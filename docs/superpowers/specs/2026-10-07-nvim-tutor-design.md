@@ -113,16 +113,12 @@ checklist, not a search.
 
 Beyond Pi's standard RPC, exactly two custom shapes cross the boundary:
 
-- Neovim → Pi: signals are sent as a `prompt` with
-  `{"message": "", "attachments": [], "tutor_signal": {...}}`? No: Pi
-  RPC has no custom command channel, so signals go through the
-  **`tutor_signal` registered tool** invoked by the Lua side using the
-  RPC `bash`-free path: the Lua client sends a `steer` message whose
-  text is a single-line JSON envelope prefixed `@@tutor-signal `. The
-  extension's `before_agent_start` strips and consumes such envelopes
-  before the model sees them. If the stuck detector decides no turn is
-  needed, it returns `{ skip: true }`-equivalent by aborting the run
-  via `ctx.abort()` before any provider call.
+- Neovim → Pi: Pi RPC has no custom command channel, so the Lua client
+  sends a `steer` message whose text is a single-line JSON envelope
+  prefixed `@@tutor-signal `. The extension's `before_agent_start`
+  strips and consumes such envelopes before the model sees them. If the
+  stuck detector decides no tutor turn is needed, the hook returns
+  `{ block: true }` so no provider call is made.
 - Pi → Neovim: the extension writes `tutor_status` entries with
   `pi.appendEntry("tutor_status", {...})`; RPC emits them as
   `custom` session events, which the Lua side reads for the status
