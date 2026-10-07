@@ -22,7 +22,8 @@ the user, cloud sync, building our own agent runtime.
 
 ## 2. Architecture
 
-The agent runtime is **Pi** (`@earendil-works/pi-coding-agent`, 0.85.x).
+The agent runtime is **Pi** (`@earendil-works/pi-coding-agent`, 1.0.x,
+requires Node ≥ 22.19).
 Pi supplies providers, sessions, streaming, skills, prompt templates,
 instruction files, and an extension API. We write two small pieces:
 
@@ -70,12 +71,13 @@ Only the documented supported surface:
   `follow_up`, `abort`, `new_session`, `switch_session`, `set_model`,
   `get_state`, `get_last_assistant_text`; events `message_update`
   (`text_delta`), `message_end`, `tool_execution_start/end`,
-  `agent_end`, `agent_settled`, `extension_ui_request` /
-  `extension_ui_response`. Pi's 0.85.1 changelog states the stdio RPC
-  API and local SDK are the supported integration points; the
-  experimental client/server subpaths are not, and we do not use them.
-- **Extension API**: `pi.on("before_agent_start" | "tool_call" |
-  "turn_end" | "session_start")`, `pi.registerTool`,
+  `agent_end`, `agent_settled`, `entry_appended`,
+  `extension_ui_request` / `extension_ui_response`. Pi's 0.85.1
+  changelog states the stdio RPC API and local SDK are the supported
+  integration points; the experimental client/server subpaths are not,
+  and we do not use them.
+- **Extension API**: `pi.on("input" | "before_agent_start" | "tool_call"
+  | "turn_end" | "session_start")`, `pi.registerTool`,
   `pi.registerCommand`, `pi.appendEntry`, `pi.sendMessage`,
   `ctx.ui.select/confirm/input/notify`.
 - **Packages**: `package.json` with a `pi` key listing `extensions`,
@@ -100,7 +102,7 @@ checklist, not a search.
 ### 3.3 Version pinning
 
 - `pi-tutor/package.json` declares `peerDependencies` on the Pi package
-  with the verified range (`^0.85`). On `session_start` the extension
+  with the verified range (`^1.0`). On `session_start` the extension
   reads Pi's version and emits a `tutor_status` warning if outside the
   range. It does not refuse to run.
 - The Lua plugin checks `pi --version` on spawn and shows the same
@@ -113,18 +115,19 @@ checklist, not a search.
 
 Beyond Pi's standard RPC, exactly two custom shapes cross the boundary:
 
-- Neovim → Pi: Pi RPC has no custom command channel, so the Lua client
-  sends a `steer` message whose text is a single-line JSON envelope
-  prefixed `@@tutor-signal `. The extension's `before_agent_start`
-  strips and consumes such envelopes before the model sees them. If the
-  stuck detector decides no tutor turn is needed, the hook returns
-  `{ block: true }` so no provider call is made.
+- Neovim → Pi: the Lua client sends an RPC `prompt` whose message is a
+  single-line JSON envelope prefixed `@@tutor-signal `. The extension's
+  `input` handler parses it and returns `{ action: "handled" }` when no
+  tutor turn is needed (the RPC response then carries
+  `disposition: "handled"`, so Lua knows no run started) or
+  `{ action: "transform", text }` to turn the signal into a tutor
+  prompt. The model never sees raw envelopes.
 - Pi → Neovim: the extension writes `tutor_status` entries with
   `pi.appendEntry("tutor_status", {...})`; RPC emits them as
-  `custom` session events, which the Lua side reads for the status
-  line, jumps, and task ticks.
+  `entry_appended` events whose `entry.customType` is `tutor_status`,
+  which the Lua side reads for the status line, jumps, and task ticks.
 
-If Pi adds a first-class custom-command channel, only `rpc.lua` and
+If Pi ever changes these two mechanisms, only `rpc.lua` and
 `signals.ts` change.
 
 ### 3.5 Why not pi.nvim
@@ -322,7 +325,7 @@ the `tool_call` guard.
 
 ```
 pi-tutor/
-├── package.json         "pi": { extensions, skills, prompts }, peerDeps pi ^0.85
+├── package.json         "pi": { extensions, skills, prompts }, peerDeps pi ^1.0
 ├── PI_SURFACE.md        every Pi API we touch + verified version
 ├── src/
 │   ├── extension.ts     registers hooks, tools, commands
@@ -381,8 +384,8 @@ pi-tutor/
 - Pi's extension API has had breaking changes roughly every few months;
   mitigated by `PI_SURFACE.md`, the version range check, and the
   contract test.
-- Signals ride on `steer` messages because RPC has no custom command
-  channel; if Pi adds one, migrate. Until then the extension must
-  reliably strip envelopes before the model sees them.
+- The installed Pi (0.73.0, old npm name `@mariozechner/pi-coding-agent`)
+  must be replaced by 1.0.x; M1 does this and keeps `~/.pi/agent`
+  settings and auth.
 - Model judgment of "correct reasoning" may be lenient; mitigated by
   the rubric and by logging judgments for tuning.
