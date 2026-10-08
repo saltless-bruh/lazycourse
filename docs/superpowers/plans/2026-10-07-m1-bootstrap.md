@@ -1160,10 +1160,10 @@ git commit -m "feat(nvim-tutor): plugin entry, commands, respawn-once"
 
 ---
 
-### Task 8: Manual acceptance with the real Pi and a README
+### Task 8: Manual acceptance with the real Pi and a README update
 
 **Files:**
-- Create: `README.md`
+- Modify: `README.md` (replace the Status section and add a Tests section)
 
 - [ ] **Step 1: Run the real thing**
 
@@ -1183,33 +1183,19 @@ Expected: prints `handled`; no reply appears in the panel.
 In the panel, type: `create a file named x.txt containing hi`
 Expected: the model reports it cannot write files (no `write`/`edit` tool is available); `ls` shows no `x.txt`.
 
-- [ ] **Step 4: Write README.md**
+- [ ] **Step 4: Update README.md**
+
+Replace the `## Status` section body with `Milestone 1 (bootstrap) done: the panel streams Pi replies and editor signals reach the extension.` and add this section before `## Upgrading Pi`:
 
 ```markdown
-# nvim-tutor
-
-An AI tutor inside LazyVim that teaches by making you write the code.
-Design: `docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`.
-
-## Layout
-- `pi-tutor/` — Pi package (extension, skills, prompts). Install: `pi install ./pi-tutor`.
-- `nvim-tutor/` — Neovim plugin. Load with lazy.nvim `dir = "<repo>/nvim-tutor"`.
-
-## Requirements
-- Neovim ≥ 0.11 with LazyVim, Node ≥ 22.19, Pi ≥ 1.0 (`npm i -g @earendil-works/pi-coding-agent`).
-
 ## Tests
 - `cd pi-tutor && npm test` (unit), `npm run test:contract` (spawns real `pi`)
 - `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
-
-## Upgrading Pi
-Read Pi's CHANGELOG "Breaking Changes" since the version in `pi-tutor/PI_SURFACE.md`,
-update that file, bump `peerDependencies`, run `npm run test:contract`.
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add README.md
-git commit -m "docs: README with layout, tests, upgrade procedure"
+git commit -m "docs: README status and test commands after M1"
 ```

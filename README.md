@@ -54,7 +54,3 @@ Design complete, implementation starting. See:
 ## Upgrading Pi
 
 `pi-tutor/PI_SURFACE.md` lists every Pi API this project touches and the version it was verified against. To upgrade: read Pi's CHANGELOG "Breaking Changes" since that version, update the file, bump `peerDependencies` in `pi-tutor/package.json`, and run `npm run test:contract`.
-
-## License
-
-MIT
