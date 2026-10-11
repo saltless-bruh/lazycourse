@@ -6,7 +6,9 @@ Re-verify every line when bumping the version range in package.json.
 
 ## CLI
 - `pi --mode rpc` : JSONL commands on stdin, events on stdout (docs/rpc.md)
-- `--tools read,bash,grep,find,ls` : allowlist of tool names (grep/find/ls are off by default)
+- `--tools read,grep,find,ls` : allowlist of tool names (grep/find/ls are off by default).
+  `bash` is excluded: with it allowed, the model wrote a file via `echo > x.txt` (observed
+  2026-10-11). M3's `tool_call` guard may re-enable it behind a read-only command filter.
 - `--no-session`, `--session-dir <dir>`
 - `pi install <source>`, `pi list`, `pi remove <source>`, `pi update [source|self|pi]`
 

@@ -12,7 +12,7 @@ local SIGNAL_PREFIX = "@@tutor-signal "
 function M.build_cmd(pi_cmd)
   local cmd = vim.deepcopy(pi_cmd)
   if vim.fs.basename(cmd[1]) == "pi" then
-    vim.list_extend(cmd, { "--mode", "rpc", "--tools", "read,bash,grep,find,ls" })
+    vim.list_extend(cmd, { "--mode", "rpc", "--tools", "read,grep,find,ls" })
   end
   return cmd
 end

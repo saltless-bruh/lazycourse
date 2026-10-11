@@ -7,7 +7,7 @@ It picks a project matched to your skill in a language you choose, scaffolds a s
 ```
 ┌───────────── Neovim (LazyVim) ─────────────────────────────┐
 │ nvim-tutor (Lua): panel · level slider · editor signals     │
-│ spawns:  pi --mode rpc --tools read,bash,grep,find,ls       │
+│ spawns:  pi --mode rpc --tools read,grep,find,ls       │
 └────────────┬───────────────────────────────────────────────┘
              │ Pi RPC: JSONL on stdin/stdout
              ▼
@@ -72,6 +72,10 @@ return {
     dependencies = { "MunifTanjim/nui.nvim", "nvim-lua/plenary.nvim" },
     cmd = { "Tutor", "TutorSend", "TutorRestart" },
     keys = { { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor panel" } },
+    init = function()
+      local ok, wk = pcall(require, "which-key")
+      if ok then wk.add({ { "<leader>t", group = "tutor" } }) end
+    end,
     opts = {},
     config = function(_, opts) require("tutor").setup(opts) end,
   },

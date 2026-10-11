@@ -72,3 +72,19 @@ describe("panel window (review fixes)", function()
     p:toggle()
   end)
 end)
+
+describe("panel under textlock", function()
+  it("defers buffer writes when called from an expr mapping (E565)", function()
+    local p = panel.new({ on_submit = function() end })
+    local err
+    vim.keymap.set("n", "<Plug>(tutor-test-expr)", function()
+      local ok, e = pcall(function() p:set_status({ state = "starting pi" }); p:append_user("hi") end)
+      if not ok then err = e end
+      return ""
+    end, { expr = true })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Plug>(tutor-test-expr)", true, false, true), "x", false)
+    assert.is_nil(err)
+    vim.wait(200, function() return vim.api.nvim_buf_line_count(p.chat_buf) == 2 end)
+    assert.same({ "> hi", "" }, vim.api.nvim_buf_get_lines(p.chat_buf, 0, -1, false))
+  end)
+end)

@@ -30,7 +30,7 @@ instruction files, and an extension API. We write two small pieces:
 ```
 ┌───────────── Neovim (LazyVim) ─────────────────────────────────────┐
 │ nvim-tutor (Lua): panel · slider · signal collector · rpc client   │
-│ spawns:  pi --mode rpc --tools read,bash,grep,find,ls              │
+│ spawns:  pi --mode rpc --tools read,grep,find,ls              │
 └────────────┬───────────────────────────────────────────────────────┘
              │ Pi RPC: JSONL on stdin/stdout (supported surface)
              ▼
@@ -298,7 +298,7 @@ nvim-tutor/lua/tutor/
 └── slider.lua   :TutorLevel N, <leader>t+ / <leader>t-
 ```
 
-Spawn: `pi --mode rpc --tools read,bash,grep,find,ls` with cwd set to
+Spawn: `pi --mode rpc --tools read,grep,find,ls` with cwd set to
 the project directory, via `vim.system` with stdin/stdout pipes.
 
 Signals (debounced 500 ms unless noted):
@@ -318,8 +318,9 @@ entry are rendered as links; `gf` follows them.
 
 Privacy: only the current buffer's content and diagnostics leave the
 editor, and only for files inside the active project directory. Pi's
-`read`/`bash` tools are additionally fenced to the project directory by
-the `tool_call` guard.
+`read` tool is fenced to the project directory by the `tool_call` guard.
+`bash` is not in the allowlist: it can write files, so M1 excludes it;
+M3 may re-enable it behind a read-only command filter in the guard.
 
 ## 9. pi-tutor package internals
 

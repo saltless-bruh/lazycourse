@@ -13,7 +13,7 @@ export interface PiHandle {
 export function spawnPi(cwd: string, extraArgs: string[] = []): PiHandle {
   const proc: ChildProcessWithoutNullStreams = spawn(
     "pi",
-    ["--mode", "rpc", "--no-session", "--tools", "read,bash,grep,find,ls", ...extraArgs],
+    ["--mode", "rpc", "--no-session", "--tools", "read,grep,find,ls", ...extraArgs],
     { cwd, stdio: ["pipe", "pipe", "pipe"] },
   );
   const received: Record[] = [];

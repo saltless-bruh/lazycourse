@@ -21,6 +21,19 @@ function M.new(opts)
 end
 
 function Panel:_render()
+  -- Buffer and window writes are illegal under textlock (E565), e.g. when the
+  -- plugin is lazy-loaded from a keymap. Try now; if refused, retry on the loop.
+  local ok, err = pcall(self._render_now, self)
+  if not ok then
+    if tostring(err):find("E565") then
+      vim.schedule(function() self:_render() end)
+    else
+      error(err, 0)
+    end
+  end
+end
+
+function Panel:_render_now()
   vim.bo[self.chat_buf].modifiable = true
   vim.api.nvim_buf_set_lines(self.chat_buf, 0, -1, false, self.chat_lines)
   vim.bo[self.chat_buf].modifiable = false
