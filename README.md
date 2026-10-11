@@ -69,20 +69,22 @@ return {
   {
     dir = "<repo>/nvim-tutor",
     name = "nvim-tutor",
-    dependencies = { "MunifTanjim/nui.nvim", "nvim-lua/plenary.nvim" },
-    cmd = { "Tutor", "TutorSend", "TutorRestart" },
-    keys = { { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor panel" } },
+    cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn" },
+    keys = {
+      { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
+      { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },
+    },
     init = function()
       local ok, wk = pcall(require, "which-key")
       if ok then wk.add({ { "<leader>t", group = "tutor" } }) end
     end,
     opts = {},
-    config = function(_, opts) require("tutor").setup(opts) end,
+    config = function(_, o) require("tutor").setup(o) end,
   },
 }
 ```
 
-4. `:Tutor` opens the panel; type in the input box and press Enter.
+4. `:Tutor` (or `<leader>tt`) opens Pi in a right split; type at Pi's prompt. `<Esc><Esc>` leaves terminal mode.
 
 ## Upgrading Pi
 
