@@ -1,0 +1,36 @@
+local fixture = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/fixtures/fake_pi.js"
+
+describe("tutor.init", function()
+  before_each(function()
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "node", fixture }, cwd = vim.fn.getcwd(), check_version = false })
+  end)
+
+  it("streams a reply into the panel", function()
+    local tutor = require("tutor")
+    vim.cmd("TutorSend hi")
+    vim.wait(2000, function() return tutor.state.panel.status.state == "idle" and #tutor.state.panel:lines() > 2 end)
+    local lines = tutor.state.panel:lines()
+    assert.equals("> hi", lines[1])
+    assert.equals("Hello\226\128\168!", lines[3])
+  end)
+
+  it("send_signal resolves handled and does not enter waiting", function()
+    local tutor = require("tutor")
+    local disp
+    tutor.send_signal({ type = "ping" }, function(d) disp = d end)
+    vim.wait(2000, function() return disp ~= nil end)
+    assert.equals("handled", disp)
+    assert.equals("idle", tutor.state.panel.status.state)
+  end)
+
+  it("respawns once after the process exits", function()
+    local tutor = require("tutor")
+    tutor.state.client:request({ type = "exit" }, function() end)
+    vim.wait(2000, function() return not tutor.state.client:is_alive() end)
+    vim.cmd("TutorSend again")
+    vim.wait(2000, function() return tutor.state.respawned and tutor.state.client:is_alive() end)
+    assert.is_true(tutor.state.respawned)
+    assert.is_true(tutor.state.client:is_alive())
+  end)
+end)
