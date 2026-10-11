@@ -39,3 +39,11 @@ Re-verify every line when bumping the version range in package.json.
 ## Install location on this machine
 - Installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is
   root-owned; `~/.local/bin` precedes `/usr/bin` on PATH, shadowing the old 0.73 copy.
+
+## Observed behaviour (1.1.0, contract test)
+- `entry_appended` IS delivered for entries appended while handling a command (e.g. inside
+  an `input` handler), even with `--no-session`.
+- `entry_appended` is NOT delivered for an entry appended in `session_start` at process
+  startup (it fires before the RPC client can observe it). Readiness is therefore detected
+  by a successful `get_state` round trip, not by a `ready` entry.
+- Startup to first response: ~1–3 s on this machine.

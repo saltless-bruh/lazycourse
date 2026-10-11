@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./extensions/tutor/index.ts"],
-    "skills": ["./skills"],
-    "prompts": ["./prompts/*.md"]
+    "extensions": [
+      "./extensions/tutor/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts/*.md"
+    ]
   },
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run --exclude test/contract.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:contract": "vitest run test/contract.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0"
