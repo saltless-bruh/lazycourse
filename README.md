@@ -23,8 +23,8 @@ It picks a project matched to your skill in a language you choose, scaffolds a s
 
 ## Status
 
-Milestone 1 (bootstrap) built: the Neovim panel talks to Pi over RPC, and editor
-signals reach the `pi-tutor` extension without starting a model run. See:
+Milestone 1b done: Pi's own TUI runs in a Neovim split; the extension watches the
+editor over Neovim's RPC and shows tutor state in a Pi widget. See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
 - Milestone 1 plan: [`docs/superpowers/plans/2026-10-07-m1-bootstrap.md`](docs/superpowers/plans/2026-10-07-m1-bootstrap.md)
@@ -54,14 +54,14 @@ signals reach the `pi-tutor` extension without starting a model run. See:
 
 ## Tests
 
-- `cd pi-tutor && npm test` (unit), `npm run test:contract` (spawns the real `pi`, no model call)
+- `cd pi-tutor && npm test` (unit + a real headless Neovim for the link tests)
 - `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
 
 ## Setup
 
 1. Install Pi and log in to a provider: `pi` then `/login`. Set `defaultModel` in
    `~/.pi/agent/settings.json` to a model that provider serves.
-2. `pi install ./pi-tutor`
+2. `cd pi-tutor && npm install && pi install "$(pwd)"`
 3. Add to your LazyVim config (`lua/plugins/tutor.lua`):
 
 ```lua

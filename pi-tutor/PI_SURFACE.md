@@ -1,51 +1,36 @@
-# Pi surface used by pi-tutor
+# Pi and Neovim surface used by pi-tutor
 
-Verified against `@earendil-works/pi-coding-agent` docs/types at 1.0.4 (repo `main`,
-2026-10-07) and the installed binary 1.1.0 (`pi --help`, 2026-10-11).
-Re-verify every line when bumping the version range in package.json.
+Verified against `@earendil-works/pi-coding-agent` 1.0.4 source (2026-10-07), installed
+binary 1.1.0 (2026-10-11), `neovim` npm client 5.5.0, Neovim 0.12.5 (2026-10-12).
+Re-verify every line when bumping versions.
 
-## CLI
-- `pi --mode rpc` : JSONL commands on stdin, events on stdout (docs/rpc.md)
-- `--tools read,grep,find,ls` : allowlist of tool names (grep/find/ls are off by default).
-  `bash` is excluded: with it allowed, the model wrote a file via `echo > x.txt` (observed
+## Pi CLI
+- `pi --tools read,grep,find,ls` run interactively inside a Neovim `:terminal` (cwd = project root)
+- `pi install ./pi-tutor`, `pi list`, `pi remove`, `pi update --extensions`
+- `bash` is excluded: with it allowed, the model wrote a file via `echo > x.txt` (observed
   2026-10-11). M3's `tool_call` guard may re-enable it behind a read-only command filter.
-- `--no-session`, `--session-dir <dir>`
-- `pi install <source>`, `pi list`, `pi remove <source>`, `pi update [source|self|pi]`
 
-## RPC commands (docs/rpc-commands.md)
-- `{"id","type":"prompt","message"}` → response `data.disposition` ∈ started|queued|handled
-- `{"id","type":"abort"}`
-- `{"id","type":"get_state"}`
-- Response shape: `{"id","type":"response","command","success","data"|"error"}`
+## Pi extension API (src/core/extensions/types.ts)
+- `export default function (pi: ExtensionAPI)`
+- `pi.on("session_start", (event, ctx) => …)` with `ctx.cwd`, `ctx.hasUI`, `ctx.ui`
+- `pi.on("session_shutdown", …)`
+- `pi.registerCommand(name, { description, handler(args, ctx) })`
+- `pi.appendEntry(customType, data)`
+- `pi.sendUserMessage(text, { deliverAs })` (M3+)
+- `ctx.ui.setWidget(key, string[] | undefined)`, `ctx.ui.setStatus(key, text)`,
+  `ctx.ui.setWorkingMessage(text)`, `ctx.ui.notify(msg, level)`
 
-## RPC events (docs/json.md)
-- `message_update` with `assistantMessageEvent.type == "text_delta"`, field `delta`
-- `agent_end`, `agent_settled`
-- `entry_appended` with `entry.type == "custom"`, `entry.customType`, `entry.data`
-- Framing: strict LF-delimited JSONL; never split on U+2028/U+2029; optional CR stripped.
-
-## Extension API (src/core/extensions/types.ts)
-- `export default function (pi: ExtensionAPI)` factory (`ExtensionFactory`)
-- `pi.on("session_start", (event: {reason}) => void)`
-- `pi.on("input", (event: {text, source: "interactive"|"rpc"|"extension"}) => InputEventResult)`
-  where `InputEventResult = {action:"continue"} | {action:"transform", text, images?} | {action:"handled"}`
-- `pi.appendEntry(customType: string, data?: unknown): void`
-- No version accessor on `ExtensionAPI`; the Neovim side checks `pi --version`.
-
-## Package layout (docs/packages.md)
-- `package.json` with `"pi": { extensions, skills, prompts }` or conventional dirs
-  `extensions/`, `skills/`, `prompts/`; a subdirectory with `index.ts` is one extension.
-- TypeScript loads via jiti, no build step.
-- `pi install ./path` writes to `~/.pi/agent/settings.json` `packages`.
+## Neovim (via `neovim` npm client over `$NVIM`)
+- `$NVIM` is set for `:terminal` children to `v:servername` (verified 0.12.5)
+- `attach({ socket })`, `raw.request("nvim_get_api_info")` → `[channel, meta]`
+- `raw.lua(code, args)`, `raw.call(fn, args)`, `raw.command(cmd)`, `raw.input(keys)`
+- `raw.on("notification", (method, args))` receives `vim.rpcnotify(channel, "tutor", payload)`
+- `raw.on("disconnect")` fires when the socket closes (client.js:121); used for detached mode.
+- The client logs via winston and patches `console`; `NVIM_NODE_LOG_FILE` is set before import
+  so nothing is written to Pi's terminal.
+- Push autocmds live in `extensions/tutor/push.lua.ts` and are installed with `nvim_exec_lua`;
+  `vim.g.tutor_chan` holds the extension's channel for `:TutorRun`.
 
 ## Install location on this machine
-- Installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is
+- Pi installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is
   root-owned; `~/.local/bin` precedes `/usr/bin` on PATH, shadowing the old 0.73 copy.
-
-## Observed behaviour (1.1.0, contract test)
-- `entry_appended` IS delivered for entries appended while handling a command (e.g. inside
-  an `input` handler), even with `--no-session`.
-- `entry_appended` is NOT delivered for an entry appended in `session_start` at process
-  startup (it fires before the RPC client can observe it). Readiness is therefore detected
-  by a successful `get_state` round trip, not by a `ready` entry.
-- Startup to first response: ~1–3 s on this machine.
