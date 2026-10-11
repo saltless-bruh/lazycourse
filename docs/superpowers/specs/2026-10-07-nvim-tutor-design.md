@@ -1,7 +1,8 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** draft for review (rev 2: Pi-based architecture)
+**Status:** living document (rev 3, 2026-10-12: Pi's own TUI in a terminal split,
+extension is a Neovim RPC client). Personal tool; expect frequent revision.
 
 ## 1. Purpose
 
@@ -22,40 +23,35 @@ the user, cloud sync, building our own agent runtime.
 
 ## 2. Architecture
 
-The agent runtime is **Pi** (`@earendil-works/pi-coding-agent`, 1.0.x,
-requires Node ≥ 22.19).
-Pi supplies providers, sessions, streaming, skills, prompt templates,
-instruction files, and an extension API. We write two small pieces:
+The agent runtime is **Pi** (`@earendil-works/pi-coding-agent`, 1.x,
+requires Node ≥ 22.19). Pi's own interactive TUI *is* the tutor pane: it
+runs inside a Neovim terminal split. Our code is a Pi package and a thin
+Neovim plugin.
 
 ```
-┌───────────── Neovim (LazyVim) ─────────────────────────────────────┐
-│ nvim-tutor (Lua): panel · slider · signal collector · rpc client   │
-│ spawns:  pi --mode rpc --tools read,grep,find,ls              │
-└────────────┬───────────────────────────────────────────────────────┘
-             │ Pi RPC: JSONL on stdin/stdout (supported surface)
-             ▼
-┌───────────── Pi (installed, unmodified) ───────────────────────────┐
-│ providers · sessions · skills · prompt templates · instructions    │
-│ ┌──── pi-tutor package (TypeScript extension, ours) ─────────────┐ │
-│ │ before_agent_start → band system prompt + rung + retrieved KB  │ │
-│ │ tool_call          → block edit/write, path guard              │ │
-│ │ registerTool       → tutor_signal (diagnostics/idle/run/snap)  │ │
-│ │ turn_end           → parse judgment block, advance rung,       │ │
-│ │                      tick tasks.md, persist via appendEntry    │ │
-│ │ registerCommand    → /tutor-start /tutor-level /tutor-learn    │ │
-│ │ profile.sqlite · stuck detector · suggester + scaffold         │ │
-│ └────────────────────────────────────────────────────────────────┘ │
-│ skills/   (knowledge base: fetched docs, notes, learned skills)    │
-└────────────────────────────────────────────────────────────────────┘
+┌──────── editor (55%) ────────┬──────── :terminal  pi (45%) ───────────┐
+│ buffers, LSP, your code      │  Pi TUI: logo · conversation · prompt  │
+│                              │  ┌ tutor widget: lang · lvl · rung ·   │
+│                              │  │ task · state                        │
+│  Neovim RPC server ($NVIM) ◀─┼──┤ pi-tutor extension (Neovim client)  │
+│   push: diagnostics, idle,   │  │  policy · stuck · ladder · profile  │
+│         churn, run output    │  │  suggester · scaffold · knowledge   │
+│   pull: buffer, cursor,      │  └─────────────────────────────────────┘
+│         diagnostics (on turn)│  footer: model · thinking · tutor lvl  │
+└──────────────────────────────┴────────────────────────────────────────┘
 ```
 
 Units:
 
-- **nvim-tutor** (`nvim-tutor/lua/tutor/`): panel UI, keymaps,
-  commands, signal collection, Pi process lifecycle, RPC client. No
-  tutor logic.
-- **pi-tutor** (`pi-tutor/`): a Pi package with one extension, bundled
-  skills, and prompt templates. All tutor logic lives here.
+- **nvim-tutor** (`nvim-tutor/lua/tutor/`): opens, hides, and respawns
+  the terminal split; `:Tutor`, `:TutorRestart`, `:TutorRun`; thin
+  `:Tutor*` wrappers that type Pi slash commands into the terminal.
+  No tutor logic, no protocol.
+- **pi-tutor** (`pi-tutor/`): a Pi package. Its extension connects to
+  Neovim over `$NVIM` (set automatically for terminal children) with the
+  official `neovim` Node client, installs a few autocmds that notify it,
+  pulls editor state on demand, and renders tutor state with Pi's
+  extension UI. All tutor logic lives here.
 - **Pi**: unmodified upstream.
 
 ## 3. Integration contract and upgrade strategy
@@ -67,19 +63,18 @@ upgraded without touching the others.
 
 Only the documented supported surface:
 
-- **RPC mode** (`pi --mode rpc`): commands `prompt`, `steer`,
-  `follow_up`, `abort`, `new_session`, `switch_session`, `set_model`,
-  `get_state`, `get_last_assistant_text`; events `message_update`
-  (`text_delta`), `message_end`, `tool_execution_start/end`,
-  `agent_end`, `agent_settled`, `entry_appended`,
-  `extension_ui_request` / `extension_ui_response`. Pi's 0.85.1
-  changelog states the stdio RPC API and local SDK are the supported
-  integration points; the experimental client/server subpaths are not,
-  and we do not use them.
-- **Extension API**: `pi.on("input" | "before_agent_start" | "tool_call"
-  | "turn_end" | "session_start")`, `pi.registerTool`,
-  `pi.registerCommand`, `pi.appendEntry`, `pi.sendMessage`,
-  `ctx.ui.select/confirm/input/notify`.
+- **Interactive mode** (`pi`), run inside a Neovim `:terminal`. RPC
+  mode is no longer used.
+- **Extension API**: `pi.on("before_agent_start" | "tool_call" |
+  "turn_end" | "session_start" | "session_shutdown")`,
+  `pi.registerCommand`, `pi.appendEntry`, `pi.sendUserMessage`,
+  `ctx.ui.setWidget/setStatus/setWorkingMessage/select/confirm/input/
+  editor/notify`.
+- **Neovim API** (from the extension, via the `neovim` npm client over
+  `$NVIM`): `nvim_exec_lua`, `nvim_buf_get_lines`,
+  `nvim_get_current_buf`, `nvim_buf_get_name`, `nvim_win_get_cursor`,
+  `nvim_subscribe`, and `vim.rpcnotify` from autocmds installed with
+  `nvim_exec_lua`.
 - **Packages**: `package.json` with a `pi` key listing `extensions`,
   `skills`, `prompts`; registered in `~/.pi/agent/settings.json`
   `packages` as a local path (dev) or git URL (install).
@@ -96,6 +91,7 @@ checklist, not a search.
 | Pi runtime | global npm or install script | `npm install -g @earendil-works/pi-coding-agent` |
 | pi-tutor package | `pi-tutor/` in this repo, registered in Pi `packages` | `git pull`, then `pi update --extensions` or `/reload` |
 | nvim-tutor plugin | `nvim-tutor/` in this repo, a lazy.nvim `dir=` or git plugin | `:Lazy update` |
+| `neovim` npm client | `pi-tutor/package.json` dependency | `npm update` inside `pi-tutor/` |
 | Knowledge base | `~/.pi/agent/skills/tutor-*/` and project `.pi/skills/` | editing files; Pi rescans on `/reload` |
 | Profile | `~/.local/share/nvim-tutor/profile.sqlite` | the extension; `schema_version` table, migrations in code |
 
@@ -113,29 +109,26 @@ checklist, not a search.
 
 ### 3.4 The contract between our two pieces
 
-Beyond Pi's standard RPC, exactly two custom shapes cross the boundary:
+There is no protocol of ours. Neovim → extension traffic is Neovim's own
+`rpcnotify` from autocmds the extension installs; extension → Neovim
+traffic is ordinary Neovim API calls. The only shared names are the
+notification method `tutor` and its payload shapes:
 
-- Neovim → Pi: the Lua client sends an RPC `prompt` whose message is a
-  single-line JSON envelope prefixed `@@tutor-signal `. The extension's
-  `input` handler parses it and returns `{ action: "handled" }` when no
-  tutor turn is needed (the RPC response then carries
-  `disposition: "handled"`, so Lua knows no run started) or
-  `{ action: "transform", text }` to turn the signal into a tutor
-  prompt. The model never sees raw envelopes.
-- Pi → Neovim: the extension writes `tutor_status` entries with
-  `pi.appendEntry("tutor_status", {...})`; RPC emits them as
-  `entry_appended` events whose `entry.customType` is `tutor_status`,
-  which the Lua side reads for the status line, jumps, and task ticks.
+```
+{ kind: "diagnostics", buf, path, errors, warnings, first: {line, msg} }
+{ kind: "idle",        buf, path, line, since_ms }
+{ kind: "churn",       buf, path, region: [l1, l2], edits }
+{ kind: "run_output",  cmd, code, stdout, stderr }
+```
 
-If Pi ever changes these two mechanisms, only `rpc.lua` and
-`signals.ts` change.
+If `$NVIM` is absent (Pi started outside Neovim) the extension runs
+detached: chat works, editor signals are off, the widget says
+`detached`.
 
 ### 3.5 Why not pi.nvim
 
-`adragomir/pi.nvim` exists but has 5 stars, last push 2026-02-02, and
-connects over TCP rather than Pi's stdio RPC. We write our own stdio
-JSONL client (about 150 lines of Lua) and may borrow its extension-UI
-rendering ideas.
+`adragomir/pi.nvim` has a terminal mode similar to ours but adds a TCP
+RPC layer we do not need. Our terminal wrapper is about 40 lines of Lua.
 
 ## 4. Level policy
 
@@ -156,7 +149,11 @@ the `snapshot` signal is never emitted.
 Implementation: `before_agent_start` selects the band prompt section
 from `pi-tutor/prompts/system/<band>.md` and sets
 `systemPromptOptions` sections; it never replaces Pi's whole prompt, so
-Pi's own skill and instruction loading keeps working.
+Pi's own skill and instruction loading keeps working. It also *pulls*
+editor context for the turn by band: beginner gets the whole current
+buffer plus diagnostics; intermediate and pro get diagnostics and the
+40 lines around the cursor. Nothing is pulled while Pi is idle. Only
+buffers whose path is inside the project root are ever read.
 
 ## 5. Hint ladder and stuck episodes
 
@@ -213,9 +210,8 @@ pick language ──▶ profile row exists? ──no──▶ interview via ctx.
                           and fetch language knowledge if not cached
 ```
 
-- Interview and selection use Pi's extension UI, which RPC forwards as
-  `extension_ui_request`; Neovim renders them with `vim.ui.select` and
-  `vim.ui.input`.
+- Interview and selection use Pi's extension UI (`ctx.ui.input`,
+  `ctx.ui.select`), rendered by Pi's TUI in the terminal split.
 - Suggester receives profile, concept scores, completed projects and
   must return structured JSON. It biases toward low or missing concept
   scores. Sizes: small (1–2 h), medium (half day), large (1–2 days).
@@ -285,108 +281,101 @@ How they are **added**:
 ## 8. Neovim plugin
 
 LazyVim spec in `lua/plugins/tutor.lua`; module in
-`nvim-tutor/lua/tutor/`. Dependency: `nui.nvim`.
+`nvim-tutor/lua/tutor/`. No plugin dependencies.
 
 ```
 nvim-tutor/lua/tutor/
-├── init.lua     setup(), commands, keymaps, Pi process lifecycle
-├── rpc.lua      stdio JSONL client: ids, responses, events, UI requests
-├── panel.lua    right split: chat log, input box, status line
-│                (language · level · rung · task id · workflow step)
-├── signals.lua  autocmds → @@tutor-signal envelopes, throttling, gating
-├── ui.lua       extension_ui_request → vim.ui.select/input/confirm
-└── slider.lua   :TutorLevel N, <leader>t+ / <leader>t-
+├── init.lua   setup(), :Tutor, :TutorRestart, :TutorRun,
+│              :TutorStart/:TutorLevel/:TutorLearn → type "/tutor-…" into Pi
+└── term.lua   open a right split (45%) running
+│              `pi --tools read,grep,find,ls` with cwd = project root;
+│              hide/show without killing the job; respawn; send text
 ```
 
-Spawn: `pi --mode rpc --tools read,grep,find,ls` with cwd set to
-the project directory, via `vim.system` with stdin/stdout pipes.
+- The split is created once per Neovim session and hidden/shown after
+  that, so Pi's session and scroll-back survive toggling.
+- Entering the split starts terminal-insert mode; `<Esc><Esc>` leaves it
+  so Pi's single `Esc` (abort) keeps working.
+- `:TutorRun` runs the project's run command (from `README.md` front
+  matter or `config.toml`) as a background job and sends
+  `{kind:"run_output"}` to the extension with `vim.rpcnotify`.
+- The push autocmds (diagnostics, idle, churn) are installed *by the
+  extension* through `nvim_exec_lua` when it connects, so the Lua
+  plugin has nothing to keep in sync with the extension.
 
-Signals (debounced 500 ms unless noted):
-
-| Signal | Source | Bands |
-|---|---|---|
-| `diagnostics` | `DiagnosticChanged`, current buffer, severity ≤ WARN | all |
-| `idle` | timer every 30 s with cursor region when no edits | all |
-| `churn` | same 20-line region edited ≥ 10 times, diagnostics unchanged | all |
-| `run_output` | `:TutorRun` runs the project's run command, sends stdout+stderr+exit | all |
-| `snapshot` | `TextChanged`, debounce 2 s, full buffer | beginner only |
-
-Commands: `:Tutor` toggle, `:TutorStart`, `:TutorRun`, `:TutorLevel
-[N]`, `:TutorExplain` (beginner only, visual selection), `:TutorLearn`,
-`:TutorReload`. Hints carrying `file:line` in a `tutor_status` jump
-entry are rendered as links; `gf` follows them.
-
-Privacy: only the current buffer's content and diagnostics leave the
-editor, and only for files inside the active project directory. Pi's
-`read` tool is fenced to the project directory by the `tool_call` guard.
-`bash` is not in the allowlist: it can write files, so M1 excludes it;
-M3 may re-enable it behind a read-only command filter in the guard.
+Tool fence: Pi runs with `--tools read,grep,find,ls`; `bash` stays off
+until the M3 `tool_call` guard adds a read-only command filter. `read`
+is fenced to the project root by that guard.
 
 ## 9. pi-tutor package internals
 
 ```
 pi-tutor/
-├── package.json         "pi": { extensions, skills, prompts }, peerDeps pi ^1.0
-├── PI_SURFACE.md        every Pi API we touch + verified version
-├── src/
-│   ├── extension.ts     registers hooks, tools, commands
-│   ├── signals.ts       parses @@tutor-signal envelopes
+├── package.json         "pi": { extensions, skills, prompts }; deps: neovim
+├── PI_SURFACE.md        every Pi and Neovim API we touch + verified version
+├── extensions/tutor/
+│   ├── index.ts         registers hooks, commands, widget
+│   ├── nvim.ts          connect($NVIM), install push autocmds, pull helpers,
+│   │                    open file:line in the editor
+│   ├── ui.ts            setWidget / setStatus / setWorkingMessage rendering
 │   ├── policy.ts        band table, thresholds, start rung
-│   ├── stuck.ts         signals → open/close episodes
+│   ├── stuck.ts         push events → open/close episodes
 │   ├── ladder.ts        rung logic, judgment application
 │   ├── judgment.ts      parses tutor-judgment block from turn_end
 │   ├── profile.ts       node:sqlite access + migrations
 │   ├── suggest.ts       interview, suggester, scaffold writer
-│   ├── knowledge/fetch.ts   source lists → skill folders
-│   └── status.ts        appendEntry("tutor_status", ...)
-├── prompts/
-│   ├── system/{beginner,intermediate,pro}.md
-│   ├── tutor-review.md  example workflow template
-│   └── ...
-├── skills/              bundled generic skills (tutor-method, spec-format)
-└── test/                vitest, runs hooks through Pi's SDK
+│   └── knowledge/fetch.ts   source lists → skill folders
+├── prompts/system/{beginner,intermediate,pro}.md, workflows
+├── skills/              bundled generic skills
+└── test/                vitest; nvim.ts tested against a real headless nvim
 ```
 
-- Provider choice is Pi's: `set_model` via RPC, configured by the
-  Lua side from `~/.config/nvim-tutor/config.toml` (`model`, idle
-  overrides, knowledge source overrides). Pluggability is free.
-- Provider errors are Pi's; the Lua side surfaces `agent_end` with an
-  error in the status line. If the Pi process exits, Lua respawns once
-  and reports if that fails.
+- Every tutor turn is one Pi turn; the model ends it with a fenced
+  `tutor-judgment` block `{judgment, concept_tags, task_done_ids,
+  episode_closed}` that `turn_end` parses. Pi's TUI shows the block;
+  a message renderer may fold it later.
+- Tutor state is shown only through Pi's UI: a two-line widget above
+  the prompt (`lang · lvl · rung · task` / episode state), a short
+  footer status, and a labelled working message during turns.
+- Proactive tutor messages use `pi.sendUserMessage(text,
+  {deliverAs: "followUp"})`, prefixed `[tutor]`.
+- Rung ≥ 3 hints with a `file:line` open that location in the editor
+  via `nvim_exec_lua`.
+- Config `~/.config/nvim-tutor/config.toml`: idle overrides, run
+  command, knowledge source overrides. Model and provider are Pi's.
 
 ## 10. Milestones
 
 | Phase | Deliverable | Done when |
 |---|---|---|
-| M1 | LazyVim bootstrap, Pi installed, `rpc.lua`, panel, empty extension loaded as local package | typing in the panel streams a Pi reply; `PI_SURFACE.md` written |
-| M2 | Band prompts, slider, judgment block parsing | voice changes across a band; judgment appears in `tutor_status` |
-| M3 | Signals, stuck detector, ladder, tool guard | a persisting error opens an episode; rung advances only on `correct`; `edit` is refused |
-| M4 | Profile, interview, suggester, scaffold | `:TutorStart` on a new language produces the spec folder and `AGENTS.md` |
-| M5 | Knowledge fetch → skills, `/tutor-learn`, `:TutorReload` | a rung 3 hint cites a `tutor-<lang>-*` skill |
-| M6 | Task ticking, run output, `:TutorExplain`, workflows, polish | a passing run ticks the right task id; status shows workflow step |
+| M1b | Terminal split + extension as Neovim client + widget; delete RPC panel | `:Tutor` shows Pi; opening a file with an error updates the widget |
+| M2 | Band prompts, `/tutor-level`, judgment block parsing | voice changes across a band; judgment shows in the widget |
+| M3 | Stuck detector, ladder, tool guard | a persisting error opens an episode; rung advances only on `correct`; `read` outside root refused |
+| M4 | Profile, interview, suggester, scaffold | `/tutor-start` on a new language produces the spec folder and `AGENTS.md` |
+| M5 | Knowledge fetch → skills, `/tutor-learn` | a rung 3 hint cites a `tutor-<lang>-*` skill |
+| M6 | Task ticking, `:TutorRun`, workflows, polish | a passing run ticks the right task id; widget shows workflow step |
 
 ## 11. Testing
 
-- **pi-tutor** (vitest): policy band math, ladder transitions per
-  judgment, stuck thresholds, judgment-block parsing, scaffold id
-  consistency across the three spec files, profile migrations. Hooks
-  are exercised through Pi's SDK `createAgentSession` with a scripted
-  provider registered via `pi.registerProvider`; this fake exists only
-  under `test/`.
-- **Contract test**: a Node script drives `pi --mode rpc` with the
-  package loaded, sends envelopes, asserts `tutor_status` events. This
-  is the test to rerun after any Pi upgrade.
-- **nvim-tutor** (plenary busted): signal gating per band, debounce,
-  JSONL framing, extension-UI mapping, panel rendering.
-- **Manual acceptance** per milestone with a real provider.
+- **pi-tutor** (vitest): policy, ladder, stuck, judgment parsing,
+  scaffold consistency, profile migrations stay pure. `nvim.ts` runs
+  against a real `nvim --headless --listen <sock>` spawned by the test:
+  install autocmds, edit a buffer, assert a `tutor` notification
+  arrives; pull text and diagnostics. No fake Neovim.
+- **nvim-tutor** (plenary): `term.lua` opens a split running a stub
+  command, hides and shows it without killing the job, `:TutorRun`
+  captures output and notifies.
+- **Live acceptance** per milestone inside the real LazyVim config.
 
 ## 12. Open risks
 
 - Pi's extension API has had breaking changes roughly every few months;
   mitigated by `PI_SURFACE.md`, the version range check, and the
   contract test.
-- The installed Pi (0.73.0, old npm name `@mariozechner/pi-coding-agent`)
-  must be replaced by 1.0.x; M1 does this and keeps `~/.pi/agent`
-  settings and auth.
+- Pi's TUI in a 45%-wide terminal: narrow widths may wrap its footer;
+  if so, widen the split or let the user configure the width.
+- The `neovim` Node client is a runtime dependency inside the Pi package;
+  Pi packages carry their own `node_modules`, so `npm install` in
+  `pi-tutor/` is part of setup.
 - Model judgment of "correct reasoning" may be lenient; mitigated by
   the rubric and by logging judgments for tuning.
