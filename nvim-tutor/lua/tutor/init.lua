@@ -7,12 +7,22 @@ local opts = {}
 
 local SIGNAL_PREFIX = "@@tutor-signal "
 
-local function pi_args()
-  local cmd = vim.deepcopy(opts.pi_cmd)
-  if cmd[1] == "pi" then
+---@param pi_cmd string[]
+---@return string[]
+function M.build_cmd(pi_cmd)
+  local cmd = vim.deepcopy(pi_cmd)
+  if vim.fs.basename(cmd[1]) == "pi" then
     vim.list_extend(cmd, { "--mode", "rpc", "--tools", "read,bash,grep,find,ls" })
   end
   return cmd
+end
+
+--- Readiness callback for the get_state round trip. Only moves "starting pi"
+--- to "idle"; a prompt sent meanwhile keeps its "waiting" state.
+function M._on_ready(resp)
+  if resp.success and M.state.panel.status.state == "starting pi" then
+    M.state.panel:set_status({ state = "idle" })
+  end
 end
 
 local function check_version()
@@ -41,7 +51,7 @@ end
 local function spawn()
   M.state.panel:set_status({ state = "starting pi" })
   M.state.client = rpc.new({
-    cmd = pi_args(),
+    cmd = M.build_cmd(opts.pi_cmd),
     cwd = opts.cwd,
     on_event = on_event,
     on_exit = function(code)
@@ -50,9 +60,7 @@ local function spawn()
   })
   -- Readiness: Pi does not deliver session_start entries over RPC at startup,
   -- so a successful get_state round trip is the ready signal.
-  M.state.client:request({ type = "get_state" }, function(resp)
-    if resp.success then M.state.panel:set_status({ state = "idle" }) end
-  end)
+  M.state.client:request({ type = "get_state" }, M._on_ready)
 end
 
 local function ensure_alive()
