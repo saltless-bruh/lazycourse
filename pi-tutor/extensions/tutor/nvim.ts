@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { existsSync, realpathSync } from "node:fs";
 import type { NeovimClient } from "neovim";
 import { PUSH_LUA } from "./push.lua.js";
 
@@ -34,22 +35,40 @@ export class NvimLink {
 
   static async connect(opts: NvimLinkOptions): Promise<NvimLink | null> {
     const socket = opts.socket ?? process.env.NVIM;
-    if (!socket) return null;
-    const { attach } = await import("neovim");
-    const raw = attach({ socket });
-    const [channel] = (await raw.request("nvim_get_api_info", [])) as [number, unknown];
-    const link = new NvimLink(raw, channel, opts.root);
-    raw.on("notification", (method: string, args: unknown[]) => {
-      if (method === "tutor" && args[0]) opts.onPayload(args[0] as TutorPayload);
-    });
-    raw.on("disconnect", () => { link.connected = false; opts.onDisconnect?.(); });
-    await raw.lua(PUSH_LUA, [channel, { root: opts.root, idle_ms: opts.idleMs ?? 30000, churn_edits: opts.churnEdits ?? 10 }]);
-    return link;
+    if (!socket || !existsSync(socket)) return null;
+    let root: string;
+    try { root = realpathSync(opts.root).replace(/\/+$/, ""); } catch { root = opts.root.replace(/\/+$/, ""); }
+    const timeoutMs = 3000;
+    try {
+      const { attach } = await import("neovim");
+      const raw = attach({ socket });
+      // Swallow transport errors: a stale socket must degrade to detached mode, never throw.
+      raw.on("error", () => {});
+      const withTimeout = <T,>(p: Promise<T>): Promise<T> =>
+        Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("nvim connect timeout")), timeoutMs))]);
+      const [channel] = (await withTimeout(raw.request("nvim_get_api_info", []))) as [number, unknown];
+      const link = new NvimLink(raw, channel, root);
+      raw.on("notification", (method: string, args: unknown[]) => {
+        if (method === "tutor" && args[0]) opts.onPayload(args[0] as TutorPayload);
+      });
+      raw.on("disconnect", () => { link.connected = false; opts.onDisconnect?.(); });
+      await withTimeout(raw.lua(PUSH_LUA, [channel, { root, idle_ms: opts.idleMs ?? 30000, churn_edits: opts.churnEdits ?? 10 }]));
+      return link;
+    } catch {
+      return null;
+    }
+  }
+
+  private isInRoot(name: string): boolean {
+    if (!name) return false;
+    const prefix = this.root + "/";
+    if (name.startsWith(prefix)) return true;
+    try { return realpathSync(name).startsWith(prefix); } catch { return false; }
   }
 
   private async currentBufIfInRoot(): Promise<number | null> {
     const [buf, name] = (await this.raw.lua(`local b = vim.api.nvim_get_current_buf(); return { b, vim.api.nvim_buf_get_name(b) }`)) as [number, string];
-    return name && name.startsWith(this.root) ? buf : null;
+    return this.isInRoot(name) ? buf : null;
   }
 
   async currentFile(): Promise<string | null> {

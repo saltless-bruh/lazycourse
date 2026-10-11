@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
 import { NvimLink, type TutorPayload } from "../extensions/tutor/nvim.js";
@@ -99,5 +99,56 @@ describe("NvimLink", () => {
     await until(() => disconnected, 5000);
     expect(link!.connected).toBe(false);
     link = null;
+  }, 20000);
+});
+
+describe("NvimLink hardening (review fixes)", () => {
+  it("resolves null quickly for a stale socket path instead of hanging or throwing", async () => {
+    const t0 = Date.now();
+    const unhandled: unknown[] = [];
+    const h = (e: unknown) => unhandled.push(e);
+    process.on("unhandledRejection", h);
+    const r = await NvimLink.connect({ socket: `/tmp/pitutor-stale-${process.pid}.sock`, root: "/x", onPayload: () => {} });
+    await new Promise((res) => setTimeout(res, 200));
+    process.off("unhandledRejection", h);
+    expect(r).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(4000);
+    expect(unhandled).toHaveLength(0);
+  }, 10000);
+
+  it("does not treat a sibling directory with the root as prefix as inside the project", async () => {
+    const hh = await startHeadlessNvim();
+    const payloads: TutorPayload[] = [];
+    const sibling = hh.root + "-secrets";
+    mkdirSync(sibling);
+    writeFileSync(join(sibling, "key.py"), "k = 1\n");
+    const l = await NvimLink.connect({ socket: hh.socket, root: hh.root, onPayload: (p) => payloads.push(p) });
+    try {
+      await l!.raw.command(`edit ${join(sibling, "key.py")}`);
+      await l!.raw.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 1, message = "boom" }})`);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(payloads.filter((p) => p.kind === "diagnostics")).toHaveLength(0);
+      expect(await l!.currentFile()).toBeNull();
+      expect(await l!.bufferText()).toBeNull();
+    } finally { await l?.close(); hh.kill(); rmSync(sibling, { recursive: true, force: true }); }
+  }, 20000);
+
+  it("matches a buffer opened through a symlinked project path", async () => {
+    const hh = await startHeadlessNvim();
+    const payloads: TutorPayload[] = [];
+    const linkPath = hh.root + "-link";
+    symlinkSync(hh.root, linkPath);
+    writeFileSync(join(hh.root, "s.py"), "s = 1\n");
+    const l = await NvimLink.connect({ socket: hh.socket, root: linkPath, onPayload: (p) => payloads.push(p) });
+    try {
+      await l!.raw.command(`edit ${join(linkPath, "s.py")}`);
+      // Neovim stores the resolved path as the buffer name; what matters is that
+      // a buffer reached through the symlinked root is recognised as inside it.
+      const f = await l!.currentFile();
+      expect(f).not.toBeNull();
+      expect(f!.endsWith("/s.py")).toBe(true);
+      await l!.raw.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 1, message = "boom" }})`);
+      await until(() => payloads.some((p) => p.kind === "diagnostics"), 3000);
+    } finally { await l?.close(); hh.kill(); rmSync(linkPath, { force: true }); }
   }, 20000);
 });

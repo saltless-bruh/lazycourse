@@ -5,9 +5,15 @@ local chan, opts = ...
 if _G.__pi_tutor_timer then pcall(function() _G.__pi_tutor_timer:stop(); _G.__pi_tutor_timer:close() end) end
 local g = vim.api.nvim_create_augroup("PiTutorPush", { clear = true })
 local function path_of(buf) return vim.api.nvim_buf_get_name(buf) end
+-- opts.root is a resolved real path ending without a slash. Resolve the buffer
+-- path too so symlinked checkouts match, and require a "/" boundary so a
+-- sibling like "proj-secrets" never counts as inside "proj".
+local root_prefix = opts.root .. "/"
 local function in_root(buf)
   local p = path_of(buf)
-  return p ~= "" and vim.startswith(p, opts.root)
+  if p == "" then return false end
+  local r = vim.fn.resolve(p)
+  return vim.startswith(r, root_prefix) or vim.startswith(p, root_prefix)
 end
 local function notify(payload)
   local ok = pcall(vim.rpcnotify, chan, "tutor", payload)

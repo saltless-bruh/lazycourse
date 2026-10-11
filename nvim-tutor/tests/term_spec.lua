@@ -55,3 +55,49 @@ describe("tutor.term", function()
     t:hide()
   end)
 end)
+
+describe("tutor.term restart (review fixes)", function()
+  local function new()
+    return require("tutor.term").new({ cmd = { "cat" }, cwd = vim.fn.getcwd(), width = 0.4 })
+  end
+  local function term_bufs()
+    local n = 0
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == "terminal" then n = n + 1 end
+    end
+    return n
+  end
+
+  it("restart from the editor window does not hijack the editor buffer (C1)", function()
+    local t = new()
+    t:show()
+    vim.cmd("wincmd h")
+    local editor_buf = vim.api.nvim_get_current_buf()
+    t:restart()
+    assert.equals(editor_buf, vim.api.nvim_get_current_buf())
+    assert.is_not.equals("terminal", vim.bo[editor_buf].buftype)
+    assert.equals("terminal", vim.bo[t:bufnr()].buftype)
+    assert.equals(t:bufnr(), vim.api.nvim_win_get_buf(t.win))
+    t:hide()
+  end)
+
+  it("stays running after the old job's exit callback fires (I2)", function()
+    local t = new()
+    t:show()
+    t:restart()
+    vim.wait(500)
+    assert.is_true(t:is_running())
+    assert.is_number(t:job_id())
+    assert.is_true(t:send("ping"))
+    t:hide()
+  end)
+
+  it("restart before the pane was ever opened starts exactly one job (I3)", function()
+    local before = term_bufs()
+    local t = new()
+    t:restart()
+    vim.wait(200)
+    assert.equals(before + 1, term_bufs())
+    t:hide()
+  end)
+end)

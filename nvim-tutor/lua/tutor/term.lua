@@ -11,18 +11,25 @@ function Term:_spawn()
   self.buf = vim.api.nvim_create_buf(false, false)
   vim.bo[self.buf].bufhidden = "hide"
   vim.api.nvim_win_set_buf(self.win, self.buf)
-  self.job = vim.fn.jobstart(self.opts.cmd, {
-    term = true,
-    cwd = self.opts.cwd,
-    on_exit = function(_, code)
-      self.job = nil
-      vim.schedule(function()
-        if self.buf and vim.api.nvim_buf_is_valid(self.buf) then
-          vim.b[self.buf].tutor_exit_code = code
-        end
-      end)
-    end,
-  })
+  local job
+  -- jobstart{term=true} attaches to the *current* window's buffer, so run it
+  -- with the pane window current, never from the editor window.
+  vim.api.nvim_win_call(self.win, function()
+    job = vim.fn.jobstart(self.opts.cmd, {
+      term = true,
+      cwd = self.opts.cwd,
+      on_exit = function(id, code)
+        -- An older job's exit must not clear a newer job.
+        if self.job == id then self.job = nil end
+        vim.schedule(function()
+          if self.buf and vim.api.nvim_buf_is_valid(self.buf) then
+            vim.b[self.buf].tutor_exit_code = code
+          end
+        end)
+      end,
+    })
+  end)
+  self.job = job
   vim.b[self.buf].tutor_term = true
   vim.keymap.set("t", "<Esc><Esc>", [[<C-\><C-n>]], { buffer = self.buf })
 end
@@ -75,7 +82,11 @@ function Term:restart()
     self.job = nil
   end
   local old = self.buf
-  if not self:is_visible() then self:show() end
+  if not self:is_visible() then
+    -- show() spawns when no buffer exists yet; that is the restart.
+    self:show()
+    if old == nil then return end
+  end
   self:_spawn()
   if old and vim.api.nvim_buf_is_valid(old) then
     vim.api.nvim_buf_delete(old, { force = true })
