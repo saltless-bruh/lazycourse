@@ -1,6 +1,6 @@
 {
   "name": "pi-tutor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "keywords": [
@@ -18,9 +18,8 @@
     ]
   },
   "scripts": {
-    "test": "vitest run --exclude test/contract.test.ts",
-    "typecheck": "tsc --noEmit",
-    "test:contract": "vitest run test/contract.test.ts"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0"
