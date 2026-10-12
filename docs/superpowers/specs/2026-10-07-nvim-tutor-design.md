@@ -1,7 +1,8 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** living document (rev 7, 2026-10-12: M5 skill reads in the guard, JSON source
+**Status:** living document (rev 8, 2026-10-13: M5-finish DevDocs references at installed
+versions replace fixed source lists; rev 7, 2026-10-12: M5 skill reads in the guard, JSON source
 overrides, learned skills global, ease applied at first judgment; rev 6, 2026-10-12: M4 interview choices, switch into the
 project after scaffold, ease formula; rev 5, 2026-10-12: M3 stuck rules, chat episodes,
 one nudge per episode, guard blocks bash, tutor mode only under `PI_TUTOR=1`;
@@ -306,6 +307,10 @@ How they are **added**:
   language replaces the built-in list). Learned skills are saved globally as
   `tutor-<lang>-learned-<slug>` (project `.pi/skills` would trigger Pi's trust prompt). The
   ease start rung is applied at an episode's first judgment, when its concept tags are known.
+- M5-finish (2026-10-13 design §5.2): fetched docs come from DevDocs bundles matched to the
+  installed toolchain (`pi.exec`), one `tutor-<lang>-ref` skill per language with `INDEX.md` +
+  `references/`. The fixed source lists and the model-written description call are retired;
+  `sources.json` now pins a DevDocs slug per language.
 - Project-local `.pi/skills/` and `AGENTS.md` override global ones by
   Pi's normal precedence.
 

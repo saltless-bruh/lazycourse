@@ -28,6 +28,9 @@ Re-verify every line when bumping versions.
   Paths resolve like Pi's `resolveToCwd` (dist/utils/paths.js:59-87: unicode spaces → " ",
   strip "@", expand "~", file:// URLs, relative to cwd); `path-utils` is not exported, so
   `guard.ts` mirrors it. Re-check on every Pi bump.
+- `pi.exec(command, args, { timeout })` → `{ stdout, stderr, code, killed }` (types.d.ts:1256, exec.d.ts): the
+  extension (never the model) runs `python3 --version`, `rustc --version`, `go version`, `tsc --version`,
+  `lua -v` to pick the DevDocs bundle.
 - `pi.getCommands()` → `SlashCommandInfo[]`; skills appear as `{ source: "skill", sourceInfo: { path: <SKILL.md> } }`
   regardless of `enableSkillCommands` (agent-session.js:2694). `guard.ts` allows `read/grep/find/ls` inside
   `dirname(path)` of each, because skills load through the `read` tool.
@@ -91,6 +94,13 @@ Re-verify every line when bumping versions.
 ## Node
 - `node:sqlite` `DatabaseSync` (profile). No ExperimentalWarning on Node 26.11.1 (2026-10-12); on Node 22.x it
   warns on stderr — check before supporting an older Node, the warning would draw over Pi's TUI.
+
+## DevDocs (external, verified 2026-10-13)
+- Catalog `https://devdocs.io/docs.json`: `[{ name, slug, type, version, release, mtime, db_size, attribution }]`.
+- Bundle `https://documents.devdocs.io/<slug>/index.json?<mtime>` → `{ entries: [{ name, path: "page#anchor", type }], types }`;
+  `…/db.json?<mtime>` → `{ "<page>": "<html>" }`. `PI_TUTOR_DEVDOCS=<base>` points both at a mirror.
+- Installed here: Python 3.14.8 → python~3.14; Go 1.27.2 → go 1.27.0; Lua 5.5.1 → lua~5.5; Rust 1.90 → rust 1.98
+  (newer, warned); TypeScript: no tsc → newest.
 
 ## Install location on this machine
 - Pi installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is
