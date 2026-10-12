@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
+import { yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], over: Partial<Judgment> = {}): Judgment =>
@@ -66,5 +66,15 @@ describe("describeTrigger", () => {
     expect(describeTrigger({ kind: "churn", path: "/p/c.go", region: [21, 40] })).toBe("rewriting c.go:21-40");
     expect(describeTrigger({ kind: "chat" })).toBe("learner question");
     expect(RUNG_NAMES).toEqual(["question", "concept", "pointer", "pseudocode", "reveal"]);
+  });
+});
+
+describe("yieldsTo (pane review I1)", () => {
+  it("lets an editor trigger replace no episode, a chat, an idle or a churn episode, but not an error one", () => {
+    expect(yieldsTo(null)).toBe(true);
+    expect(yieldsTo(openEpisode({ kind: "chat" }, "pro", 1))).toBe(true);
+    expect(yieldsTo(openEpisode({ kind: "idle", path: "/p/a.py", line: 1 }, "pro", 1))).toBe(true);
+    expect(yieldsTo(openEpisode({ kind: "churn", path: "/p/a.py", region: [1, 20] }, "pro", 1))).toBe(true);
+    expect(yieldsTo(openEpisode(err, "pro", 1))).toBe(false);
   });
 });

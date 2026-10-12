@@ -195,9 +195,12 @@ Rules:
 - Beginner band may send proactive explanations outside an episode, at
   most once per 2 minutes.
 - Detector rules (M3): an error is its file plus first-error message and fires once; idle
-  fires once per idle stretch; churn fires when the same 20-line region churns twice within
-  the idle threshold. An editor-triggered episode sends one `[tutor]` nudge, only if Pi is
-  idle. Only replies with `stopReason: "stop"` are judged.
+  fires once per idle stretch; churn fires when the same 20-line region of a file that has
+  an error churns twice within the idle threshold (churn alone is just typing). A trigger
+  refused because an episode is open is not consumed. Only error episodes hold their place;
+  an editor trigger replaces an open chat, idle or churn episode (`superseded`). An
+  editor-triggered episode sends one `[tutor]` nudge, only if Pi is idle and no nudge was
+  sent in the last 2 minutes. Only replies with `stopReason: "stop"` are judged.
 
 ## 6. Profile, interview, project suggestion, scaffold
 

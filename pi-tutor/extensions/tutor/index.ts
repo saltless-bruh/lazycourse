@@ -6,7 +6,7 @@ import { bandPrompt } from "./prompts.js";
 import { parseJudgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall } from "./guard.js";
 
 type Ui = ExtensionContext["ui"];
@@ -15,6 +15,8 @@ type Ui = ExtensionContext["ui"];
 const TUTOR_PREFIX = "[tutor]";
 /** How often persisting errors are checked against the band's error threshold. */
 const TICK_MS = 5000;
+/** Spec §5 "at most once per 2 minutes": the floor between proactive nudges. */
+const NUDGE_GAP_MS = 120_000;
 
 /** Last `tutor_level` custom entry on the active branch, if any. */
 function restoreLevel(ctx: ExtensionContext): number | undefined {
@@ -48,8 +50,10 @@ export default function (pi: ExtensionAPI): void {
   /** Latest push-signal text, shown when no episode is open. */
   let signal = "idle";
   let tick: ReturnType<typeof setInterval> | null = null;
+  let lastNudge = -Infinity;
   const level = () => state.level ?? DEFAULT_LEVEL;
-  const detector = new StuckDetector(() => thresholds(level()));
+  // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
+  const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
 
   function paint() {
     state.rung = episode ? episode.rung : startRung(bandFor(level()));
@@ -68,11 +72,18 @@ export default function (pi: ExtensionAPI): void {
   }
 
   function openEp(trigger: Trigger, nudge: boolean) {
-    if (episode) return;
-    episode = openEpisode(trigger, bandFor(level()), Date.now());
+    if (episode) {
+      // Chat, idle and churn episodes may never close on their own; editor triggers must not be lost behind them.
+      if (!nudge || !yieldsTo(episode)) return;
+      closeEp("superseded");
+    }
+    const now = Date.now();
+    episode = openEpisode(trigger, bandFor(level()), now);
     pi.appendEntry("tutor_episode", episode);
-    // Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running reply.
-    if (nudge && session?.isIdle()) {
+    // Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running
+    // reply, and at most one per NUDGE_GAP_MS so a run of changing errors is not a run of turns.
+    if (nudge && session?.isIdle() && now - lastNudge >= NUDGE_GAP_MS) {
+      lastNudge = now;
       pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
     }
   }
@@ -111,6 +122,7 @@ export default function (pi: ExtensionAPI): void {
     ui = ctx.hasUI ? ctx.ui : null;
     state.level = restoreLevel(ctx) ?? DEFAULT_LEVEL;
     episode = restoreEpisode(ctx);
+    if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       link = await NvimLink.connect({
         root: ctx.cwd,

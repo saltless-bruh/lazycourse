@@ -19,9 +19,9 @@ const until = (f: () => boolean, ms = 5000) => new Promise<void>((res, rej) => {
 });
 
 /** Boot linked to a fresh headless Neovim at beginner level (error threshold 0) and open a file in the root. */
-async function linked(busy = false) {
+async function linked(busy = false, branch: (root: string) => unknown[] = () => []) {
   h = await startHeadlessNvim();
-  const b = await boot({ nvim: h.socket, cwd: h.root });
+  const b = await boot({ nvim: h.socket, cwd: h.root, branch: branch(h.root) });
   shutdown = () => b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
   expect(b.widgets["tutor"]?.[1]).not.toMatch(/detached/);
   await b.commands["tutor-level"].handler("10", b.ctx);
@@ -54,6 +54,34 @@ describe("stuck episodes through a real Neovim", () => {
     const b = await linked(true);
     await setError("bang");
     await until(() => b.widgets["tutor"]?.[1] === 'stuck: error "bang" at a.py:1');
+    expect(b.sent).toEqual([]);
+  }, 20000);
+
+  it("an editor error supersedes an open chat episode and still nudges (final review I1)", async () => {
+    const b = await linked();
+    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "what does :w do?", systemPromptOptions: { sections: {} } }, b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "chat" } });
+    await setError("boom");
+    await until(() => b.sent.length > 0);
+    expect(b.widgets["tutor"]?.[1]).toBe('stuck: error "boom" at a.py:1');
+    expect(episodes(b.entries).find((e) => e.closeReason === "superseded")).toMatchObject({ trigger: { kind: "chat" } });
+  }, 20000);
+
+  it("a second error within 2 minutes opens its episode but sends no second nudge (final review I2)", async () => {
+    const b = await linked();
+    await setError("boom");
+    await until(() => b.sent.length > 0);
+    await setError("bang");
+    await until(() => b.widgets["tutor"]?.[1] === 'stuck: error "bang" at a.py:1', 10000);
+    expect(b.sent).toHaveLength(1);
+  }, 20000);
+
+  it("a restored error episode closes when its error is gone (final review I1)", async () => {
+    const b = await linked(false, (root) => [{ type: "custom", customType: "tutor_episode",
+      data: { id: "ep-1", trigger: { kind: "error", path: join(root, "a.py"), line: 1, msg: "boom" }, band: "intermediate", rung: 3, opened: 1, turns: 1, concept_tags: [] } }]);
+    expect(b.widgets["tutor"]?.[1]).toBe('stuck: error "boom" at a.py:1');
+    await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 2, message = "only a warning" }})`);
+    await until(() => b.widgets["tutor"]?.[1] === "episode closed (cleared)");
     expect(b.sent).toEqual([]);
   }, 20000);
 });

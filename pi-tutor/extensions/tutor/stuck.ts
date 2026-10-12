@@ -2,7 +2,8 @@ import type { TutorPayload } from "./nvim.js";
 import type { Trigger } from "./ladder.js";
 
 // Stuck detector (spec §5): push payloads + clock → open / cleared / run_passed.
-// It does not know whether an episode is open; index.ts ignores "open" while one is.
+// `canOpen` says whether the caller would accept a new episode now; a refused
+// trigger is not consumed, so it fires once the caller is free.
 export type StuckEvent =
   | { type: "open"; trigger: Trigger }
   | { type: "cleared"; path: string; msg: string }
@@ -18,7 +19,15 @@ export class StuckDetector {
   private idleLast = -1;
   private idleFired = false;
 
-  constructor(private readonly limits: () => { errorMs: number; idleMs: number }) {}
+  constructor(
+    private readonly limits: () => { errorMs: number; idleMs: number },
+    private readonly canOpen: () => boolean = () => true,
+  ) {}
+
+  /** Track an error whose episode was restored from the session, already fired. */
+  adopt(t: Trigger, now: number): void {
+    if (t.kind === "error") this.errors.set(t.path, { line: t.line, msg: t.msg, since: now, fired: true });
+  }
 
   observe(p: TutorPayload, now: number): StuckEvent[] {
     const out: StuckEvent[] = [];
@@ -40,18 +49,23 @@ export class StuckDetector {
         // A smaller since_ms than last time means the learner typed: a new stretch.
         if (p.since_ms < this.idleLast) this.idleFired = false;
         this.idleLast = p.since_ms;
-        if (!this.idleFired && p.since_ms >= this.limits().idleMs) {
+        if (!this.idleFired && p.since_ms >= this.limits().idleMs && this.canOpen()) {
           this.idleFired = true;
           out.push({ type: "open", trigger: { kind: "idle", path: p.path, line: p.line } });
         }
         break;
       }
       case "churn": {
+        // Every keystroke is a TextChanged edit, so churn alone is just typing;
+        // it counts only as rewriting around an error the file still has.
+        if (!this.errors.has(p.path)) break;
         const key = `${p.path}:${p.region[0]}`;
         const first = this.churnAt.get(key);
         if (first !== undefined && now - first <= this.limits().idleMs) {
-          this.churnAt.delete(key);
-          out.push({ type: "open", trigger: { kind: "churn", path: p.path, region: p.region } });
+          if (this.canOpen()) {
+            this.churnAt.delete(key);
+            out.push({ type: "open", trigger: { kind: "churn", path: p.path, region: p.region } });
+          }
         } else {
           this.churnAt.set(key, now);
         }
@@ -69,9 +83,10 @@ export class StuckDetector {
     const { errorMs } = this.limits();
     const out: StuckEvent[] = [];
     for (const [path, w] of this.errors) {
-      if (!w.fired && now - w.since >= errorMs) {
+      if (!w.fired && now - w.since >= errorMs && this.canOpen()) {
         w.fired = true;
         out.push({ type: "open", trigger: { kind: "error", path, line: w.line, msg: w.msg } });
+        break; // one episode at a time; the rest fire on later ticks
       }
     }
     return out;

@@ -59,13 +59,54 @@ describe("StuckDetector idle and churn", () => {
     expect(d.observe(idle(30_000), 0)).toEqual([]); // learner typed: a new stretch
     expect(d.observe(idle(60_000), 0)).toHaveLength(1);
   });
-  it("opens when the same region churns twice within the idle threshold", () => {
+  it("ignores churn in a file without an error: typing is not being stuck (pane review I1)", () => {
     const d = det(0, 60_000);
+    for (let t = 0; t < 10; t++) expect(d.observe(churn(1), t * 1_000)).toEqual([]);
+  });
+  it("opens when the same region of a file with an error churns twice within the idle threshold", () => {
+    const d = det(1e9, 60_000); // the error itself never fires here
+    d.observe(diag("/p/a.py", 1), 0);
     expect(d.observe(churn(1), 0)).toEqual([]);
     expect(d.observe(churn(21), 1_000)).toEqual([]);
     expect(d.observe(churn(1), 50_000)).toEqual([{ type: "open", trigger: { kind: "churn", path: "/p/a.py", region: [1, 20] } }]);
     expect(d.observe(churn(21), 200_000)).toEqual([]); // first churn too long ago: restarts
     expect(d.observe(churn(21), 210_000)).toHaveLength(1);
+  });
+});
+
+describe("StuckDetector with a busy caller (final review I1)", () => {
+  it("does not consume an error trigger the caller refuses; a later tick fires it", () => {
+    let free = false;
+    const d = new StuckDetector(() => ({ errorMs: 0, idleMs: 60_000 }), () => free);
+    expect(d.observe(diag("/p/a.py", 1), 0)).toEqual([]);
+    expect(d.tick(1)).toEqual([]);
+    free = true;
+    expect(openMsgs(d.tick(5_000))).toEqual(["boom"]);
+    expect(d.tick(10_000)).toEqual([]);
+  });
+  it("does not consume idle or churn triggers the caller refuses", () => {
+    let free = false;
+    const d = new StuckDetector(() => ({ errorMs: 0, idleMs: 60_000 }), () => free);
+    expect(d.observe(idle(60_000), 0)).toEqual([]);
+    d.observe(diag("/p/a.py", 1), 0); // refused too, so it stays unfired
+    expect(d.observe(churn(1), 0)).toEqual([]);
+    expect(d.observe(churn(1), 1_000)).toEqual([]);
+    free = true;
+    expect(d.observe(idle(90_000), 0)).toHaveLength(1);
+    expect(d.observe(churn(1), 2_000)).toHaveLength(1);
+  });
+  it("opens at most one error per tick so a second error is not lost to the open episode", () => {
+    const d = det(60_000);
+    d.observe(diag("/p/a.py", 1, "a"), 0);
+    d.observe(diag("/p/b.py", 1, "b"), 0);
+    expect(openMsgs(d.tick(60_000))).toEqual(["a"]);
+    expect(openMsgs(d.tick(65_000))).toEqual(["b"]);
+  });
+  it("adopt() tracks a restored error so its fix is reported as cleared, without re-firing it", () => {
+    const d = det(0);
+    d.adopt({ kind: "error", path: "/p/a.py", line: 3, msg: "boom" }, 0);
+    expect(d.observe(diag("/p/a.py", 1, "boom", 3), 1)).toEqual([]);
+    expect(d.observe(diag("/p/a.py", 0), 2)).toEqual([{ type: "cleared", path: "/p/a.py", msg: "boom" }]);
   });
 });
 

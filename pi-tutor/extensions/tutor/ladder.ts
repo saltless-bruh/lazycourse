@@ -11,7 +11,8 @@ export type Trigger =
   | { kind: "churn"; path: string; region: [number, number] }
   | { kind: "chat" };
 
-export type CloseReason = "cleared" | "run_passed" | "judged";
+/** `superseded`: an editor trigger replaced an open chat, idle or churn episode. */
+export type CloseReason = "cleared" | "run_passed" | "judged" | "superseded";
 
 export interface Episode {
   id: string;
@@ -23,6 +24,15 @@ export interface Episode {
   concept_tags: string[];
   closed?: number;
   closeReason?: CloseReason;
+}
+
+/**
+ * Whether a new editor trigger may replace `ep`. Only error episodes hold their
+ * place, because only they close from the editor (when the error clears); chat,
+ * idle and churn episodes would otherwise swallow every later trigger.
+ */
+export function yieldsTo(ep: Episode | null): boolean {
+  return ep === null || ep.trigger.kind !== "error";
 }
 
 export function rungCap(band: Band): 4 | 5 {
