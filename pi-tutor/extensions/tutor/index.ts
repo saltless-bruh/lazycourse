@@ -1,12 +1,20 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { NvimLink, type TutorPayload } from "./nvim.js";
+import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
-import { bandFor, startRung, DEFAULT_LEVEL } from "./policy.js";
+import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { bandPrompt } from "./prompts.js";
 import { parseJudgment } from "./judgment.js";
-import { formatEditorContext } from "./context.js";
+import { formatEditorContext, formatEpisodeContext } from "./context.js";
+import { StuckDetector, type StuckEvent } from "./stuck.js";
+import { openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { guardToolCall } from "./guard.js";
 
 type Ui = ExtensionContext["ui"];
+
+/** Prefix of proactive messages; the ladder prompt tells the model what they are (spec §9). */
+const TUTOR_PREFIX = "[tutor]";
+/** How often persisting errors are checked against the band's error threshold. */
+const TICK_MS = 5000;
 
 /** Last `tutor_level` custom entry on the active branch, if any. */
 function restoreLevel(ctx: ExtensionContext): number | undefined {
@@ -20,39 +28,87 @@ function restoreLevel(ctx: ExtensionContext): number | undefined {
   return level;
 }
 
+/** Last `tutor_episode` entry on the active branch, if it is still open. */
+function restoreEpisode(ctx: ExtensionContext): Episode | null {
+  let ep: Episode | undefined;
+  for (const e of ctx.sessionManager.getBranch()) {
+    if (e.type === "custom" && e.customType === "tutor_episode") ep = e.data as Episode;
+  }
+  return ep && typeof ep.rung === "number" && ep.trigger && ep.closed === undefined ? ep : null;
+}
+
 export default function (pi: ExtensionAPI): void {
   const state: TutorState = { state: "idle", connected: false };
   let link: NvimLink | null = null;
   let ui: Ui | null = null;
+  let session: ExtensionContext | null = null;
+  let episode: Episode | null = null;
+  /** Latest push-signal text, shown when no episode is open. */
+  let signal = "idle";
+  let tick: ReturnType<typeof setInterval> | null = null;
+  const level = () => state.level ?? DEFAULT_LEVEL;
+  const detector = new StuckDetector(() => thresholds(level()));
 
   function paint() {
+    state.rung = episode ? episode.rung : startRung(bandFor(level()));
+    state.state = episode ? `stuck: ${describeTrigger(episode.trigger)}` : signal;
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));
   }
 
-  function setLevel(level: number) {
-    state.level = level;
-    state.rung = startRung(bandFor(level));
+  function setLevel(n: number) {
+    state.level = n;
+    if (episode) {
+      episode = rebandEpisode(episode, bandFor(n));
+      pi.appendEntry("tutor_episode", episode);
+    }
+  }
+
+  function openEp(trigger: Trigger, nudge: boolean) {
+    if (episode) return;
+    episode = openEpisode(trigger, bandFor(level()), Date.now());
+    pi.appendEntry("tutor_episode", episode);
+    // Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running reply.
+    if (nudge && session?.isIdle()) {
+      pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
+    }
+  }
+
+  function closeEp(reason: CloseReason) {
+    if (!episode) return;
+    pi.appendEntry("tutor_episode", closeEpisode(episode, reason, Date.now()));
+    episode = null;
+    signal = `episode closed (${reason})`;
+  }
+
+  function onStuck(events: StuckEvent[]) {
+    for (const e of events) {
+      if (e.type === "open") openEp(e.trigger, true);
+      else if (e.type === "run_passed") closeEp("run_passed");
+      else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");
+    }
   }
 
   function onPayload(p: TutorPayload) {
-    // M3 replaces this with the stuck detector; for now reflect the latest signal.
     switch (p.kind) {
       case "diagnostics":
-        state.state = p.errors > 0 ? `error: ${p.first?.msg ?? ""}` : p.warnings > 0 ? `${p.warnings} warning(s)` : "clean";
+        signal = p.errors > 0 ? `error: ${p.first?.msg ?? ""}` : p.warnings > 0 ? `${p.warnings} warning(s)` : "clean";
         break;
-      case "idle": state.state = `idle ${Math.round(p.since_ms / 1000)}s`; break;
-      case "churn": state.state = `churning lines ${p.region[0]}-${p.region[1]}`; break;
-      case "run_output": state.state = p.code === 0 ? "run passed" : `run failed (exit ${p.code})`; break;
+      case "idle": signal = `idle ${Math.round(p.since_ms / 1000)}s`; break;
+      case "churn": signal = `churning lines ${p.region[0]}-${p.region[1]}`; break;
+      case "run_output": signal = p.code === 0 ? "run passed" : `run failed (exit ${p.code})`; break;
     }
     pi.appendEntry("tutor_signal", p);
+    onStuck(detector.observe(p, Date.now()));
     paint();
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    session = ctx;
     ui = ctx.hasUI ? ctx.ui : null;
-    setLevel(restoreLevel(ctx) ?? DEFAULT_LEVEL);
+    state.level = restoreLevel(ctx) ?? DEFAULT_LEVEL;
+    episode = restoreEpisode(ctx);
     if (!link) {
       link = await NvimLink.connect({
         root: ctx.cwd,
@@ -61,38 +117,64 @@ export default function (pi: ExtensionAPI): void {
       });
       state.connected = link !== null;
     }
+    if (!tick) {
+      tick = setInterval(() => {
+        const ev = detector.tick(Date.now());
+        if (ev.length) { onStuck(ev); paint(); }
+      }, TICK_MS);
+      tick.unref?.();
+    }
     paint();
   });
 
   pi.on("session_shutdown", async () => {
+    if (tick) clearInterval(tick);
+    tick = null;
     await link?.close();
     link = null;
     state.connected = false;
   });
 
-  // Spec §4: select the band prompt section and pull band-scoped editor context for this turn.
+  // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
-    const band = bandFor(state.level ?? DEFAULT_LEVEL);
+    const band = bandFor(level());
     event.systemPromptOptions.sections["tutor"] = bandPrompt(band);
-    if (!link) return;
-    let snap = null;
-    try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
-    if (!snap) return;
-    if (snap.filetype) { state.language = snap.filetype; paint(); }
-    return { message: { customType: "tutor_editor", content: formatEditorContext(snap), display: false, details: { band, path: snap.path } } };
+    // A learner's chat message opens an episode; our own [tutor] nudges do not.
+    if (!episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
+    let snap: EditorSnapshot | null = null;
+    if (link) {
+      try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
+    }
+    if (snap?.filetype) { state.language = snap.filetype; paint(); }
+    const parts: string[] = [];
+    if (episode) parts.push(formatEpisodeContext(episode));
+    if (snap) parts.push(formatEditorContext(snap));
+    if (parts.length === 0) return;
+    return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
 
-  // Spec §5: parse the trailing tutor-judgment block. Ladder application lands in M3.
+  // Spec §5: parse the trailing tutor-judgment block and apply it to the open episode.
   pi.on("turn_end", async (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
-    if (m.content.some((c) => c.type === "toolCall")) return;
+    // Aborted, errored, truncated and tool-call turns carry no final judgment.
+    if (m.stopReason !== "stop" || m.content.some((c) => c.type === "toolCall")) return;
     const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     const j = parseJudgment(text);
     state.last = j ? j.judgment : "missing";
-    if (j) pi.appendEntry("tutor_judgment", j);
+    if (j) {
+      pi.appendEntry("tutor_judgment", j);
+      if (episode) {
+        episode = applyJudgment(episode, j, Date.now());
+        pi.appendEntry("tutor_episode", episode);
+        if (episode.closed !== undefined) { episode = null; signal = "episode closed (judged)"; }
+      }
+    }
     paint();
   });
+
+  // Spec §8 tool fence: read-only tools inside the project root. Defence in depth behind `--tools`.
+  pi.on("tool_call", (event, ctx) => guardToolCall(event.toolName, event.input as Record<string, unknown>, ctx.cwd));
 
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context.
@@ -110,7 +192,7 @@ export default function (pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const arg = args.trim();
       if (arg === "") {
-        ctx.ui.notify(`current level ${state.level ?? DEFAULT_LEVEL} (${bandFor(state.level ?? DEFAULT_LEVEL)}); usage: /tutor-level <0-100>`, "info");
+        ctx.ui.notify(`current level ${level()} (${bandFor(level())}); usage: /tutor-level <0-100>`, "info");
         return;
       }
       const n = /^\d{1,3}$/.test(arg) ? Number(arg) : NaN;
