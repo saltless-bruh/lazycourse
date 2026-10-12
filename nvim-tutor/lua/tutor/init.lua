@@ -119,6 +119,8 @@ function M.setup(user_opts)
   cmd("TutorStart", slash("/tutor-start"), {})
   cmd("TutorLevel", slash("/tutor-level"), { nargs = "?" })
   cmd("TutorLearn", slash("/tutor-learn"), {})
+  cmd("TutorDocs", slash("/tutor-docs"), { nargs = "?" })
+  cmd("TutorReload", slash("/reload"), {})
 end
 
 return M

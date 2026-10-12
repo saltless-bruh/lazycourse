@@ -400,3 +400,64 @@ describe("M5 ease start rung", () => {
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
 });
+
+describe("M5 /tutor-docs and /tutor-start docs", () => {
+  async function docServer() {
+    const { createServer } = await import("node:http");
+    const server = createServer((req, res) => { if (req.url === "/style.md") res.end("# Naming\nsnake_case"); else { res.statusCode = 404; res.end(); } });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    return { server, url: `http://127.0.0.1:${port}/style.md` };
+  }
+  async function withSources(map: Record<string, unknown>, fn: () => Promise<void>) {
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const saved = process.env.PI_TUTOR_SOURCES;
+    process.env.PI_TUTOR_SOURCES = join(mkdtempSync(join(tmpdir(), "pitutor-src-")), "s.json");
+    writeFileSync(process.env.PI_TUTOR_SOURCES, JSON.stringify(map));
+    try { await fn(); } finally { process.env.PI_TUTOR_SOURCES = saved; }
+  }
+
+  it("/tutor-docs fetches the language's docs into skills and reloads Pi", async () => {
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { server, url } = await docServer();
+    try {
+      await withSources({ rust: [{ slug: "style", title: "Rust naming", urls: [url] }] }, async () => {
+        const b = await boot();
+        b.replies.push(JSON.stringify({ skills: [{ slug: "style", description: "Rust naming. Use when naming things." }] }));
+        await b.commands["tutor-docs"].handler("rust", b.ctx);
+        expect(existsSync(join(process.env.PI_CODING_AGENT_DIR!, "skills", "tutor-rust-style", "SKILL.md"))).toBe(true);
+        expect(b.notes.at(-1)).toMatch(/tutor-rust-style/);
+        expect(b.reloads.n).toBe(1);
+      });
+    } finally { server.close(); }
+  });
+
+  it("/tutor-docs for a language without sources says the tutor relies on model knowledge", async () => {
+    const b = await boot();
+    await b.commands["tutor-docs"].handler("cobol", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/no cached docs for cobol/);
+    expect(b.reloads.n).toBe(0);
+  });
+
+  it("/tutor-start fetches docs for a new language before switching; a fetch failure only warns", async () => {
+    const { mkdtempSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    await withSources({ go: [{ slug: "style", title: "Go style", urls: ["http://127.0.0.1:9/never"] }] }, async () => {
+      const root = mkdtempSync(join(tmpdir(), "pitutor-startdocs-"));
+      const b = await boot({ cwd: root });
+      b.replies.push(
+        JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
+        JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.go", run_cmd: "go run ./src" }),
+      );
+      b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
+      await b.commands["tutor-start"].handler("go", b.ctx);
+      expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
+      expect(b.notes.some((n) => /go docs: nothing fetched/.test(n))).toBe(true);
+      expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
+    });
+  });
+});

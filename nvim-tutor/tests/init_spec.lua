@@ -18,6 +18,18 @@ describe("tutor.init", function()
     assert.equals("1", require("tutor").state.term.opts.env.PI_TUTOR)
   end)
 
+  it(":TutorDocs and :TutorReload type their slash commands into pi", function()
+    local tutor = require("tutor")
+    vim.cmd("Tutor")
+    vim.cmd("TutorDocs rust")
+    vim.cmd("TutorReload")
+    local buf = tutor.state.term:bufnr()
+    local has = function(s) return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), s) end
+    vim.wait(1000, function() return has("/tutor-docs rust") and has("/reload") end)
+    assert.is_true(has("/tutor-docs rust"))
+    assert.is_true(has("/reload"))
+  end)
+
   it("switch cds into the project, opens the file and restarts pi there", function()
     local tutor = require("tutor")
     local dir = vim.fn.tempname()

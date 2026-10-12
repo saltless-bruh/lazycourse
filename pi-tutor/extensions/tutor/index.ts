@@ -15,7 +15,8 @@ import { runStart } from "./start.js";
 import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
-import { skillsRoot } from "./knowledge/fetch.js";
+import { fetchKnowledge, cachedSkills, skillsRoot } from "./knowledge/fetch.js";
+import { topicsFor } from "./knowledge/sources.js";
 
 type Ui = ExtensionContext["ui"];
 
@@ -309,6 +310,39 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  /** Spec §7: fetch the language's doc sources into tutor-<lang>-* skills, behind a cancellable loader. */
+  async function fetchDocs(ctx: ExtensionContext, language: string): Promise<"fetched" | "none" | "failed"> {
+    const topics = topicsFor(language);
+    if (!topics || topics.length === 0) {
+      ctx.ui.notify(`no cached docs for ${language}; the tutor relies on model knowledge`, "info");
+      return "none";
+    }
+    try {
+      const r = await withProgress(ctx, `tutor: fetching ${language} docs…`, (signal) =>
+        fetchKnowledge(language, topics, { fetch, complete: rawComplete(ctx, signal), root: skillsRoot(), signal }));
+      if (r.written.length === 0) {
+        ctx.ui.notify(`${language} docs: nothing fetched (${r.failed.join("; ")})`, "warning");
+        return "failed";
+      }
+      const extra = r.failed.length ? ` (failed: ${r.failed.join("; ")})` : "";
+      ctx.ui.notify(`${language} docs: ${r.written.join(", ")}${extra}`, "info");
+      return "fetched";
+    } catch (e) {
+      ctx.ui.notify(e instanceof Cancelled ? `${language} docs fetch cancelled` : `${language} docs fetch failed: ${e instanceof Error ? e.message : String(e)}`, "warning");
+      return "failed";
+    }
+  }
+
+  pi.registerCommand("tutor-docs", {
+    description: "Fetch (or re-fetch) official docs for a language into tutor-<lang>-* skills",
+    handler: async (args, ctx) => {
+      const language = (args.trim() || project?.language || state.language || "").toLowerCase();
+      if (!/^[a-z][a-z0-9+#.-]{0,30}$/.test(language)) { ctx.ui.notify("usage: /tutor-docs <language>", "warning"); return; }
+      if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
+      if ((await fetchDocs(ctx, language)) === "fetched") await ctx.reload();
+    },
+  });
+
   pi.registerCommand("tutor-start", {
     description: "Pick a language, get three project ideas, scaffold one (spec/ + AGENTS.md)",
     handler: async (args, ctx) => {
@@ -325,6 +359,8 @@ export default function (pi: ExtensionAPI): void {
         profile, complete: modelComplete(ctx, () => label), now: Date.now, home: homedir(),
       });
       if (!r) return;
+      // Spec §6 last step: fetch the language's knowledge if not cached; the switched Pi loads it.
+      if (cachedSkills(skillsRoot(), r.language).length === 0) await fetchDocs(ctx, r.language);
       if (link) {
         ctx.ui.notify(`scaffolded ${r.title} in ${r.dir}; switching the editor and tutor there…`, "info");
         await link.switchProject(r.dir, "spec/tasks.md");
