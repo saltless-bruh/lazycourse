@@ -36,15 +36,22 @@ export function realpathLoose(abs: string): string {
   return tail.length ? join(real, ...tail) : real;
 }
 
-export function guardToolCall(toolName: string, input: Record<string, unknown>, cwd: string): GuardResult {
+export function guardToolCall(toolName: string, input: Record<string, unknown>, cwd: string, extraRoots: string[] = []): GuardResult {
   if (toolName === "bash") return { block: true, reason: BASH_REASON };
   if (!READ_TOOLS.has(toolName)) return { block: true, reason: `the tutor is read-only: ${toolName} is not allowed` };
   const p = input.path;
   if (p === undefined && toolName !== "read") return undefined; // defaults to cwd
   if (typeof p !== "string") return { block: true, reason: `${toolName} needs a string path inside the project` };
   const root = realpathLoose(cwd);
-  const prefix = root.endsWith("/") ? root : root + "/";
   const target = realpathLoose(resolveToolPath(p, cwd));
-  if (target === root || target.startsWith(prefix)) return undefined;
-  return { block: true, reason: `${p} is outside the project root ${root}; the tutor only reads project files` };
+  for (const r of [root, ...extraRoots.map(realpathLoose)]) {
+    const prefix = r.endsWith("/") ? r : r + "/";
+    if (target === r || target.startsWith(prefix)) return undefined;
+  }
+  return { block: true, reason: `${p} is outside the project root ${root}; the tutor only reads project files and loaded skills` };
+}
+
+/** Folders of the skills Pi loaded (spec §7): the model reads SKILL.md and references/ through `read`. */
+export function skillDirs(commands: { source: string; sourceInfo?: { path?: string } }[]): string[] {
+  return commands.filter((c) => c.source === "skill" && typeof c.sourceInfo?.path === "string").map((c) => dirname(c.sourceInfo!.path!));
 }

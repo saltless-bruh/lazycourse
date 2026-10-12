@@ -1,8 +1,18 @@
+import { mkdtempSync as __mk, writeFileSync as __wf } from "node:fs";
+import { tmpdir as __tmp } from "node:os";
+import { join as __join } from "node:path";
 import extension from "../extensions/tutor/index.js";
 
 // The extension only activates when nvim-tutor started Pi (Task 6); tests are tutor mode.
 process.env.PI_TUTOR = "1";
 process.env.PI_TUTOR_PROFILE ??= ":memory:"; // each boot gets a private in-memory profile
+// Never touch the real ~/.pi/agent or the network: temp skills root, and no built-in doc sources.
+const __dir = __mk(__join(__tmp(), "pitutor-agent-"));
+process.env.PI_CODING_AGENT_DIR ??= __dir;
+if (!process.env.PI_TUTOR_SOURCES) {
+  process.env.PI_TUTOR_SOURCES = __join(__dir, "sources.json");
+  __wf(process.env.PI_TUTOR_SOURCES, JSON.stringify({ python: [], rust: [], go: [], typescript: [], lua: [] }));
+}
 
 export type Handler = (...a: unknown[]) => unknown;
 
@@ -11,13 +21,15 @@ export function fakePi() {
   const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
   const entries: { type: string; data: unknown }[] = [];
   const sent: { text: string; opts: unknown }[] = [];
+  const skills: { path: string }[] = [];
   const pi = {
     on: (name: string, h: Handler) => { events[name] = h; return () => {}; },
     registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
     appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); },
     sendUserMessage: (text: string, opts: unknown) => { sent.push({ text, opts }); },
+    getCommands: () => skills.map((s) => ({ name: "skill:x", source: "skill", sourceInfo: { path: s.path } })),
   };
-  return { pi, events, commands, entries, sent };
+  return { pi, events, commands, entries, sent, skills };
 }
 
 export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {

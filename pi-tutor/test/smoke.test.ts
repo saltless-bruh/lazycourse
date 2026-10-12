@@ -315,3 +315,14 @@ describe("M4 review fixes", () => {
     expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
   });
 });
+
+describe("M5 skill reads", () => {
+  it("tool_call lets the model read a skill Pi loaded, outside the project", async () => {
+    const b = await boot();
+    b.skills.push({ path: "/home/u/.pi/agent/skills/tutor-rust-style/SKILL.md" });
+    const call = (path: string) => b.events["tool_call"]({ type: "tool_call", toolCallId: "1", toolName: "read", input: { path } }, b.ctx);
+    expect(await call("/home/u/.pi/agent/skills/tutor-rust-style/SKILL.md")).toBeUndefined();
+    expect(await call("/home/u/.pi/agent/skills/tutor-rust-style/references/1-naming.md")).toBeUndefined();
+    expect(await call("/home/u/.pi/agent/auth.json")).toMatchObject({ block: true });
+  });
+});

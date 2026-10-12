@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { guardToolCall, resolveToolPath, realpathLoose } from "../extensions/tutor/guard.js";
+import { guardToolCall, resolveToolPath, realpathLoose, skillDirs } from "../extensions/tutor/guard.js";
 
 let root: string;
 beforeAll(() => {
@@ -76,5 +76,28 @@ describe("resolveToolPath / realpathLoose", () => {
   it("re-appends the missing tail to the real parent", () => {
     expect(realpathLoose(join(root, "etc-link", "nope", "x"))).toBe(join(realpathSync("/etc"), "nope", "x"));
     expect(realpathLoose(join(root, "missing", "y"))).toBe(join(root, "missing", "y"));
+  });
+});
+
+describe("skill folders (M5)", () => {
+  it("allows reads inside an extra root such as a loaded skill folder, and nothing next to it", () => {
+    const skills = mkdtempSync(join(tmpdir(), "pitutor-skills-"));
+    const dir = join(skills, "tutor-rust-style");
+    mkdirSync(join(dir, "references"), { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "x");
+    writeFileSync(join(skills, "secret.md"), "x");
+    expect(guardToolCall("read", { path: join(dir, "SKILL.md") }, root, [dir])).toBeUndefined();
+    expect(guardToolCall("read", { path: join(dir, "references", "1-style.md") }, root, [dir])).toBeUndefined();
+    expect(guardToolCall("read", { path: join(skills, "secret.md") }, root, [dir])).toMatchObject({ block: true });
+    expect(guardToolCall("read", { path: join(dir, "SKILL.md") }, root)).toMatchObject({ block: true });
+    expect(guardToolCall("bash", { command: "cat x" }, root, [dir])).toMatchObject({ block: true });
+  });
+  it("derives skill folders from Pi's command list", () => {
+    expect(skillDirs([
+      { source: "skill", sourceInfo: { path: "/a/skills/tutor-rust-style/SKILL.md" } },
+      { source: "extension", sourceInfo: { path: "/a/ext/index.ts" } },
+      { source: "prompt", sourceInfo: { path: "/a/prompts/x.md" } },
+      { source: "skill", sourceInfo: {} },
+    ])).toEqual(["/a/skills/tutor-rust-style"]);
   });
 });

@@ -9,7 +9,7 @@ import { parseJudgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
-import { guardToolCall } from "./guard.js";
+import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type ProjectRow } from "./profile.js";
 import { runStart } from "./start.js";
 import type { Complete } from "./llm.js";
@@ -260,7 +260,8 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // Spec §8 tool fence: read-only tools inside the project root. Defence in depth behind `--tools`.
-  pi.on("tool_call", (event, ctx) => guardToolCall(event.toolName, event.input as Record<string, unknown>, ctx.cwd));
+  // Plus the folders of skills Pi loaded (spec §7): skills load through `read`.
+  pi.on("tool_call", (event, ctx) => guardToolCall(event.toolName, event.input as Record<string, unknown>, ctx.cwd, skillDirs(pi.getCommands())));
 
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context.
