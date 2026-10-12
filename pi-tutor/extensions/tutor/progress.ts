@@ -2,6 +2,12 @@
 // ctx.ui.setWorkingMessage only shows during agent turns, so /tutor-start puts Pi's
 // BorderedLoader in the editor slot instead (pattern: Pi examples/extensions/qna.ts).
 
+/**
+ * The longest one /tutor-start model call may take. The scaffold call (three documents in one
+ * reply) ran past 180 s on z-ai/glm-5.3-flash in the live check; the loader's Esc cancels sooner.
+ */
+export const MODEL_TIMEOUT_MS = 600_000;
+
 export interface LoaderLike { readonly signal: AbortSignal; onAbort?: () => void }
 
 /** The slice of ctx.ui.custom this needs; the factory returns the component to show. */

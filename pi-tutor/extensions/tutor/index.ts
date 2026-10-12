@@ -13,7 +13,7 @@ import { guardToolCall } from "./guard.js";
 import { Profile, type ProjectRow } from "./profile.js";
 import { runStart } from "./start.js";
 import type { Complete } from "./llm.js";
-import { withLoader, type CustomUi } from "./progress.js";
+import { withLoader, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 
 type Ui = ExtensionContext["ui"];
 
@@ -49,8 +49,6 @@ function realCwd(cwd: string): string {
   try { return realpathSync(cwd); } catch { return cwd; }
 }
 
-/** The longest a single suggest/scaffold model call may take before it is abandoned. */
-const MODEL_TIMEOUT_MS = 180_000;
 
 /**
  * Pi's own model as a JSON-call function for the suggester and scaffold (spec §6). In the TUI each

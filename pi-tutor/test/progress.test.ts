@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { withLoader, Cancelled, type LoaderLike, type CustomUi } from "../extensions/tutor/progress.js";
+import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type LoaderLike, type CustomUi } from "../extensions/tutor/progress.js";
+
+describe("MODEL_TIMEOUT_MS", () => {
+  it("allows 10 minutes: the live scaffold call on z-ai/glm-5.3-flash ran past 180 s (2026-10-12); Esc still cancels", () => {
+    expect(MODEL_TIMEOUT_MS).toBe(600_000);
+  });
+});
 
 /** A ctx.ui.custom stand-in: runs the factory, keeps the component, records done(). */
 function fakeCustom() {
