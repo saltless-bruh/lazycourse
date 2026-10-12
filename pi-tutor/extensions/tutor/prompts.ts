@@ -19,3 +19,8 @@ function read(name: string): string {
 export function bandPrompt(band: Band): string {
   return `${read(band)}\n\n${read("ladder")}\n\n${read("judgment")}\n`;
 }
+
+/** Any other prompt in prompts/system (suggest, scaffold). */
+export function systemText(name: string): string {
+  return read(name);
+}
