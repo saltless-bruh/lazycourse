@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
-import { NvimLink, type TutorPayload } from "../extensions/tutor/nvim.js";
+import { NvimLink, SNAPSHOT_LUA, type TutorPayload } from "../extensions/tutor/nvim.js";
 
 let h: Headless | undefined;
 let link: NvimLink | null = null;
@@ -192,5 +192,37 @@ describe("NvimLink hardening (review fixes)", () => {
     await link.raw.command(`edit /tmp/outside-snap-${process.pid}.py`);
     expect(await link.snapshot("full")).toBeNull();
     expect(await link.snapshot("window")).toBeNull();
+  }, 20000);
+});
+
+describe("NvimLink editor-window resolution (M2 review fixes)", () => {
+  it("snapshot and pulls read the editor window even when a terminal window is current (C1)", async () => {
+    const { link, h } = await setup();
+    writeFileSync(join(h.root, "t.py"), Array.from({ length: 40 }, (_, i) => `line${i + 1}`).join("\n") + "\n");
+    await link.raw.command(`edit ${join(h.root, "t.py")}`);
+    await link.raw.lua(`vim.bo.filetype = "python"; vim.api.nvim_win_set_cursor(0, { 30, 0 })`);
+    // Open a terminal split and leave it as the current window, like the Pi pane.
+    await link.raw.command("vsplit | terminal");
+    expect(await link.raw.lua("return vim.bo[vim.api.nvim_get_current_buf()].buftype")).toBe("terminal");
+    const s = await link.snapshot("window", 5);
+    expect(s).not.toBeNull();
+    expect(s!.path).toBe(join(h.root, "t.py"));
+    expect(s!.cursor).toBe(30);
+    expect(s!.from).toBe(25);
+    expect(s!.filetype).toBe("python");
+    expect(await link.currentFile()).toBe(join(h.root, "t.py"));
+    expect(await link.cursorLine()).toBe(30);
+    expect((await link.bufferText())!.startsWith("line1\n")).toBe(true);
+  }, 20000);
+
+  it("the snapshot Lua returns only the path for a buffer outside the root (I1)", async () => {
+    const { link } = await setup();
+    await link.raw.command(`edit /tmp/outside-lua-${process.pid}.py`);
+    await link.raw.call("nvim_buf_set_lines", [0, 0, -1, false, ["secret = 1"]]);
+    const r = (await link.raw.lua(SNAPSHOT_LUA, ["full", 20, link.root])) as Record<string, unknown>;
+    expect(r.path).toBe(`/tmp/outside-lua-${process.pid}.py`);
+    expect(r.lines).toBeUndefined();
+    expect(r.diagnostics).toBeUndefined();
+    expect(await link.snapshot("full")).toBeNull();
   }, 20000);
 });

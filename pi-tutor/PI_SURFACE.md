@@ -26,13 +26,20 @@ Re-verify every line when bumping versions.
   `(TextContent | ThinkingContent | ToolCall)[]`, `ToolCall.type === "toolCall"`.
 - `ctx.sessionManager.getBranch()` (ReadonlySessionManager): custom entries are
   `{ type: "custom", customType, data }`; used to restore `tutor_level` on resume.
+- `pi.on("context", (event: { messages: AgentMessage[] }) => { messages? })` transforms the
+  conversation before each LLM call (types.d.ts:666, 1058, 1176); used to keep only the newest
+  `tutor_editor` custom message. `CustomMessage` is `{ role: "custom", customType, content, display }`.
 - Custom entry types we write: `tutor_signal`, `tutor_level { level }`, `tutor_judgment` (Judgment).
 - System prompt section key: `tutor`. `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.
 
 ## Neovim (via `neovim` npm client over `$NVIM`)
 - `$NVIM` is set for `:terminal` children to `v:servername` (verified 0.12.5)
-- `vim.bo[b].filetype`, `nvim_win_get_cursor(0)`, `nvim_buf_get_lines(b, from, to, false)` with
+- Editor window = first window in the tabpage whose buffer has `buftype == ""` (current, then
+  `winnr("#")`, then any); the Pi pane is a terminal window, so "current window" is wrong when the
+  user is typing in Pi. All pulls and the snapshot go through this resolver (`EDITOR_WIN_LUA`).
+- The snapshot Lua checks the root inside Neovim and returns `{ path }` only for outside buffers.
+- `vim.bo[b].filetype`, `nvim_win_get_cursor(w)`, `nvim_buf_get_lines(b, from, to, false)` with
   `to` past EOF (strict_indexing=false clamps) — one `nvim_exec_lua` round trip in `NvimLink.snapshot()`.
 - `attach({ socket })`, `raw.request("nvim_get_api_info")` → `[channel, meta]`
 - `raw.lua(code, args)`, `raw.call(fn, args)`, `raw.command(cmd)`, `raw.input(keys)`

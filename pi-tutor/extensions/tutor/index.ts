@@ -94,10 +94,26 @@ export default function (pi: ExtensionAPI): void {
     paint();
   });
 
+  // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
+  // the newest so stale snapshots do not pile up in the model's context.
+  pi.on("context", (event) => {
+    const msgs = event.messages;
+    let last = -1;
+    msgs.forEach((m, i) => { if (m.role === "custom" && m.customType === "tutor_editor") last = i; });
+    if (last < 0) return;
+    const pruned = msgs.filter((m, i) => !(m.role === "custom" && m.customType === "tutor_editor" && i !== last));
+    return pruned.length === msgs.length ? undefined : { messages: pruned };
+  });
+
   pi.registerCommand("tutor-level", {
     description: "Set the tutor level 0-100 (beginner → pro)",
     handler: async (args, ctx) => {
-      const n = Number(args.trim());
+      const arg = args.trim();
+      if (arg === "") {
+        ctx.ui.notify(`current level ${state.level ?? DEFAULT_LEVEL} (${bandFor(state.level ?? DEFAULT_LEVEL)}); usage: /tutor-level <0-100>`, "info");
+        return;
+      }
+      const n = /^\d{1,3}$/.test(arg) ? Number(arg) : NaN;
       if (!Number.isInteger(n) || n < 0 || n > 100) {
         ctx.ui.notify("usage: /tutor-level <0-100>", "warning");
         return;

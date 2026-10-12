@@ -103,3 +103,34 @@ describe("extension wiring", () => {
     await expect(events["turn_end"]({ type: "turn_end", message: assistant("```tutor-judgment\n{nope\n```") }, ctx)).resolves.toBeUndefined();
   });
 });
+
+describe("M2 review fixes", () => {
+  it("/tutor-level rejects empty, exponent and hex forms and shows the current level on empty (I2)", async () => {
+    const { commands, ctx, notes, entries } = await boot();
+    const before = entries.length;
+    await commands["tutor-level"].handler("", ctx);
+    expect(notes.at(-1)).toMatch(/current level 50/);
+    for (const bad of ["1e1", "0x10", "-0", "101", " 5 5"]) {
+      await commands["tutor-level"].handler(bad, ctx);
+      expect(notes.at(-1)).toMatch(/0-100/);
+    }
+    expect(entries.length).toBe(before);
+    await commands["tutor-level"].handler("007", ctx);
+    expect(entries.at(-1)).toEqual({ type: "tutor_level", data: { level: 7 } });
+  });
+
+  it("context handler keeps only the newest tutor_editor message (I3)", async () => {
+    const { events } = await boot();
+    const custom = (n: number) => ({ role: "custom", customType: "tutor_editor", content: `snap${n}`, display: false, timestamp: n });
+    const messages = [
+      { role: "user", content: "a", timestamp: 1 },
+      custom(2),
+      { role: "assistant", content: [{ type: "text", text: "b" }], timestamp: 3 },
+      { role: "custom", customType: "tutor_other", content: "keep", display: false, timestamp: 4 },
+      custom(5),
+      { role: "user", content: "c", timestamp: 6 },
+    ];
+    const r = (await events["context"]({ type: "context", messages }, {})) as { messages: typeof messages };
+    expect(r.messages.map((m) => (m as { content: unknown }).content)).toEqual(["a", [{ type: "text", text: "b" }], "keep", "snap5", "c"]);
+  });
+});
