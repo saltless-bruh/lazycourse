@@ -38,6 +38,49 @@ describe("tutor.init", function()
     assert.is_false(tutor.switch(dir .. "/missing", "x"))
   end)
 
+  local function project()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir .. "/spec", "p")
+    vim.fn.writefile({ "- [ ] P1.T1" }, dir .. "/spec/tasks.md")
+    return dir
+  end
+  local function shows(file)
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.fn.resolve(vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))) == vim.fn.resolve(file) then return true end
+    end
+    return false
+  end
+
+  it("switch opens the file when the only editor window is a dashboard (nofile) (pane review I1)", function()
+    local tutor = require("tutor")
+    vim.cmd("silent! only")
+    vim.cmd("enew")
+    vim.bo.buftype = "nofile"
+    local dir = project()
+    vim.cmd("Tutor")
+    assert.is_true(tutor.switch(dir, "spec/tasks.md"))
+    assert.is_true(shows(dir .. "/spec/tasks.md"))
+  end)
+
+  it("switch still re-roots pi when the file cannot be opened (pane review I1)", function()
+    local tutor = require("tutor")
+    vim.cmd("silent! only")
+    vim.cmd("enew")
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "unsaved work" })
+    local hidden = vim.o.hidden
+    vim.o.hidden = false -- :edit now fails with E37
+    local dir = project()
+    vim.cmd("Tutor")
+    local old = tutor.state.term:job_id()
+    local ok, res = pcall(tutor.switch, dir, "spec/tasks.md")
+    vim.o.hidden = hidden
+    vim.bo.modified = false
+    assert.is_true(ok, tostring(res))
+    assert.is_true(res)
+    assert.equals(dir, tutor.state.term.opts.cwd)
+    assert.are_not.equal(old, tutor.state.term:job_id())
+  end)
+
   it("wrappers type slash commands into the terminal", function()
     local tutor = require("tutor")
     vim.cmd("Tutor")

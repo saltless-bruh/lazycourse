@@ -3,6 +3,7 @@ import { bandFor } from "./policy.js";
 import type { Profile } from "./profile.js";
 import { runInterview, initialLevel, type Ask, type InterviewAnswers } from "./interview.js";
 import { completeJson, type Complete } from "./llm.js";
+import { Cancelled } from "./progress.js";
 import { systemText } from "./prompts.js";
 import { suggestPrompt, checkSuggestions, suggestionLabel } from "./suggest.js";
 import { scaffoldPrompt, checkScaffold, writeScaffold, slugify, isEmptyOrMissing } from "./scaffold.js";
@@ -80,7 +81,8 @@ export async function runStart(arg: string, d: StartDeps): Promise<StartResult |
     d.profile.addProject(language, dir, project.title, d.now());
     return { dir, language, level, title: project.title, files };
   } catch (e) {
-    d.ui.notify(`tutor-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+    if (e instanceof Cancelled) d.ui.notify("tutor-start cancelled", "info");
+    else d.ui.notify(`tutor-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     return null;
   } finally {
     d.ui.working();

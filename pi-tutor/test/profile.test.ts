@@ -87,4 +87,25 @@ describe("projects", () => {
     expect(p.projects("rust").map((x) => x.title)).toEqual(["Todo CLI"]);
     expect(p.projects("go")).toEqual([]);
   });
+  it("re-adding a recorded folder updates its row instead of failing (final review I2)", () => {
+    p = Profile.open(":memory:");
+    const a = p.addProject("python", "/home/u/lazycourse/py-todo", "Todo CLI", 5);
+    const b = p.addProject("python", "/home/u/lazycourse/py-todo", "Todo CLI v2", 9);
+    expect(b).toEqual({ ...a, title: "Todo CLI v2", created: 9 });
+    expect(p.projects("python")).toEqual([b]);
+  });
+});
+
+describe("busy profile (final review I4)", () => {
+  it("waits for a lock up to the busy timeout, then throws instead of hanging", () => {
+    const path = tmp();
+    p = Profile.open(path, { busyTimeoutMs: 50 });
+    const other = new DatabaseSync(path);
+    other.exec("BEGIN EXCLUSIVE");
+    try {
+      const t0 = Date.now();
+      expect(() => p!.setLevel("rust", 1)).toThrow(/locked|busy/i);
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(40);
+    } finally { other.exec("ROLLBACK"); other.close(); }
+  });
 });

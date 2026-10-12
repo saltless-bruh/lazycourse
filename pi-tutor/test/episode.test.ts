@@ -85,3 +85,37 @@ describe("stuck episodes through a real Neovim", () => {
     expect(b.sent).toEqual([]);
   }, 20000);
 });
+
+describe("profile language in a scaffolded project (M4 final review I3)", () => {
+  it("records episodes and /tutor-level under the project's language, not the open buffer's filetype", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { realpathSync } = await import("node:fs");
+    h = await startHeadlessNvim();
+    const root = realpathSync(h.root);
+    const file = join(root, "profile.sqlite");
+    const seed = Profile.open(file);
+    seed.saveLanguage("python", 20, {}, 1);
+    seed.addProject("python", root, "Todo CLI", 1);
+    seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ nvim: h.socket, cwd: root });
+      shutdown = () => b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+      const { attach } = await import("neovim");
+      nvim = attach({ socket: h.socket });
+      writeFileSync(join(root, "tasks.md"), "- [ ] P1.T1\n");
+      await nvim.command(`edit ${join(root, "tasks.md")}`); // filetype markdown, as right after the switch
+      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "where do I start?", systemPromptOptions: { sections: {} } }, b.ctx);
+      expect(b.widgets["tutor"]?.[0]).toMatch(/^tutor  markdown/); // display follows the buffer
+      await b.events["turn_end"]({ type: "turn_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: '```tutor-judgment\n{"judgment":"none","concept_tags":["planning"],"episode_closed":true}\n```' }] } }, b.ctx);
+      await b.commands["tutor-level"].handler("60", b.ctx);
+      await shutdown(); shutdown = undefined;
+      const check = Profile.open(file);
+      expect(check.episodes("markdown")).toEqual([]);
+      expect(check.episodes("python")).toHaveLength(1);
+      expect(check.language("python")?.level).toBe(60);
+      check.close();
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  }, 20000);
+});

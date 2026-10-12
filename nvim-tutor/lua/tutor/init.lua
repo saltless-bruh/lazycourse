@@ -80,12 +80,25 @@ function M.switch(dir, file)
   end
   opts.cwd = dir
   vim.cmd.cd(vim.fn.fnameescape(dir))
+  -- Editor window: a normal buffer, else any non-terminal one (LazyVim's dashboard is
+  -- buftype=nofile), else a new split left of the Pi pane.
+  local target, fallback
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if vim.bo[vim.api.nvim_win_get_buf(w)].buftype == "" then
-      vim.api.nvim_win_call(w, function() vim.cmd.edit(vim.fn.fnameescape(dir .. "/" .. file)) end)
-      break
-    end
+    local bt = vim.bo[vim.api.nvim_win_get_buf(w)].buftype
+    if bt == "" then target = w; break end
+    if bt ~= "terminal" and not fallback then fallback = w end
   end
+  target = target or fallback
+  local path = vim.fn.fnameescape(dir .. "/" .. file)
+  -- The open may fail (E37 unsaved buffer with 'nohidden'); Pi must follow the :cd regardless.
+  local ok, err = pcall(function()
+    if target then
+      vim.api.nvim_win_call(target, function() vim.cmd.edit(path) end)
+    else
+      vim.cmd("topleft vsplit " .. path)
+    end
+  end)
+  if not ok then vim.notify("[tutor] could not open " .. file .. ": " .. tostring(err), vim.log.levels.WARN) end
   M.state.term.opts.cwd = dir
   M.state.term:restart()
   return true

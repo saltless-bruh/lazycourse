@@ -261,6 +261,9 @@ Scaffold, written by the extension only inside the chosen directory:
   free text. After scaffolding, `require("tutor").switch(dir, "spec/tasks.md")` cds Neovim into
   the project and restarts Pi there, so the tool guard, `AGENTS.md`, and the editor root all
   follow. Ease per concept is the mean of episode scores `1 − (rung − start)/(cap − start + 1)`.
+  The scaffold does not create `.pi/skills/` yet: any `.pi/skills` makes Pi ask "trust this
+  folder?" on first open; M5 creates it when it writes the first skill. Profile writes use the
+  project's language (from the profile), never the open buffer's filetype.
 
 ## 7. Knowledge base: skills, instructions, workflows
 

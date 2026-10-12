@@ -34,7 +34,14 @@ Re-verify every line when bumping versions.
   (model-registry.d.ts:40; pattern from examples/extensions/qna.ts). Used by `/tutor-start` for the
   suggester and the scaffold; non-`"stop"` `stopReason` is an error (`errorMessage` shown).
 - `ctx.ui.select(title, options)` / `ctx.ui.input(title, placeholder)` → `string | undefined` (Esc = undefined);
-  `ctx.ui.setWorkingMessage(text?)`; `ctx.model` (undefined → `/tutor-start` refuses).
+  `ctx.ui.setWorkingMessage(text?)` (only visible during an agent turn — interactive-mode.js:2061 — so
+  it is not progress for a command); `ctx.model` (undefined → `/tutor-start` refuses).
+- `ctx.ui.custom(factory(tui, theme, keybindings, done))` (types.d.ts:121) showing `BorderedLoader`
+  (exported from the package, `{ cancellable: true }`, `.signal`, `.onAbort`) during each `/tutor-start`
+  model call; its signal goes to `modelRegistry.complete(..., { signal })`. Pattern from qna.ts.
+  `initTheme(name?, watcher?)` must have run first (Pi does it at startup; tests call it).
+- Project trust: `.pi/{settings.json,mcp.json,extensions,skills,prompts,themes,SYSTEM.md,APPEND_SYSTEM.md}`
+  make Pi ask "trust this folder?" (trust-manager.js:8), so the M4 scaffold writes no `.pi/` (M5 decides).
 - `ctx.ui.setWidget(key, string[] | undefined)`, `ctx.ui.setStatus(key, text)`,
   `ctx.ui.setWorkingMessage(text)`, `ctx.ui.notify(msg, level)`
 - `pi.on("before_agent_start", (event, ctx) => …)`: mutate `event.systemPromptOptions.sections["tutor"]`

@@ -10,9 +10,10 @@ import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall } from "./guard.js";
-import { Profile } from "./profile.js";
+import { Profile, type ProjectRow } from "./profile.js";
 import { runStart } from "./start.js";
 import type { Complete } from "./llm.js";
+import { withLoader, type CustomUi } from "./progress.js";
 
 type Ui = ExtensionContext["ui"];
 
@@ -48,14 +49,27 @@ function realCwd(cwd: string): string {
   try { return realpathSync(cwd); } catch { return cwd; }
 }
 
-/** Pi's own model as a JSON-call function for the suggester and scaffold (spec §6). */
-function modelComplete(ctx: ExtensionContext): Complete {
-  return async (system, user) => {
+/** The longest a single suggest/scaffold model call may take before it is abandoned. */
+const MODEL_TIMEOUT_MS = 180_000;
+
+/**
+ * Pi's own model as a JSON-call function for the suggester and scaffold (spec §6). In the TUI each
+ * call shows Pi's BorderedLoader with `label()` and Esc to cancel; setWorkingMessage alone is
+ * invisible outside an agent turn.
+ */
+function modelComplete(ctx: ExtensionContext, label: () => string): Complete {
+  const call = async (system: string, user: string, signal: AbortSignal) => {
     const model = ctx.model;
     if (!model) throw new Error("no model selected");
-    const r = await ctx.modelRegistry.complete(model, { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] });
+    const r = await ctx.modelRegistry.complete(model, { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] }, { signal });
     if (r.stopReason !== "stop") throw new Error(`model stopped (${r.stopReason})${r.errorMessage ? `: ${r.errorMessage}` : ""}`);
     return r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+  };
+  return async (system, user) => {
+    if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") return call(system, user, AbortSignal.timeout(MODEL_TIMEOUT_MS));
+    const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
+    const make = (tui: unknown, theme: unknown, message: string) => new BorderedLoader(tui as never, theme as never, message, { cancellable: true });
+    return withLoader(ctx.ui.custom.bind(ctx.ui) as unknown as CustomUi, make, label(), (signal) => call(system, user, signal), MODEL_TIMEOUT_MS);
   };
 }
 
@@ -72,6 +86,8 @@ export default function (pi: ExtensionAPI): void {
   let tick: ReturnType<typeof setInterval> | null = null;
   let lastNudge = -Infinity;
   let profile: Profile | null = null;
+  /** The recorded project this Pi runs in (cwd), if any: the source of the profile language. */
+  let project: ProjectRow | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -109,18 +125,31 @@ export default function (pi: ExtensionAPI): void {
     }
   }
 
-  /** Spec §5: a closed episode is mirrored to the profile (needs a known language). */
+  /**
+   * Spec §5: a closed episode is mirrored to the profile. Only inside a recorded project, and under
+   * the project's language: the buffer filetype (state.language) is display-only — right after the
+   * switch it is `markdown` (spec/tasks.md).
+   */
+  /**
+   * Profile writes run from Neovim notifications and the tick, outside any Pi handler: an uncaught
+   * SQLITE_BUSY or I/O error there would crash Pi, so it becomes a warning instead.
+   */
+  function profileWrite(write: () => void) {
+    try { write(); } catch (e) { ui?.notify(`tutor: profile write failed: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
+  }
+
   function mirror(closed: Episode) {
-    if (!profile || !state.language || closed.closed === undefined) return;
+    if (!profile || !project || closed.closed === undefined) return;
     const score = episodeScore(closed);
     if (score === null) return;
-    profile.recordEpisode({
-      language: state.language,
-      project: session ? profile.projectAt(realCwd(session.cwd))?.path ?? null : null,
+    const p = profile, proj = project, closedAt = closed.closed;
+    profileWrite(() => p.recordEpisode({
+      language: proj.language,
+      project: proj.path,
       concept_tags: closed.concept_tags,
       rungs_used: closed.rung - startRung(closed.band) + 1,
-      turns: closed.turns, opened: closed.opened, closed: closed.closed,
-    }, score);
+      turns: closed.turns, opened: closed.opened, closed: closedAt,
+    }, score));
   }
 
   function closeEp(reason: CloseReason) {
@@ -161,6 +190,7 @@ export default function (pi: ExtensionAPI): void {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
     }
     const proj = profile?.projectAt(realCwd(ctx.cwd));
+    project = proj ?? null;
     if (proj) state.language = proj.language;
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
     episode = restoreEpisode(ctx);
@@ -260,7 +290,7 @@ export default function (pi: ExtensionAPI): void {
       }
       setLevel(n);
       pi.appendEntry("tutor_level", { level: n });
-      if (state.language) profile?.setLevel(state.language, n);
+      if (project && profile) { const p = profile, lang = project.language; profileWrite(() => p.setLevel(lang, n)); }
       paint();
       ctx.ui.notify(`tutor level set to ${n} (${bandFor(n)})`, "info");
     },
@@ -271,14 +301,15 @@ export default function (pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
+      let label = "tutor: asking the model…";
       const r = await runStart(args, {
         ui: {
           select: (t, o) => ctx.ui.select(t, o),
           input: (t, p) => ctx.ui.input(t, p),
           notify: (m, l) => ctx.ui.notify(m, l),
-          working: (m) => ctx.ui.setWorkingMessage(m),
+          working: (m) => { label = m ?? label; ctx.ui.setWorkingMessage(m); },
         },
-        profile, complete: modelComplete(ctx), now: Date.now, home: homedir(),
+        profile, complete: modelComplete(ctx, () => label), now: Date.now, home: homedir(),
       });
       if (!r) return;
       if (link) {

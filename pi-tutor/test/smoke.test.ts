@@ -250,3 +250,68 @@ describe("M4 profile and /tutor-start", () => {
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
 });
+
+describe("M4 review fixes", () => {
+  it("a locked or failing profile never throws out of an episode close or /tutor-level (final review I4)", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { DatabaseSync } = await import("node:sqlite");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-locked-"));
+    const file = join(dir, "profile.sqlite");
+    const seed = Profile.open(file);
+    seed.saveLanguage("rust", 50, {}, 1);
+    seed.addProject("rust", dir, "Todo", 1);
+    seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    const other = new DatabaseSync(file);
+    try {
+      const b = await boot({ cwd: dir });
+      other.exec("BEGIN EXCLUSIVE"); // another tutor holds the write lock past the busy timeout
+      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
+      await expect(b.events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, b.ctx)).resolves.toBeUndefined();
+      expect(b.widgets["tutor"]?.[1]).toMatch(/detached|episode closed/); // the episode still closed
+      await expect(b.commands["tutor-level"].handler("70", b.ctx)).resolves.toBeUndefined();
+      expect(b.notes.some((n) => /profile write failed/.test(n))).toBe(true);
+    } finally {
+      other.exec("ROLLBACK"); other.close();
+      if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
+    }
+  }, 15000);
+
+  it("/tutor-start shows Pi's cancellable loader during each model call and passes its signal (final review I1)", async () => {
+    const { mkdtempSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "pitutor-loader-"));
+    const { initTheme } = await import("@earendil-works/pi-coding-agent");
+    initTheme(undefined, false); // Pi does this at startup; BorderedLoader needs it
+    const b = await boot({ cwd: root });
+    const shown: unknown[] = [];
+    const signals: unknown[] = [];
+    const tui = { requestRender() {} };
+    const theme = { fg: (_c: string, s: string) => s };
+    const ctx = b.ctx as unknown as { ui: Record<string, unknown>; modelRegistry: Record<string, unknown> };
+    ctx.ui.custom = (factory: (t: unknown, th: unknown, kb: unknown, done: (r: unknown) => void) => unknown) =>
+      new Promise((resolve) => { shown.push(factory(tui, theme, {}, resolve)); });
+    const replies = [
+      JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
+      JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.py", run_cmd: "python src/main.py" }),
+    ];
+    ctx.modelRegistry.complete = async (_m: unknown, _c: unknown, opts: { signal?: AbortSignal }) => {
+      signals.push(opts?.signal);
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() }] };
+    };
+    b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
+    await b.commands["tutor-start"].handler("python", b.ctx);
+    const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
+    expect(shown).toHaveLength(2);
+    for (const c of shown) expect(c).toBeInstanceOf(BorderedLoader);
+    expect(signals.length).toBe(2);
+    expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
+    for (const c of shown) (c as { dispose(): void }).dispose();
+    expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
+  });
+});

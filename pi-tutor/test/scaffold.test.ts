@@ -61,7 +61,8 @@ describe("writeScaffold", () => {
   it("writes the spec §6 layout and nothing outside the folder", () => {
     const dir = join(mkdtempSync(join(tmpdir(), "pitutor-scaffold-")), "rust-todo-cli");
     const written = writeScaffold(dir, spec(), meta);
-    expect(written).toEqual(["README.md", "AGENTS.md", ".pi/skills/.gitkeep", "spec/design.md", "spec/tasks.md", "spec/requirements.md", "src/main.rs"]);
+    expect(written).toEqual(["README.md", "AGENTS.md", "spec/design.md", "spec/tasks.md", "spec/requirements.md", "src/main.rs"]);
+    expect(existsSync(join(dir, ".pi"))).toBe(false); // .pi/skills makes Pi ask "trust this folder?" (final review I5)
     expect(readFileSync(join(dir, "spec/tasks.md"), "utf8")).toBe(spec().tasks_md);
     expect(readFileSync(join(dir, "src/main.rs"), "utf8")).toBe("// Start here: spec/tasks.md, task P1.T1. You write the code; the tutor coaches.\n");
     const readme = readFileSync(join(dir, "README.md"), "utf8");
@@ -84,6 +85,6 @@ describe("writeScaffold", () => {
     expect(isEmptyOrMissing(dir)).toBe(false);
     const empty = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
     expect(isEmptyOrMissing(empty)).toBe(true);
-    expect(writeScaffold(empty, spec(), meta)).toHaveLength(7);
+    expect(writeScaffold(empty, spec(), meta)).toHaveLength(6);
   });
 });

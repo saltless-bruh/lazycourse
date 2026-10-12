@@ -33,9 +33,10 @@ const project = (r: Row): ProjectRow => ({
 export class Profile {
   private constructor(private readonly db: DatabaseSync) {}
 
-  static open(path = defaultProfilePath()): Profile {
+  /** `busyTimeoutMs`: how long a write waits on another tutor's lock before throwing (never hangs Pi). */
+  static open(path = defaultProfilePath(), opts: { busyTimeoutMs?: number } = {}): Profile {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-    const db = new DatabaseSync(path);
+    const db = new DatabaseSync(path, { timeout: opts.busyTimeoutMs ?? 2000 });
     try {
       db.exec("CREATE TABLE IF NOT EXISTS schema_version (v INTEGER NOT NULL)");
       const row = db.prepare("SELECT v FROM schema_version").get() as Row | undefined;
@@ -102,9 +103,11 @@ export class Profile {
   }
 
   addProject(language: string, path: string, title: string, now: number): ProjectRow {
-    const r = this.db.prepare("INSERT INTO projects (language, path, title, status, created) VALUES (?, ?, ?, 'active', ?)")
-      .run(language, path, title, now);
-    return { id: Number(r.lastInsertRowid), language, path, title, status: "active", created: now };
+    // A folder scaffolded again (after the learner emptied it) replaces its old record.
+    const r = this.db.prepare(`INSERT INTO projects (language, path, title, status, created) VALUES (?, ?, ?, 'active', ?)
+      ON CONFLICT(path) DO UPDATE SET language = excluded.language, title = excluded.title, status = 'active', created = excluded.created
+      RETURNING id`).get(language, path, title, now) as Row;
+    return { id: Number(r.id), language, path, title, status: "active", created: now };
   }
 
   projectAt(path: string): ProjectRow | undefined {

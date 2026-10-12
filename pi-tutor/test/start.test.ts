@@ -94,6 +94,17 @@ describe("runStart", () => {
     expect(t.working.at(-1)).toBeUndefined();
   });
 
+  it("Esc during a model call cancels quietly: info notice, nothing written (final review I1)", async () => {
+    const { Cancelled } = await import("../extensions/tutor/progress.js");
+    const t = deps(["1. Todo CLI (small) — Track tasks.", ""]);
+    t.profile.saveLanguage("rust", 40, {}, 1);
+    const replies = [SUGGEST];
+    t.d.complete = async () => { const r = replies.shift(); if (r) return r; throw new Cancelled(); };
+    expect(await runStart("rust", t.d)).toBeNull();
+    expect(t.notes.at(-1)).toBe("tutor-start cancelled");
+    expect(existsSync(join(t.home, "lazycourse"))).toBe(false);
+  });
+
   it("rejects an invalid language name", async () => {
     const t = deps([]);
     expect(await runStart("rm -rf /", t.d)).toBeNull();

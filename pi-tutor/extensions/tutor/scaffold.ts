@@ -94,8 +94,8 @@ export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta):
   const first = taskIds(s.tasks_md)[0];
   const files: [string, string][] = [
     ["README.md", readme(s, meta)],
+    // No .pi/skills/ yet: Pi asks "trust this folder?" for it; M5 creates it when it writes a skill.
     ["AGENTS.md", agents(meta)],
-    [".pi/skills/.gitkeep", ""],
     ["spec/design.md", s.design_md],
     ["spec/tasks.md", s.tasks_md],
     ["spec/requirements.md", s.requirements_md],
