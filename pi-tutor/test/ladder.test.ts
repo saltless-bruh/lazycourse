@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { episodeScore, yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
+import { easeStart, episodeScore, yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], over: Partial<Judgment> = {}): Judgment =>
@@ -91,5 +91,20 @@ describe("episodeScore", () => {
   });
   it("is null for a superseded episode", () => {
     expect(episodeScore(at("pro", 1, "superseded"))).toBeNull();
+  });
+});
+
+describe("easeStart (spec §5 ease ≥ 0.7 starts one rung lower)", () => {
+  const ease = (m: Record<string, number>) => (t: string) => m[t];
+  const ep0 = openEpisode({ kind: "chat" }, "beginner", 1); // rung 3
+  it("lowers the first-turn rung when every tag is well known", () => {
+    expect(easeStart(ep0, ["traits", "generics"], ease({ traits: 0.9, generics: 0.7 })).rung).toBe(2);
+  });
+  it("keeps the rung for an unknown or weak tag, no tags, a later turn, or rung 1", () => {
+    expect(easeStart(ep0, ["traits", "lifetimes"], ease({ traits: 0.9, lifetimes: 0.4 })).rung).toBe(3);
+    expect(easeStart(ep0, ["traits", "new"], ease({ traits: 0.9 })).rung).toBe(3);
+    expect(easeStart(ep0, [], ease({})).rung).toBe(3);
+    expect(easeStart({ ...ep0, turns: 1 }, ["traits"], ease({ traits: 1 })).rung).toBe(3);
+    expect(easeStart(openEpisode({ kind: "chat" }, "pro", 1), ["traits"], ease({ traits: 1 })).rung).toBe(1);
   });
 });

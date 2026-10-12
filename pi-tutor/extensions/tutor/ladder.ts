@@ -82,3 +82,10 @@ export function episodeScore(ep: Episode): number | null {
   const start = startRung(ep.band);
   return Math.min(1, Math.max(0, 1 - (ep.rung - start) / (rungCap(ep.band) - start + 1)));
 }
+
+/** Spec §5: well-known concepts (ease ≥ 0.7) start one rung lower; applied at an episode's first judgment, when tags are known. */
+export function easeStart(ep: Episode, tags: string[], easeOf: (tag: string) => number | undefined): Episode {
+  if (ep.turns !== 0 || tags.length === 0) return ep;
+  if (!tags.every((t) => (easeOf(t) ?? 0) >= 0.7)) return ep;
+  return { ...ep, rung: Math.max(1, ep.rung - 1) };
+}

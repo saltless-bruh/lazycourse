@@ -29,4 +29,8 @@ describe("bandPrompt", () => {
       expect(p).toContain("[episode]");
     }
   });
+  it("tells the model to load and cite a tutor-<lang>-* skill for a rung 3 pointer (spec §7)", () => {
+    expect(bandPrompt("beginner")).toMatch(/tutor-<lang>-\*/);
+    expect(bandPrompt("beginner")).toMatch(/cite the skill('s)? name/i);
+  });
 });

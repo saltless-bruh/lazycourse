@@ -375,3 +375,28 @@ describe("M5 /tutor-learn", () => {
     expect(b.notes.at(-1)).toMatch(/no finished stuck episode/);
   });
 });
+
+describe("M5 ease start rung", () => {
+  it("a first judgment on concepts with ease ≥ 0.7 starts the episode one rung lower", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-ease-"));
+    const file = join(dir, "p.sqlite");
+    const seed = Profile.open(file);
+    seed.saveLanguage("rust", 20, {}, 1);
+    seed.addProject("rust", dir, "T", 1);
+    seed.recordEpisode({ language: "rust", project: dir, concept_tags: ["traits"], rungs_used: 1, turns: 1, opened: 1, closed: 2 }, 0.9);
+    seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ cwd: dir });
+      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
+      await b.events["turn_end"]({ type: "turn_end", message: assistant('hm\n```tutor-judgment\n{"judgment":"wrong","concept_tags":["traits"]}\n```') }, b.ctx);
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 2");
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+});

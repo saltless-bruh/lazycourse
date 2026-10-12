@@ -8,7 +8,7 @@ import { bandPrompt, systemText } from "./prompts.js";
 import { parseJudgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type ProjectRow } from "./profile.js";
 import { runStart } from "./start.js";
@@ -259,6 +259,12 @@ export default function (pi: ExtensionAPI): void {
     if (j) {
       pi.appendEntry("tutor_judgment", j);
       if (episode) {
+        if (episode.turns === 0 && project && profile) {
+          let known = new Map<string, number>();
+          const p = profile, lang = project.language;
+          profileWrite(() => { known = new Map(p.concepts(lang).map((c) => [c.tag, c.ease])); });
+          episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
+        }
         episode = applyJudgment(episode, j, Date.now());
         pi.appendEntry("tutor_episode", episode);
         if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
