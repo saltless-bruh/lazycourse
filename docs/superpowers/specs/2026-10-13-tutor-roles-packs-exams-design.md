@@ -140,9 +140,38 @@ The timer is soft: going over is recorded as late and still graded. The example 
 |---|---|
 | #2 prompt weight | a per-turn token budget: card and role ≤ ~600 tokens each; details live in skills; a "golden transcript" check verifies a given model follows the style, ladder and judgment rules |
 | #4 runtime errors | a failing `:TutorRun` / test run opens an episode carrying the trace; the cookbook's stack-trace recipe teaches reading it |
-| #6 memory across sessions | the per-turn context includes a short learner summary from the profile (strengths, recent mistakes, last exam) |
+| #6 memory across sessions | see §7.1 |
 | #7 feedback | `/tutor-feedback too-long\|too-vague\|too-much-help\|good` adjusts style and rung and is logged in the profile |
 | #13 deferred minors | M3–M5 minors fixed in M6 |
+
+### 7.1 Memory (decision C, 2026-10-13)
+
+Five Pi memory packages were reviewed from source (scores /40): `@pify/memory` 31, `@henryqw/pi-memory` 25, `@samfp/pi-memory` 24, `pi-memory` 24, `pi-hermes-memory` 24. None can be limited to tutor sessions. Two discard learner progress by design. Three write to stderr or the console, or add hidden model calls.
+
+**Tutor sessions: our own learner memory**, borrowing tested MIT parts:
+
+```
+extension writes (deterministic): episodes · exams · ease           ─┐
+model writes via ONE tool `tutor_remember` (guard allows by name):   ├─▶ profile.sqlite
+  types learner · feedback · project · reference; secret-scanned     │   memory table + FTS5
+model reads via `tutor_recall` (read-only search)                   ─┘
+session_start ──▶ frozen, capped snapshot ──▶ inside the `tutor` section
+```
+
+- From `@pify/memory`: the secret scanner (`secrets.ts`, with an added `nvapi-` pattern) and the full-text search approach.
+- From `@henryqw/pi-memory`: the frozen snapshot rendered into a system-prompt section at session start.
+- From `/claude-memory:structured-memory`: the four memory types and the "what not to save" rules, in a `tutor-memory` skill.
+- Each borrowed file keeps its LICENSE text and a credit line.
+- No hidden model calls. Writes happen only when the model calls `tutor_remember`, or when the extension records facts.
+
+**Plain `pi` sessions:** `@pify/memory` may be installed separately for general memory. Its tools are not on the tutor guard's allowlist, so it is inert inside tutor sessions.
+
+**Fallback: switch the tutor to `@pify/memory` if ours gets too complex.** That means any of:
+- the memory task grows past ~400 lines of production code;
+- it needs more than 2 new tools;
+- it misses its milestone's done-when check twice.
+
+If any of these trips, the tutor uses `@pify/memory` instead (allowlisting its 5 tool names), and our profile keeps only the numbers.
 
 ## 8. Data and files
 
@@ -154,7 +183,7 @@ pi-tutor/skills/                tutor-teaching-style, tutor-design-recipe, tutor
                                 (bundled with the package; LICENSE + credits for adapted ones)
 ~/.pi/agent/skills/tutor-<lang>-ref/   generated from DevDocs per installed version
 <project>/exam/<id>/{brief.md, examples.*, grade.md}
-profile.sqlite v2: exams, feedback tables; concept tags normalized per pack
+profile.sqlite v2: exams, feedback, memory (+ FTS5) tables; concept tags normalized per pack
 session entries: tutor_role, tutor_workflow, tutor_exam
 ```
 
@@ -163,7 +192,7 @@ session entries: tutor_role, tutor_workflow, tutor_exam
 | Phase | Deliverable | Done when |
 |---|---|---|
 | M5-finish | DevDocs reference + version detection (+ background download and progress) replaces the fixed source lists; then merge M5 | `:TutorDocs python` on this machine writes `tutor-python-ref` for 3.14 and a rung 3 hint cites it |
-| M6 roles | teaching-style section + skill (narrow diagrams), role files and injection, `:TutorPlan` workflow, `:TutorArchitect`, prompt budget + golden transcript, runtime-error episodes, learner summary, `/tutor-feedback`, M3–M5 minors | a beginner `:TutorPlan P1.T1` walks all six steps in the tmux check, with replies in the structure |
+| M6 roles | teaching-style section + skill (narrow diagrams), role files and injection, `:TutorPlan` workflow, `:TutorArchitect`, prompt budget + golden transcript, runtime-error episodes, tutor memory (§7.1: `tutor_remember`/`tutor_recall` + frozen snapshot), `/tutor-feedback`, M3–M5 minors | a beginner `:TutorPlan P1.T1` walks all six steps in the tmux check, with replies in the structure |
 | M7 packs | cards and cookbooks for 5 languages + editor pack; adapted expert skills via skill-creator with licenses and upstream versions; concept-tag vocabulary | a Python project's first turn shows the 3.14 card and a cookbook recipe is used at step 5 |
 | M8 exams | `:TutorRun` from README `run:`/`test:` + per-language test runners, exam-maker, examiner, soft timer, grades, profile v2, `:TutorProgress` | `:TutorExam small` → solve → `:TutorSubmit` produces `grade.md` with test evidence |
 
