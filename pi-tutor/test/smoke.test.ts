@@ -10,6 +10,16 @@ describe("extension wiring", () => {
     expect(Object.keys(commands)).toEqual(expect.arrayContaining(["tutor-level", "tutor-status"]));
   });
 
+  it("is inert outside tutor mode: no handlers, no commands without PI_TUTOR=1", () => {
+    const saved = process.env.PI_TUTOR; delete process.env.PI_TUTOR;
+    try {
+      const { pi, events, commands } = fakePi();
+      extension(pi as never);
+      expect(Object.keys(events)).toEqual([]);
+      expect(Object.keys(commands)).toEqual([]);
+    } finally { process.env.PI_TUTOR = saved; }
+  });
+
   it("starts detached at the default level", async () => {
     const { widgets, statuses } = await boot();
     expect(widgets["tutor"]?.[1]).toBe("detached: pi started outside Neovim");

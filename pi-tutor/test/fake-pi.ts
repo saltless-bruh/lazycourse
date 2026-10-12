@@ -1,5 +1,8 @@
 import extension from "../extensions/tutor/index.js";
 
+// The extension only activates when nvim-tutor started Pi (Task 6); tests are tutor mode.
+process.env.PI_TUTOR = "1";
+
 export type Handler = (...a: unknown[]) => unknown;
 
 export function fakePi() {

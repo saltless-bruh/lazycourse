@@ -38,6 +38,8 @@ function restoreEpisode(ctx: ExtensionContext): Episode | null {
 }
 
 export default function (pi: ExtensionAPI): void {
+  // pi-tutor is installed globally; only the Pi that nvim-tutor starts is the tutor.
+  if (process.env.PI_TUTOR !== "1") return;
   const state: TutorState = { state: "idle", connected: false };
   let link: NvimLink | null = null;
   let ui: Ui | null = null;

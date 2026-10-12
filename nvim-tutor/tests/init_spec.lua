@@ -14,6 +14,10 @@ describe("tutor.init", function()
     assert.equals(job, t:job_id())
   end)
 
+  it("starts pi in tutor mode (PI_TUTOR=1)", function()
+    assert.equals("1", require("tutor").state.term.opts.env.PI_TUTOR)
+  end)
+
   it("wrappers type slash commands into the terminal", function()
     local tutor = require("tutor")
     vim.cmd("Tutor")
