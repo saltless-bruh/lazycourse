@@ -1,0 +1,32 @@
+import { describe, it, expect } from "vitest";
+import { parseJudgment } from "../extensions/tutor/judgment.js";
+
+const block = (json: string) => "Some explanation.\n\n```tutor-judgment\n" + json + "\n```\n";
+
+describe("parseJudgment", () => {
+  it("parses a well-formed trailing block", () => {
+    const j = parseJudgment(block('{"judgment":"correct","concept_tags":["ownership"],"task_done_ids":["P1.T1"],"episode_closed":true}'));
+    expect(j).toEqual({ judgment: "correct", concept_tags: ["ownership"], task_done_ids: ["P1.T1"], episode_closed: true });
+  });
+  it("fills missing optional fields with defaults", () => {
+    expect(parseJudgment(block('{"judgment":"partial"}'))).toEqual({ judgment: "partial", concept_tags: [], task_done_ids: [], episode_closed: false });
+  });
+  it("returns null when there is no block", () => {
+    expect(parseJudgment("just prose")).toBeNull();
+    expect(parseJudgment("```json\n{\"judgment\":\"correct\"}\n```")).toBeNull();
+  });
+  it("returns null on malformed JSON or an unknown judgment value", () => {
+    expect(parseJudgment(block("{judgment: correct}"))).toBeNull();
+    expect(parseJudgment(block('{"judgment":"excellent"}'))).toBeNull();
+    expect(parseJudgment(block('"a string"'))).toBeNull();
+  });
+  it("uses the last block when there are several", () => {
+    const text = block('{"judgment":"wrong"}') + "more\n" + block('{"judgment":"none"}');
+    expect(parseJudgment(text)?.judgment).toBe("none");
+  });
+  it("drops non-string entries from the tag arrays", () => {
+    const j = parseJudgment(block('{"judgment":"correct","concept_tags":["a",1,null],"task_done_ids":[2,"P1.T2"]}'));
+    expect(j?.concept_tags).toEqual(["a"]);
+    expect(j?.task_done_ids).toEqual(["P1.T2"]);
+  });
+});
