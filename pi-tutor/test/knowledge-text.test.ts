@@ -3,8 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { htmlToText, toText, cap, MAX_REF_CHARS } from "../extensions/tutor/knowledge/text.js";
-import { SOURCES, topicsFor, sourcesPath } from "../extensions/tutor/knowledge/sources.js";
-import { LANGUAGES } from "../extensions/tutor/start.js";
+import { overrideFor, sourcesPath } from "../extensions/tutor/knowledge/sources.js";
 
 describe("htmlToText", () => {
   it("drops scripts and styles, keeps headings, list items, paragraphs and entities", () => {
@@ -36,37 +35,19 @@ describe("toText / cap", () => {
   });
 });
 
-describe("sources", () => {
+describe("overrideFor (sources.json pins a DevDocs slug)", () => {
   const saved = process.env.PI_TUTOR_SOURCES;
   afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_SOURCES; else process.env.PI_TUTOR_SOURCES = saved; });
-
-  it("starts the Lua stdlib reference at §6, past the 120k cap's reach (M5 final review I2)", () => {
-    expect(SOURCES.lua.find((t) => t.slug === "stdlib")?.from).toBe("The Standard Libraries");
-  });
-
-  it("covers every built-in /tutor-start language with valid slugs and http(s) urls", () => {
-    for (const lang of LANGUAGES) {
-      const topics = SOURCES[lang];
-      expect(topics?.length, lang).toBeGreaterThan(0);
-      for (const t of topics) {
-        expect(t.slug).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
-        expect(t.urls.length).toBeGreaterThan(0);
-        for (const u of t.urls) expect(u).toMatch(/^https?:\/\//);
-      }
-    }
-  });
-  it("uses the override file per language, keeps built-ins otherwise, and ignores a missing or broken file", () => {
+  it("returns a valid slug per language and ignores missing, broken or old-format files", () => {
     const file = join(mkdtempSync(join(tmpdir(), "pitutor-src-")), "sources.json");
     process.env.PI_TUTOR_SOURCES = file;
     expect(sourcesPath()).toBe(file);
-    expect(topicsFor("rust")).toEqual(SOURCES.rust); // missing file
-    writeFileSync(file, "{ not json");
-    expect(topicsFor("rust")).toEqual(SOURCES.rust); // broken file
-    writeFileSync(file, JSON.stringify({ rust: [{ slug: "mine", title: "Mine", urls: ["http://localhost/x.md"] }], zig: [], cobol: [{ slug: "Bad Slug", title: "x", urls: [] }] }));
-    expect(topicsFor("rust")).toEqual([{ slug: "mine", title: "Mine", urls: ["http://localhost/x.md"] }]);
-    expect(topicsFor("python")).toEqual(SOURCES.python);
-    expect(topicsFor("zig")).toEqual([]);
-    expect(topicsFor("cobol")).toEqual([]); // invalid entries are dropped
-    expect(topicsFor("haskell")).toBeUndefined();
+    expect(overrideFor("python")).toBeUndefined(); // missing file
+    writeFileSync(file, "{ nope");
+    expect(overrideFor("python")).toBeUndefined();
+    writeFileSync(file, JSON.stringify({ python: "python~3.12", rust: [{ slug: "old-format" }], go: "bad slug!" }));
+    expect(overrideFor("python")).toBe("python~3.12");
+    expect(overrideFor("rust")).toBeUndefined();
+    expect(overrideFor("go")).toBeUndefined();
   });
 });

@@ -1,0 +1,71 @@
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { Cancelled } from "../progress.js";
+import { buildReference, chooseBundle, referenceSkill, type CatalogEntry, type DevdocsIndex } from "./devdocs.js";
+
+// Download a DevDocs bundle into ~/.pi/agent/skills/tutor-<lang>-ref (spec 2026-10-13 §5.2).
+export interface RefMeta { slug: string; release: string; mtime: number; installed: string | null; note: string }
+export interface RefDeps { fetch: typeof fetch; root: string; installed: string | null; devdocsType: string; override?: string; force?: boolean; signal?: AbortSignal; timeoutMs?: number }
+export interface RefResult { status: "fetched" | "cached"; name: string; meta: RefMeta; entries: number }
+
+export function skillsRoot(): string {
+  return join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "skills");
+}
+
+/** PI_TUTOR_DEVDOCS: one base URL serving docs.json and <slug>/{index,db}.json (offline mirror; tests). */
+export function devdocsUrls(): { catalog: string; documents: string } {
+  const b = process.env.PI_TUTOR_DEVDOCS?.replace(/\/+$/, "");
+  return b ? { catalog: `${b}/docs.json`, documents: b } : { catalog: "https://devdocs.io/docs.json", documents: "https://documents.devdocs.io" };
+}
+
+export function referenceInfo(root: string, language: string): RefMeta | null {
+  try { return JSON.parse(readFileSync(join(root, `tutor-${language}-ref`, ".devdocs.json"), "utf8")) as RefMeta; } catch { return null; }
+}
+
+async function getJson<T>(url: string, d: RefDeps): Promise<T> {
+  const timeout = AbortSignal.timeout(d.timeoutMs ?? 300_000);
+  const signal = d.signal ? AbortSignal.any([d.signal, timeout]) : timeout;
+  try {
+    const res = await d.fetch(url, { signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    return (await res.json()) as T;
+  } catch (e) {
+    if (d.signal?.aborted) throw new Cancelled();
+    if (e instanceof Error && e.name === "TimeoutError") throw new Error(`timed out fetching ${url}`);
+    throw e;
+  }
+}
+
+export async function fetchReference(language: string, d: RefDeps): Promise<RefResult> {
+  const urls = devdocsUrls();
+  const catalog = await getJson<CatalogEntry[]>(urls.catalog, d);
+  const choice = chooseBundle(catalog, d.devdocsType, d.installed, d.override);
+  if (!choice) throw new Error(`DevDocs has no ${language} documentation`);
+  const name = `tutor-${language}-ref`;
+  const meta: RefMeta = { slug: choice.entry.slug, release: choice.entry.release, mtime: choice.entry.mtime, installed: d.installed, note: choice.note };
+  const prev = referenceInfo(d.root, language);
+  if (!d.force && prev && prev.slug === meta.slug && prev.mtime === meta.mtime) return { status: "cached", name, meta: prev, entries: 0 };
+
+  const docs = `${urls.documents}/${choice.entry.slug}`;
+  const index = await getJson<DevdocsIndex>(`${docs}/index.json?${choice.entry.mtime}`, d);
+  const db = await getJson<Record<string, string>>(`${docs}/db.json?${choice.entry.mtime}`, d);
+  const built = await buildReference(index, db, { signal: d.signal });
+  if (d.signal?.aborted) throw new Cancelled();
+
+  // Dot-prefixed temp folder: Pi skips it and cachedSkills-style scans never match it.
+  const dir = join(d.root, name);
+  const tmp = join(d.root, `.${name}.tmp-${process.pid}`);
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  for (const f of built.files) {
+    mkdirSync(dirname(join(tmp, f.path)), { recursive: true });
+    writeFileSync(join(tmp, f.path), f.text);
+  }
+  writeFileSync(join(tmp, "INDEX.md"), built.index);
+  writeFileSync(join(tmp, "SKILL.md"), referenceSkill(language, choice, d.installed, index));
+  writeFileSync(join(tmp, ".devdocs.json"), `${JSON.stringify(meta, null, 2)}\n`);
+  rmSync(dir, { recursive: true, force: true });
+  renameSync(tmp, dir);
+  return { status: "fetched", name, meta, entries: built.entries };
+}

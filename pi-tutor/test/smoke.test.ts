@@ -307,7 +307,7 @@ describe("M4 review fixes", () => {
     b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
     await b.commands["tutor-start"].handler("python", b.ctx);
     const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
-    expect(shown).toHaveLength(2);
+    expect(shown).toHaveLength(3); // suggest + scaffold model calls, then the DevDocs fetch (M5-finish)
     for (const c of shown) expect(c).toBeInstanceOf(BorderedLoader);
     expect(signals.length).toBe(2);
     expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
@@ -401,63 +401,58 @@ describe("M5 ease start rung", () => {
   });
 });
 
-describe("M5 /tutor-docs and /tutor-start docs", () => {
-  async function docServer() {
+describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
+  async function mirror() {
     const { createServer } = await import("node:http");
-    const server = createServer((req, res) => { if (req.url === "/style.md") res.end("# Naming\nsnake_case"); else { res.statusCode = 404; res.end(); } });
+    const catalog = [{ name: "Python", slug: "python~3.14", type: "python", version: "3.14", release: "3.14.8", mtime: 7, db_size: 1, attribution: "&copy; PSF" }];
+    const server = createServer((req, res) => {
+      const u = (req.url ?? "").split("?")[0];
+      if (u === "/docs.json") return res.end(JSON.stringify(catalog));
+      if (u === "/python~3.14/index.json") return res.end(JSON.stringify({ entries: [{ name: "len", path: "library/functions#len", type: "Built-in" }], types: [{ name: "Built-in", count: 1, slug: "b" }] }));
+      if (u === "/python~3.14/db.json") return res.end(JSON.stringify({ "library/functions": '<h1>Built-in</h1><p id="len">len(s)</p>' }));
+      res.statusCode = 404; res.end();
+    });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    const port = (server.address() as { port: number }).port;
-    return { server, url: `http://127.0.0.1:${port}/style.md` };
-  }
-  async function withSources(map: Record<string, unknown>, fn: () => Promise<void>) {
-    const { writeFileSync, mkdtempSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const saved = process.env.PI_TUTOR_SOURCES;
-    process.env.PI_TUTOR_SOURCES = join(mkdtempSync(join(tmpdir(), "pitutor-src-")), "s.json");
-    writeFileSync(process.env.PI_TUTOR_SOURCES, JSON.stringify(map));
-    try { await fn(); } finally { process.env.PI_TUTOR_SOURCES = saved; }
+    return { server, base: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
   }
 
-  it("/tutor-docs fetches the language's docs into skills and reloads Pi", async () => {
+  it("/tutor-docs detects the installed version, writes tutor-python-ref, reloads Pi", async () => {
     const { existsSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const { server, url } = await docServer();
+    const { server, base } = await mirror();
+    const saved = process.env.PI_TUTOR_DEVDOCS;
+    process.env.PI_TUTOR_DEVDOCS = base;
     try {
-      await withSources({ rust: [{ slug: "style", title: "Rust naming", urls: [url] }] }, async () => {
-        const b = await boot();
-        b.replies.push(JSON.stringify({ skills: [{ slug: "style", description: "Rust naming. Use when naming things." }] }));
-        await b.commands["tutor-docs"].handler("rust", b.ctx);
-        expect(existsSync(join(process.env.PI_CODING_AGENT_DIR!, "skills", "tutor-rust-style", "SKILL.md"))).toBe(true);
-        expect(b.notes.at(-1)).toMatch(/tutor-rust-style/);
-        expect(b.reloads.n).toBe(1);
-      });
-    } finally { server.close(); }
+      const b = await boot();
+      b.execOut["python3"] = { stdout: "Python 3.14.8\n", stderr: "", code: 0 };
+      await b.commands["tutor-docs"].handler("python", b.ctx);
+      expect(existsSync(join(process.env.PI_CODING_AGENT_DIR!, "skills", "tutor-python-ref", "INDEX.md"))).toBe(true);
+      expect(b.notes.at(-1)).toMatch(/python docs: tutor-python-ref \(3\.14\.8, 1 entries\)/);
+      expect(b.reloads.n).toBe(1);
+    } finally { process.env.PI_TUTOR_DEVDOCS = saved; server.close(); }
   });
 
-  it("/tutor-docs for a language without sources says the tutor relies on model knowledge", async () => {
+  it("/tutor-docs for a language without DevDocs support says the tutor relies on model knowledge", async () => {
     const b = await boot();
     await b.commands["tutor-docs"].handler("cobol", b.ctx);
     expect(b.notes.at(-1)).toMatch(/no cached docs for cobol/);
     expect(b.reloads.n).toBe(0);
   });
 
-  it("/tutor-start fetches docs for a new language before switching; a fetch failure only warns", async () => {
+  it("/tutor-start fetches docs before switching; an unreachable DevDocs only warns", async () => {
     const { mkdtempSync, existsSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    await withSources({ go: [{ slug: "style", title: "Go style", urls: ["http://127.0.0.1:9/never"] }] }, async () => {
-      const root = mkdtempSync(join(tmpdir(), "pitutor-startdocs-"));
-      const b = await boot({ cwd: root });
-      b.replies.push(
-        JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
-        JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.go", run_cmd: "go run ./src" }),
-      );
-      b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
-      await b.commands["tutor-start"].handler("go", b.ctx);
-      expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
-      expect(b.notes.some((n) => /go docs: nothing fetched/.test(n))).toBe(true);
-      expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
-    });
+    const root = mkdtempSync(join(tmpdir(), "pitutor-startdocs-"));
+    const b = await boot({ cwd: root });
+    b.replies.push(
+      JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
+      JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.go", run_cmd: "go run ./src" }),
+    );
+    b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
+    await b.commands["tutor-start"].handler("go", b.ctx);
+    expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
+    expect(b.notes.some((n) => /go docs fetch failed/.test(n))).toBe(true);
+    expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
   });
 });

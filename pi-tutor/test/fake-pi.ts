@@ -9,9 +9,10 @@ process.env.PI_TUTOR_PROFILE ??= ":memory:"; // each boot gets a private in-memo
 // Never touch the real ~/.pi/agent or the network: temp skills root, and no built-in doc sources.
 const __dir = __mk(__join(__tmp(), "pitutor-agent-"));
 process.env.PI_CODING_AGENT_DIR ??= __dir;
+process.env.PI_TUTOR_DEVDOCS ??= "http://127.0.0.1:9"; // refused: tests never reach devdocs.io
 if (!process.env.PI_TUTOR_SOURCES) {
   process.env.PI_TUTOR_SOURCES = __join(__dir, "sources.json");
-  __wf(process.env.PI_TUTOR_SOURCES, JSON.stringify({ python: [], rust: [], go: [], typescript: [], lua: [] }));
+  __wf(process.env.PI_TUTOR_SOURCES, "{}");
 }
 
 export type Handler = (...a: unknown[]) => unknown;
@@ -21,15 +22,17 @@ export function fakePi() {
   const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
   const entries: { type: string; data: unknown }[] = [];
   const sent: { text: string; opts: unknown }[] = [];
+  const execOut: Record<string, { stdout: string; stderr: string; code: number }> = {};
   const skills: { path: string }[] = [];
   const pi = {
     on: (name: string, h: Handler) => { events[name] = h; return () => {}; },
     registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
     appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); },
     sendUserMessage: (text: string, opts: unknown) => { sent.push({ text, opts }); },
+    exec: async (command: string) => ({ ...(execOut[command] ?? { stdout: "", stderr: `${command}: not found`, code: 127 }), killed: false }),
     getCommands: () => skills.map((s) => ({ name: "skill:x", source: "skill", sourceInfo: { path: s.path } })),
   };
-  return { pi, events, commands, entries, sent, skills };
+  return { pi, events, commands, entries, sent, skills, execOut };
 }
 
 export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
