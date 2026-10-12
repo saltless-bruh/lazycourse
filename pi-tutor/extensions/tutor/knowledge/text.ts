@@ -1,7 +1,11 @@
 // Fetched documentation → plain text for skill references (spec §7).
 export const MAX_REF_CHARS = 120_000;
 
-const NAMED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
+const NAMED: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ",
+  copy: "©", ndash: "–", mdash: "—", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”",
+  le: "≤", ge: "≥", sect: "§", middot: "·", pi: "π", hellip: "…", times: "×", rarr: "→",
+};
 
 function entity(match: string, code: string): string {
   if (code[0] === "#") {
