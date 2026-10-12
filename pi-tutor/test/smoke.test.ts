@@ -326,3 +326,52 @@ describe("M5 skill reads", () => {
     expect(await call("/home/u/.pi/agent/auth.json")).toMatchObject({ block: true });
   });
 });
+
+describe("M5 /tutor-learn", () => {
+  const closedEp = { id: "ep-1", trigger: { kind: "error", path: "/p/main.rs", line: 4, msg: "borrow of moved value" }, band: "beginner", rung: 4, opened: 1, turns: 2, concept_tags: ["ownership"], closed: 5, closeReason: "judged" };
+  const branch = [
+    { type: "custom", customType: "tutor_episode", data: closedEp },
+    { type: "message", message: { role: "user", content: "why is s moved?" } },
+  ];
+  const draft = JSON.stringify({ slug: "moved-string", description: "Moving a String into a call. Use when the learner sees borrow of moved value.", body: "## Fix\nBorrow with &s." });
+
+  it("drafts from the last closed episode, shows the editor, saves the accepted text, reloads Pi", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const b = await boot({ branch });
+    b.replies.push(draft);
+    await b.commands["tutor-learn"].handler("", b.ctx);
+    expect(b.editorSeen[0]).toContain("name: tutor-general-learned-moved-string");
+    const file = join(process.env.PI_CODING_AGENT_DIR!, "skills", "tutor-general-learned-moved-string", "SKILL.md");
+    expect(readFileSync(file, "utf8")).toBe(b.editorSeen[0]);
+    expect(b.reloads.n).toBe(1);
+    expect(b.notes.at(-1)).toMatch(/saved .*tutor-general-learned-moved-string/);
+  });
+
+  it("Esc in the editor discards: nothing written, no reload", async () => {
+    const b = await boot({ branch });
+    b.replies.push(JSON.stringify({ slug: "discarded-one", description: "x.", body: "y" }));
+    b.edits.push(undefined);
+    await b.commands["tutor-learn"].handler("", b.ctx);
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    expect(existsSync(join(process.env.PI_CODING_AGENT_DIR!, "skills", "tutor-general-learned-discarded-one"))).toBe(false);
+    expect(b.reloads.n).toBe(0);
+    expect(b.notes.at(-1)).toMatch(/discarded/);
+  });
+
+  it("an edit that breaks the frontmatter is refused with the reason", async () => {
+    const b = await boot({ branch });
+    b.replies.push(draft);
+    b.edits.push("---\nname: Not Valid\ndescription: x\n---\n");
+    await b.commands["tutor-learn"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/not saved: .*name/);
+    expect(b.reloads.n).toBe(0);
+  });
+
+  it("says so when there is no finished episode yet", async () => {
+    const b = await boot();
+    await b.commands["tutor-learn"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/no finished stuck episode/);
+  });
+});

@@ -39,10 +39,14 @@ export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
   const busy = { value: false };
   const script: (string | undefined)[] = [];
   const replies: string[] = [];
+  const edits: (string | undefined)[] = [];
+  const editorSeen: string[] = [];
+  const reloads = { n: 0 };
   return {
     ctx: {
       hasUI: true, cwd, mode: "tui",
       isIdle: () => !busy.value,
+      reload: async () => { reloads.n++; },
       sessionManager: { getBranch: () => branch },
       model: { id: "fake-model" },
       modelRegistry: {
@@ -55,9 +59,10 @@ export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
         notify: (m: string) => notes.push(m),
         select: async () => script.shift(),
         input: async () => script.shift(),
+        editor: async (_title: string, prefill?: string) => { editorSeen.push(prefill ?? ""); return edits.length ? edits.shift() : prefill; },
       },
     },
-    widgets, statuses, notes, busy, script, replies,
+    widgets, statuses, notes, busy, script, replies, edits, editorSeen, reloads,
   };
 }
 

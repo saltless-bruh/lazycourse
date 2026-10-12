@@ -1,0 +1,77 @@
+import { describe, it, expect } from "vitest";
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill } from "../extensions/tutor/learn.js";
+import { openEpisode, closeEpisode } from "../extensions/tutor/ladder.js";
+
+const ep = (closed: boolean) => {
+  const e = { ...openEpisode({ kind: "error", path: "/p/src/main.rs", line: 4, msg: "borrow of moved value" }, "beginner", 1), rung: 4, turns: 3, concept_tags: ["ownership", "move-semantics"] };
+  return closed ? closeEpisode(e, "judged", 9) : e;
+};
+const entry = (data: unknown) => ({ type: "custom", customType: "tutor_episode", data });
+const msg = (role: string, content: unknown) => ({ type: "message", message: { role, content } });
+
+describe("lastClosedEpisode / transcript", () => {
+  it("finds the newest closed episode on the branch", () => {
+    expect(lastClosedEpisode([entry(ep(true)), entry(ep(false))])).toMatchObject({ closeReason: "judged" });
+    expect(lastClosedEpisode([entry(ep(false))])).toBeNull();
+    expect(lastClosedEpisode([])).toBeNull();
+  });
+  it("keeps the newest user/assistant text within the budget and skips tool calls and custom messages", () => {
+    const branch = [
+      msg("user", "old question"),
+      msg("assistant", [{ type: "text", text: "old answer" }, { type: "toolCall", name: "read" }]),
+      { type: "message", message: { role: "custom", customType: "tutor_editor", content: "[editor] secret" } },
+      msg("user", [{ type: "text", text: "why moved?" }]),
+      msg("assistant", [{ type: "text", text: "because String is not Copy" }]),
+    ];
+    const t = transcript(branch, 10_000);
+    expect(t).toBe("learner: old question\ntutor: old answer\nlearner: why moved?\ntutor: because String is not Copy");
+    expect(transcript(branch, 60)).toBe("learner: why moved?\ntutor: because String is not Copy"); // 54 chars; the older answer does not fit
+  });
+});
+
+describe("learnPrompt / checkLearned / renderLearned", () => {
+  it("puts the episode facts and conversation into the prompt", () => {
+    const p = learnPrompt("rust", ep(true), "learner: why?");
+    for (const s of ["language: rust", 'error "borrow of moved value" at main.rs:4', "ownership, move-semantics", "rung 4 (pseudocode)", "3 turn(s)", "learner: why?"]) expect(p).toContain(s);
+  });
+  it("accepts a well-formed draft and rejects bad slugs, multi-line descriptions and empty bodies", () => {
+    const good = { slug: "moved-string", description: "Moving a String into a function. Use when the learner sees 'borrow of moved value'.", body: "## Misconception\n..." };
+    expect(checkLearned(good)).toEqual(good);
+    expect(() => checkLearned({ ...good, slug: "Moved String" })).toThrow(/slug/);
+    expect(() => checkLearned({ ...good, description: "a\nb" })).toThrow(/description/);
+    expect(() => checkLearned({ ...good, body: " " })).toThrow(/body/);
+  });
+  it("renders a SKILL.md that parses back to its name and description", () => {
+    const text = renderLearned("rust", { slug: "moved-string", description: "Moving a String: use clone or borrow.", body: "## Fix pattern\nBorrow with &." });
+    expect(text.startsWith("---\nname: tutor-rust-learned-moved-string\n")).toBe(true);
+    expect(parseSkillHeader(text)).toEqual({ name: "tutor-rust-learned-moved-string", description: "Moving a String: use clone or borrow." });
+  });
+});
+
+describe("parseSkillHeader", () => {
+  it("refuses a draft edited into invalid frontmatter, with a reason", () => {
+    expect(() => parseSkillHeader("no frontmatter")).toThrow(/frontmatter/);
+    expect(() => parseSkillHeader("---\ndescription: x\n---\nbody")).toThrow(/name/);
+    expect(() => parseSkillHeader("---\nname: Bad Name\ndescription: x\n---\n")).toThrow(/name/);
+    expect(() => parseSkillHeader("---\nname: a--b\ndescription: x\n---\n")).toThrow(/name/);
+    expect(() => parseSkillHeader("---\nname: ok-name\n---\n")).toThrow(/description/);
+    expect(parseSkillHeader('---\nname: ok-name\ndescription: "quoted: yes"\n---\n')).toEqual({ name: "ok-name", description: "quoted: yes" });
+  });
+});
+
+describe("saveSkill", () => {
+  it("writes SKILL.md in a new folder and never overwrites an existing skill", () => {
+    const root = mkdtempSync(join(tmpdir(), "pitutor-learn-"));
+    mkdirSync(join(root, "tutor-rust-learned-x"));
+    writeFileSync(join(root, "tutor-rust-learned-x", "SKILL.md"), "mine");
+    const a = saveSkill(root, "tutor-rust-learned-x", "---\nname: tutor-rust-learned-x\n---\nnew");
+    expect(a).toBe(join(root, "tutor-rust-learned-x-2"));
+    expect(readFileSync(join(root, "tutor-rust-learned-x", "SKILL.md"), "utf8")).toBe("mine");
+    expect(readFileSync(join(a, "SKILL.md"), "utf8")).toContain("name: tutor-rust-learned-x-2");
+    expect(saveSkill(root, "tutor-rust-learned-x", "---\nname: tutor-rust-learned-x\n---\n")).toBe(join(root, "tutor-rust-learned-x-3"));
+    expect(readdirSync(root).sort()).toEqual(["tutor-rust-learned-x", "tutor-rust-learned-x-2", "tutor-rust-learned-x-3"]);
+  });
+});

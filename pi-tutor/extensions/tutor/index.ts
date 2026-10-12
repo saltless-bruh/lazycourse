@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
 import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
-import { bandPrompt } from "./prompts.js";
+import { bandPrompt, systemText } from "./prompts.js";
 import { parseJudgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
@@ -12,8 +12,10 @@ import { episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, reban
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type ProjectRow } from "./profile.js";
 import { runStart } from "./start.js";
-import type { Complete } from "./llm.js";
-import { withLoader, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
+import { completeJson, type Complete } from "./llm.js";
+import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
+import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
+import { skillsRoot } from "./knowledge/fetch.js";
 
 type Ui = ExtensionContext["ui"];
 
@@ -50,25 +52,31 @@ function realCwd(cwd: string): string {
 }
 
 
-/**
- * Pi's own model as a JSON-call function for the suggester and scaffold (spec §6). In the TUI each
- * call shows Pi's BorderedLoader with `label()` and Esc to cancel; setWorkingMessage alone is
- * invisible outside an agent turn.
- */
-function modelComplete(ctx: ExtensionContext, label: () => string): Complete {
-  const call = async (system: string, user: string, signal: AbortSignal) => {
+/** Pi's model as a plain JSON-call function bound to one abort signal. */
+function rawComplete(ctx: ExtensionContext, signal: AbortSignal): Complete {
+  return async (system, user) => {
     const model = ctx.model;
     if (!model) throw new Error("no model selected");
     const r = await ctx.modelRegistry.complete(model, { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] }, { signal });
     if (r.stopReason !== "stop") throw new Error(`model stopped (${r.stopReason})${r.errorMessage ? `: ${r.errorMessage}` : ""}`);
     return r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
   };
-  return async (system, user) => {
-    if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") return call(system, user, AbortSignal.timeout(MODEL_TIMEOUT_MS));
-    const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
-    const make = (tui: unknown, theme: unknown, message: string) => new BorderedLoader(tui as never, theme as never, message, { cancellable: true });
-    return withLoader(ctx.ui.custom.bind(ctx.ui) as unknown as CustomUi, make, label(), (signal) => call(system, user, signal), MODEL_TIMEOUT_MS);
-  };
+}
+
+/**
+ * Run slow work behind Pi's BorderedLoader (Esc cancels) in the TUI, or just a timeout elsewhere;
+ * setWorkingMessage alone is invisible outside an agent turn.
+ */
+async function withProgress<T>(ctx: ExtensionContext, label: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") return run(AbortSignal.timeout(MODEL_TIMEOUT_MS));
+  const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
+  const make = (tui: unknown, theme: unknown, message: string) => new BorderedLoader(tui as never, theme as never, message, { cancellable: true });
+  return withLoader(ctx.ui.custom.bind(ctx.ui) as unknown as CustomUi, make, label, run, MODEL_TIMEOUT_MS);
+}
+
+/** Each model call gets its own loader showing `label()` (spec §6 suggest/scaffold). */
+function modelComplete(ctx: ExtensionContext, label: () => string): Complete {
+  return (system, user) => withProgress(ctx, label(), (signal) => rawComplete(ctx, signal)(system, user));
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -317,6 +325,31 @@ export default function (pi: ExtensionAPI): void {
       } else {
         ctx.ui.notify(`scaffolded ${r.title} in ${r.dir}. Continue with: cd ${r.dir} && pi`, "info");
       }
+    },
+  });
+
+  pi.registerCommand("tutor-learn", {
+    description: "Draft a skill from the last finished stuck episode; edit it, then submit to keep or Esc to discard",
+    handler: async (_args, ctx) => {
+      const branch = ctx.sessionManager.getBranch() as unknown[];
+      const ep = lastClosedEpisode(branch);
+      if (!ep) { ctx.ui.notify("no finished stuck episode to learn from yet", "info"); return; }
+      if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
+      const language = project?.language ?? (state.language && /^[a-z0-9]+$/.test(state.language) ? state.language : "general");
+      let draft: Learned;
+      try {
+        draft = await completeJson(modelComplete(ctx, () => "tutor: drafting a skill…"), systemText("learn"), learnPrompt(language, ep, transcript(branch)), checkLearned);
+      } catch (e) {
+        ctx.ui.notify(e instanceof Cancelled ? "tutor-learn cancelled" : `tutor-learn failed: ${e instanceof Error ? e.message : String(e)}`, e instanceof Cancelled ? "info" : "error");
+        return;
+      }
+      const edited = await ctx.ui.editor("Learned skill: edit, submit to save, Esc to discard", renderLearned(language, draft));
+      if (edited === undefined) { ctx.ui.notify("learned skill discarded", "info"); return; }
+      let header: { name: string };
+      try { header = parseSkillHeader(edited); } catch (e) { ctx.ui.notify(`not saved: ${e instanceof Error ? e.message : String(e)}`, "error"); return; }
+      const dir = saveSkill(skillsRoot(), header.name, edited);
+      ctx.ui.notify(`saved ${dir}; reloading skills`, "info");
+      await ctx.reload();
     },
   });
 
