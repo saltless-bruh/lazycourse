@@ -1,8 +1,9 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** living document (rev 3, 2026-10-12: Pi's own TUI in a terminal split,
-extension is a Neovim RPC client). Personal tool; expect frequent revision.
+**Status:** living document (rev 4, 2026-10-12: M2 editor context as a hidden
+message, level persistence; rev 3: Pi's own TUI in a terminal split, extension
+is a Neovim RPC client). Personal tool; expect frequent revision.
 
 ## 1. Purpose
 
@@ -143,17 +144,22 @@ The slider is one integer 0–100 stored per language in the profile.
 Within a band the number scales idle thresholds linearly between the
 band's neighbours and sets the starting rung: beginner 3, intermediate
 2, pro 1. The slider can change mid-session and takes effect on the
-next turn. Snapshot sending is gated in Lua: outside the beginner band
-the `snapshot` signal is never emitted.
+next turn.
 
 Implementation: `before_agent_start` selects the band prompt section
-from `pi-tutor/prompts/system/<band>.md` and sets
-`systemPromptOptions` sections; it never replaces Pi's whole prompt, so
-Pi's own skill and instruction loading keeps working. It also *pulls*
-editor context for the turn by band: beginner gets the whole current
-buffer plus diagnostics; intermediate and pro get diagnostics and the
-40 lines around the cursor. Nothing is pulled while Pi is idle. Only
-buffers whose path is inside the project root are ever read.
+from `pi-tutor/prompts/system/<band>.md` (plus the shared
+`judgment.md` turn protocol) and sets `systemPromptOptions` sections;
+it never replaces Pi's whole prompt, so Pi's own skill and instruction
+loading keeps working. It also *pulls* editor context for the turn by
+band and returns it from `before_agent_start` as a hidden custom
+message (`tutor_editor`, `display: false`): beginner gets the whole
+current buffer (capped at 400 lines) plus diagnostics; intermediate and
+pro get diagnostics and the 40 lines around the cursor. Nothing is
+pulled while Pi is idle. Only buffers whose path is inside the project
+root are ever read. The level defaults to 50 until `/tutor-level` or
+the profile sets it, and is persisted as a `tutor_level` session entry
+that `session_start` restores. Idle and error thresholds interpolate
+linearly between band midpoints (17, 50, 83) and clamp outside.
 
 ## 5. Hint ladder and stuck episodes
 
