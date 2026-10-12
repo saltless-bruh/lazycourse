@@ -1,7 +1,8 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** living document (rev 5, 2026-10-12: M3 stuck rules, chat episodes,
+**Status:** living document (rev 6, 2026-10-12: M4 interview choices, switch into the
+project after scaffold, ease formula; rev 5, 2026-10-12: M3 stuck rules, chat episodes,
 one nudge per episode, guard blocks bash, tutor mode only under `PI_TUTOR=1`;
 rev 4: M2 editor context as a hidden
 message, level persistence; rev 3: Pi's own TUI in a terminal split, extension
@@ -255,6 +256,11 @@ Scaffold, written by the extension only inside the chosen directory:
   `task_done_ids`; it never edits `src/`.
 - The three spec files come from one structured call so they stay
   consistent.
+- M4 rulings: the interview asks experience, familiarity and size as choices (they set the
+  starting level: familiarity 15/45/80, experience −10/0/+5/+10) and languages known and goal as
+  free text. After scaffolding, `require("tutor").switch(dir, "spec/tasks.md")` cds Neovim into
+  the project and restarts Pi there, so the tool guard, `AGENTS.md`, and the editor root all
+  follow. Ease per concept is the mean of episode scores `1 − (rung − start)/(cap − start + 1)`.
 
 ## 7. Knowledge base: skills, instructions, workflows
 

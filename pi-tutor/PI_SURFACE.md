@@ -30,6 +30,11 @@ Re-verify every line when bumping versions.
   `guard.ts` mirrors it. Re-check on every Pi bump.
 - `BeforeAgentStartEvent.prompt` (types.d.ts:711): `[tutor]`-prefixed prompts do not open a chat episode.
 - `AssistantMessage.stopReason` (`pi-ai` types.d.ts:313): only `"stop"` turns are judged.
+- `ctx.modelRegistry.complete(ctx.model, { systemPrompt, messages: [UserMessage] })` → `AssistantMessage`
+  (model-registry.d.ts:40; pattern from examples/extensions/qna.ts). Used by `/tutor-start` for the
+  suggester and the scaffold; non-`"stop"` `stopReason` is an error (`errorMessage` shown).
+- `ctx.ui.select(title, options)` / `ctx.ui.input(title, placeholder)` → `string | undefined` (Esc = undefined);
+  `ctx.ui.setWorkingMessage(text?)`; `ctx.model` (undefined → `/tutor-start` refuses).
 - `ctx.ui.setWidget(key, string[] | undefined)`, `ctx.ui.setStatus(key, text)`,
   `ctx.ui.setWorkingMessage(text)`, `ctx.ui.notify(msg, level)`
 - `pi.on("before_agent_start", (event, ctx) => …)`: mutate `event.systemPromptOptions.sections["tutor"]`
@@ -61,10 +66,16 @@ Re-verify every line when bumping versions.
 - `raw.on("disconnect")` fires when the socket closes (client.js:121); used for detached mode.
 - `raw.close()` (client.js:232) closes only our socket. Never `raw.quit()`: it is `command("qa!")`
   (Neovim.js:715) and kills the user's editor; `NvimLink.close()` used it until M3.
+- `require("tutor").switch(dir, file)` (nvim-tutor init.lua) is called by `NvimLink.switchProject` via
+  `vim.defer_fn(…, 500)` so the restart that kills this Pi happens after `/tutor-start` returns.
 - The client logs via winston and patches `console`; `NVIM_NODE_LOG_FILE` is set before import
   so nothing is written to Pi's terminal.
 - Push autocmds live in `extensions/tutor/push.lua.ts` and are installed with `nvim_exec_lua`;
   `vim.g.tutor_chan` holds the extension's channel for `:TutorRun`.
+
+## Node
+- `node:sqlite` `DatabaseSync` (profile). No ExperimentalWarning on Node 26.11.1 (2026-10-12); on Node 22.x it
+  warns on stderr — check before supporting an older Node, the warning would draw over Pi's TUI.
 
 ## Install location on this machine
 - Pi installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is

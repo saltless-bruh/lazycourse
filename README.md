@@ -38,10 +38,18 @@ chat questions open one too. Hints climb a five-rung ladder (question → concep
 → pseudocode → reveal) only when the tutor judges your reasoning correct; pro stops at 4.
 A `tool_call` guard keeps the tutor to read-only tools inside the project folder.
 The tutor only exists in the Pi that `:Tutor` starts (`PI_TUTOR=1`); a plain `pi`
-elsewhere is untouched. See:
+elsewhere is untouched.
+
+Milestone 4 done (2026-10-12): `:TutorStart` (or `/tutor-start [language]`) runs a short
+interview the first time you pick a language, suggests three projects aimed at your weak
+concepts, and scaffolds the one you pick into `~/lazycourse/<language>-<project>` (or a folder
+you choose): `README.md`, `AGENTS.md`, `spec/design.md`, `spec/tasks.md`,
+`spec/requirements.md`, `src/<entry>`. Neovim then switches into that folder and restarts the
+tutor there. Your levels, projects and finished stuck episodes (with per-concept ease) live in
+`~/.local/share/nvim-tutor/profile.sqlite`. See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
-- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard)
+- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start)
 
 ## How it works
 
