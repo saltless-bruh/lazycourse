@@ -1,8 +1,24 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { NvimLink, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
+import { bandFor, startRung, DEFAULT_LEVEL } from "./policy.js";
+import { bandPrompt } from "./prompts.js";
+import { parseJudgment } from "./judgment.js";
+import { formatEditorContext } from "./context.js";
 
 type Ui = ExtensionContext["ui"];
+
+/** Last `tutor_level` custom entry on the active branch, if any. */
+function restoreLevel(ctx: ExtensionContext): number | undefined {
+  let level: number | undefined;
+  for (const e of ctx.sessionManager.getBranch()) {
+    if (e.type === "custom" && e.customType === "tutor_level") {
+      const l = (e.data as { level?: unknown } | undefined)?.level;
+      if (typeof l === "number") level = l;
+    }
+  }
+  return level;
+}
 
 export default function (pi: ExtensionAPI): void {
   const state: TutorState = { state: "idle", connected: false };
@@ -13,6 +29,11 @@ export default function (pi: ExtensionAPI): void {
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));
+  }
+
+  function setLevel(level: number) {
+    state.level = level;
+    state.rung = startRung(bandFor(level));
   }
 
   function onPayload(p: TutorPayload) {
@@ -31,6 +52,7 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     ui = ctx.hasUI ? ctx.ui : null;
+    setLevel(restoreLevel(ctx) ?? DEFAULT_LEVEL);
     if (!link) {
       link = await NvimLink.connect({
         root: ctx.cwd,
@@ -48,17 +70,58 @@ export default function (pi: ExtensionAPI): void {
     state.connected = false;
   });
 
+  // Spec §4: select the band prompt section and pull band-scoped editor context for this turn.
+  pi.on("before_agent_start", async (event) => {
+    const band = bandFor(state.level ?? DEFAULT_LEVEL);
+    event.systemPromptOptions.sections["tutor"] = bandPrompt(band);
+    if (!link) return;
+    let snap = null;
+    try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
+    if (!snap) return;
+    if (snap.filetype) { state.language = snap.filetype; paint(); }
+    return { message: { customType: "tutor_editor", content: formatEditorContext(snap), display: false, details: { band, path: snap.path } } };
+  });
+
+  // Spec §5: parse the trailing tutor-judgment block. Ladder application lands in M3.
+  pi.on("turn_end", async (event) => {
+    const m = event.message;
+    if (m.role !== "assistant") return;
+    if (m.content.some((c) => c.type === "toolCall")) return;
+    const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+    const j = parseJudgment(text);
+    state.last = j ? j.judgment : "missing";
+    if (j) pi.appendEntry("tutor_judgment", j);
+    paint();
+  });
+
+  // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
+  // the newest so stale snapshots do not pile up in the model's context.
+  pi.on("context", (event) => {
+    const msgs = event.messages;
+    let last = -1;
+    msgs.forEach((m, i) => { if (m.role === "custom" && m.customType === "tutor_editor") last = i; });
+    if (last < 0) return;
+    const pruned = msgs.filter((m, i) => !(m.role === "custom" && m.customType === "tutor_editor" && i !== last));
+    return pruned.length === msgs.length ? undefined : { messages: pruned };
+  });
+
   pi.registerCommand("tutor-level", {
     description: "Set the tutor level 0-100 (beginner → pro)",
     handler: async (args, ctx) => {
-      const n = Number(args.trim());
+      const arg = args.trim();
+      if (arg === "") {
+        ctx.ui.notify(`current level ${state.level ?? DEFAULT_LEVEL} (${bandFor(state.level ?? DEFAULT_LEVEL)}); usage: /tutor-level <0-100>`, "info");
+        return;
+      }
+      const n = /^\d{1,3}$/.test(arg) ? Number(arg) : NaN;
       if (!Number.isInteger(n) || n < 0 || n > 100) {
         ctx.ui.notify("usage: /tutor-level <0-100>", "warning");
         return;
       }
-      state.level = n;
+      setLevel(n);
+      pi.appendEntry("tutor_level", { level: n });
       paint();
-      ctx.ui.notify(`tutor level set to ${n}`, "info");
+      ctx.ui.notify(`tutor level set to ${n} (${bandFor(n)})`, "info");
     },
   });
 

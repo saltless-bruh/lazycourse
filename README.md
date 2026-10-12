@@ -24,10 +24,16 @@ It picks a project matched to your skill in a language you choose, scaffolds a s
 ## Status
 
 Milestone 1b done: Pi's own TUI runs in a Neovim split; the extension watches the
-editor over Neovim's RPC and shows tutor state in a Pi widget. See:
+editor over Neovim's RPC and shows tutor state in a Pi widget.
+
+Milestone 2 done (2026-10-12): band system prompts (beginner / intermediate / pro)
+selected per turn from the level slider; each turn carries the current buffer
+(beginner) or ±20 lines (others) plus diagnostics as a hidden message;
+`/tutor-level` / `:TutorLevel` persists across session resume; the model's trailing
+`tutor-judgment` block is parsed and shown in the widget (`judged correct`). See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
-- Milestone 1 plan: [`docs/superpowers/plans/2026-10-07-m1-bootstrap.md`](docs/superpowers/plans/2026-10-07-m1-bootstrap.md)
+- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts)
 
 ## How it works
 

@@ -6,12 +6,16 @@ describe("renderWidget", () => {
     const w = renderWidget({ language: "python", level: 30, rung: 2, task: "P1.T2.S1", state: "idle", connected: true });
     expect(w).toEqual(["tutor  python · lvl 30 · rung 2 · P1.T2.S1", "idle"]);
   });
+  it("appends the last judgment to line 2", () => {
+    const w = renderWidget({ level: 30, state: "clean", connected: true, last: "correct" });
+    expect(w[1]).toBe("clean · judged correct");
+  });
   it("says detached when not connected to Neovim", () => {
-    const w = renderWidget({ state: "idle", connected: false });
+    const w = renderWidget({ state: "idle", connected: false, last: "wrong" });
     expect(w[1]).toBe("detached: pi started outside Neovim");
   });
   it("keeps both lines within 44 cells", () => {
-    const w = renderWidget({ language: "typescript", level: 100, rung: 5, task: "P12.T34.S56", state: "stuck: cannot borrow `x` as mutable more than once at a time", connected: true });
+    const w = renderWidget({ language: "typescript", level: 100, rung: 5, task: "P12.T34.S56", state: "stuck: cannot borrow `x` as mutable more than once at a time", connected: true, last: "partial" });
     for (const l of w) expect(l.length).toBeLessThanOrEqual(44);
     expect(w[1].endsWith("…")).toBe(true);
   });
@@ -21,8 +25,9 @@ describe("renderWidget", () => {
 });
 
 describe("renderStatus", () => {
-  it("is the level or 'tutor' when unknown", () => {
-    expect(renderStatus({ level: 30, state: "idle", connected: true })).toBe("tutor lvl 30");
+  it("is the level with its band, or 'tutor' when unknown", () => {
+    expect(renderStatus({ level: 30, state: "idle", connected: true })).toBe("tutor lvl 30 · beginner");
+    expect(renderStatus({ level: 70, state: "idle", connected: true })).toBe("tutor lvl 70 · pro");
     expect(renderStatus({ state: "idle", connected: true })).toBe("tutor");
   });
 });
