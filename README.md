@@ -46,10 +46,17 @@ concepts, and scaffolds the one you pick into `~/lazycourse/<language>-<project>
 you choose): `README.md`, `AGENTS.md`, `spec/design.md`, `spec/tasks.md`,
 `spec/requirements.md`, `src/<entry>`. Neovim then switches into that folder and restarts the
 tutor there. Your levels, projects and finished stuck episodes (with per-concept ease) live in
-`~/.local/share/nvim-tutor/profile.sqlite`. See:
+`~/.local/share/nvim-tutor/profile.sqlite`.
+
+Milestone 5 done (2026-10-12): starting a project in Python, Rust, Go, TypeScript or Lua also
+fetches that language's official style, idiom and stdlib docs into Pi skills
+(`~/.pi/agent/skills/tutor-<lang>-*`); `:TutorDocs [lang]` re-fetches. When the tutor points
+you at a reference (rung 3) it names the skill. After a stuck episode, `:TutorLearn` drafts a
+skill from it in Pi's editor — edit and submit to keep, Esc to discard. Concepts you've shown
+you know start one hint rung lower. Custom doc sources: `~/.config/nvim-tutor/sources.json`. See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
-- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start)
+- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start, M5 knowledge/learn)
 
 ## How it works
 

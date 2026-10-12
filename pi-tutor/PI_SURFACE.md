@@ -28,6 +28,14 @@ Re-verify every line when bumping versions.
   Paths resolve like Pi's `resolveToCwd` (dist/utils/paths.js:59-87: unicode spaces → " ",
   strip "@", expand "~", file:// URLs, relative to cwd); `path-utils` is not exported, so
   `guard.ts` mirrors it. Re-check on every Pi bump.
+- `pi.getCommands()` → `SlashCommandInfo[]`; skills appear as `{ source: "skill", sourceInfo: { path: <SKILL.md> } }`
+  regardless of `enableSkillCommands` (agent-session.js:2694). `guard.ts` allows `read/grep/find/ls` inside
+  `dirname(path)` of each, because skills load through the `read` tool.
+- `ctx.ui.editor(title, prefill)` → `string | undefined` (types.d.ts:139): the `/tutor-learn` draft; Esc = discard.
+- `ctx.reload()` (ExtensionCommandContext, types.d.ts:322) after saving or fetching skills, so Pi rescans them.
+- Skill format (docs/skills.md): `SKILL.md` frontmatter `name` (lowercase, digits, single hyphens, ≤ 64) and
+  `description` (≤ 1024); malformed or description-less skills are not loaded. Global root
+  `$PI_CODING_AGENT_DIR/skills` (default `~/.pi/agent/skills`).
 - `BeforeAgentStartEvent.prompt` (types.d.ts:711): `[tutor]`-prefixed prompts do not open a chat episode.
 - `AssistantMessage.stopReason` (`pi-ai` types.d.ts:313): only `"stop"` turns are judged.
 - `ctx.modelRegistry.complete(ctx.model, { systemPrompt, messages: [UserMessage] })` → `AssistantMessage`

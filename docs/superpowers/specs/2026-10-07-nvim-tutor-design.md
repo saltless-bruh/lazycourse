@@ -1,7 +1,8 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** living document (rev 6, 2026-10-12: M4 interview choices, switch into the
+**Status:** living document (rev 7, 2026-10-12: M5 skill reads in the guard, JSON source
+overrides, learned skills global, ease applied at first judgment; rev 6, 2026-10-12: M4 interview choices, switch into the
 project after scaffold, ease formula; rev 5, 2026-10-12: M3 stuck rules, chat episodes,
 one nudge per episode, guard blocks bash, tutor mode only under `PI_TUTOR=1`;
 rev 4: M2 editor context as a hidden
@@ -299,6 +300,12 @@ How they are **added**:
 - **Learned skills**: `/tutor-learn` after a closed episode drafts a
   skill from the episode (concept, misconception, fix pattern) and shows
   it via `ctx.ui.editor` for accept, edit, or discard. Never auto-saved.
+- M5 rulings: the tool guard also allows reads inside every skill folder Pi loaded
+  (`pi.getCommands()` skill paths), since skills load through `read`. Source overrides live in
+  `~/.config/nvim-tutor/sources.json` (`{ "<lang>": [{ "slug", "title", "urls" }] }`; a listed
+  language replaces the built-in list). Learned skills are saved globally as
+  `tutor-<lang>-learned-<slug>` (project `.pi/skills` would trigger Pi's trust prompt). The
+  ease start rung is applied at an episode's first judgment, when its concept tags are known.
 - Project-local `.pi/skills/` and `AGENTS.md` override global ones by
   Pi's normal precedence.
 
