@@ -14,7 +14,7 @@ Run from the repo root:
 ```bash
 rm -rf /tmp/tutor-live && mkdir -p /tmp/tutor-live && printf 'x = \n' > /tmp/tutor-live/a.py
 cd /tmp/tutor-live && timeout 120 nvim --headless -c "luafile $CLAUDE_SKILL_DIR/drive.lua" > /tmp/tutor-live/out.txt 2>&1; echo "exit=$?"
-grep -aE "^(WIDGET|LEVEL|DIAG|RUN|LINE)" /tmp/tutor-live/out.txt
+grep -aE "^(WIDGET|LEVEL|DIAG|EPISODE|RUN|LINE)" /tmp/tutor-live/out.txt
 sleep 1; pgrep -fa 'pi --tools' | grep -v pgrep | grep -v snapshot || echo "no stray pi"
 ```
 
@@ -22,6 +22,7 @@ Expected:
 - `WIDGET present=true detached=false chan=<n>`
 - `LEVEL lvl40=true`
 - `DIAG widget=true`
+- `EPISODE widget=true nudge=true` (level 10 = beginner, error threshold 0)
 - `RUN done` preceded by `[tutor] no run_cmd configured` (unless `run_cmd` is set)
 - `no stray pi`
 

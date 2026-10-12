@@ -1,53 +1,23 @@
 import { describe, it, expect } from "vitest";
+import { fakePi, boot, assistant, judged, episodes } from "./fake-pi.js";
 import extension from "../extensions/tutor/index.js";
-
-type Handler = (...a: unknown[]) => unknown;
-function fakePi() {
-  const events: Record<string, Handler> = {};
-  const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
-  const entries: { type: string; data: unknown }[] = [];
-  const pi = {
-    on: (name: string, h: Handler) => { events[name] = h; return () => {}; },
-    registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
-    appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); },
-  };
-  return { pi, events, commands, entries };
-}
-function fakeCtx(branch: unknown[] = []) {
-  const widgets: Record<string, string[] | undefined> = {};
-  const statuses: Record<string, string | undefined> = {};
-  const notes: string[] = [];
-  return {
-    ctx: {
-      hasUI: true, cwd: "/tmp/proj",
-      sessionManager: { getBranch: () => branch },
-      ui: {
-        setWidget: (k: string, c: string[] | undefined) => { widgets[k] = c; },
-        setStatus: (k: string, t: string | undefined) => { statuses[k] = t; },
-        notify: (m: string) => notes.push(m),
-      },
-    },
-    widgets, statuses, notes,
-  };
-}
-/** Boot the extension detached (no $NVIM) so tests never need a Neovim. */
-async function boot(branch: unknown[] = []) {
-  const f = fakePi();
-  extension(f.pi as never);
-  const c = fakeCtx(branch);
-  const saved = process.env.NVIM; delete process.env.NVIM;
-  await f.events["session_start"]({ type: "session_start", reason: "startup" }, c.ctx);
-  if (saved) process.env.NVIM = saved;
-  return { ...f, ...c };
-}
-const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop" });
 
 describe("extension wiring", () => {
   it("registers lifecycle handlers and commands", () => {
     const { pi, events, commands } = fakePi();
     extension(pi as never);
-    expect(Object.keys(events)).toEqual(expect.arrayContaining(["session_start", "session_shutdown", "before_agent_start", "turn_end"]));
+    expect(Object.keys(events)).toEqual(expect.arrayContaining(["session_start", "session_shutdown", "before_agent_start", "turn_end", "context", "tool_call"]));
     expect(Object.keys(commands)).toEqual(expect.arrayContaining(["tutor-level", "tutor-status"]));
+  });
+
+  it("is inert outside tutor mode: no handlers, no commands without PI_TUTOR=1", () => {
+    const saved = process.env.PI_TUTOR; delete process.env.PI_TUTOR;
+    try {
+      const { pi, events, commands } = fakePi();
+      extension(pi as never);
+      expect(Object.keys(events)).toEqual([]);
+      expect(Object.keys(commands)).toEqual([]);
+    } finally { process.env.PI_TUTOR = saved; }
   });
 
   it("starts detached at the default level", async () => {
@@ -66,21 +36,24 @@ describe("extension wiring", () => {
   });
 
   it("restores the latest tutor_level entry from the session branch on start", async () => {
-    const { widgets } = await boot([
+    const { widgets } = await boot({ branch: [
       { type: "custom", customType: "tutor_level", data: { level: 10 } },
       { type: "custom", customType: "tutor_signal", data: {} },
       { type: "custom", customType: "tutor_level", data: { level: 80 } },
-    ]);
+    ] });
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 80 · rung 1");
   });
 
-  it("before_agent_start sets the band section and sends no editor message when detached", async () => {
+  it("before_agent_start sets the band section; detached turns carry the episode but no editor snapshot", async () => {
     const { events, commands, ctx } = await boot();
     const opts = { sections: {} as Record<string, string> };
-    const r1 = await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx);
+    const r1 = (await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx)) as { message: { customType: string; content: string; display: boolean } };
     expect(opts.sections["tutor"]).toMatch(/^# Tutor band: intermediate\n/);
     expect(opts.sections["tutor"]).toContain("```tutor-judgment");
-    expect(r1).toBeUndefined();
+    expect(r1.message.customType).toBe("tutor_editor");
+    expect(r1.message.display).toBe(false);
+    expect(r1.message.content).toMatch(/^\[episode\] stuck on: learner question\nhint rung 2\/5/);
+    expect(r1.message.content).not.toContain("[editor]");
     await commands["tutor-level"].handler("5", ctx);
     await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx);
     expect(opts.sections["tutor"]).toMatch(/^# Tutor band: beginner\n/);
@@ -132,5 +105,70 @@ describe("M2 review fixes", () => {
     ];
     const r = (await events["context"]({ type: "context", messages }, {})) as { messages: typeof messages };
     expect(r.messages.map((m) => (m as { content: unknown }).content)).toEqual(["a", [{ type: "text", text: "b" }], "keep", "snap5", "c"]);
+  });
+});
+
+describe("M3 episodes, ladder and guard", () => {
+  const bas = (prompt: string) => ({ type: "before_agent_start", prompt, systemPromptOptions: { sections: {} } });
+
+  it("a chat message opens an episode; correct advances, wrong holds, episode_closed closes", async () => {
+    const { events, ctx, entries, widgets } = await boot();
+    await events["before_agent_start"](bas("why does this fail?"), ctx);
+    expect(episodes(entries).at(-1)).toMatchObject({ trigger: { kind: "chat" }, rung: 2, turns: 0 });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2"); // line 2 says "detached" in these boots
+    await events["turn_end"]({ type: "turn_end", message: judged("correct") }, ctx);
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
+    await events["turn_end"]({ type: "turn_end", message: judged("wrong") }, ctx);
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
+    await events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, ctx);
+    expect(episodes(entries).at(-1)).toMatchObject({ rung: 4, turns: 3, closeReason: "judged" });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+  });
+
+  it("[tutor] nudges never open a chat episode, and a second chat message joins the open one", async () => {
+    const { events, ctx, entries } = await boot();
+    await events["before_agent_start"](bas("[tutor] stuck signal: idle at a.py:1"), ctx);
+    expect(episodes(entries)).toHaveLength(0);
+    await events["before_agent_start"](bas("first"), ctx);
+    await events["before_agent_start"](bas("second"), ctx);
+    expect(episodes(entries)).toHaveLength(1);
+  });
+
+  it("aborted, errored and truncated replies leave the rung and the widget alone", async () => {
+    const { events, ctx, entries, widgets } = await boot();
+    await events["before_agent_start"](bas("q"), ctx);
+    const n = entries.length;
+    for (const stop of ["aborted", "error", "length"]) {
+      await events["turn_end"]({ type: "turn_end", message: judged("correct", true, stop) }, ctx);
+    }
+    expect(entries.length).toBe(n);
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+  });
+
+  it("restores an open episode on resume and ignores a closed one", async () => {
+    const ep = { id: "ep-1", trigger: { kind: "chat" }, band: "intermediate", rung: 4, opened: 1, turns: 3, concept_tags: [] };
+    const entry = (data: unknown) => ({ type: "custom", customType: "tutor_episode", data });
+    const open = await boot({ branch: [entry(ep)] });
+    expect(open.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 4");
+    const closed = await boot({ branch: [entry(ep), entry({ ...ep, closed: 5, closeReason: "judged" })] });
+    expect(closed.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+  });
+
+  it("/tutor-level into pro re-caps an open episode's rung and persists it", async () => {
+    const { events, commands, ctx, entries, widgets } = await boot();
+    await events["before_agent_start"](bas("q"), ctx);
+    for (let i = 0; i < 3; i++) await events["turn_end"]({ type: "turn_end", message: judged("correct") }, ctx);
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 5");
+    await commands["tutor-level"].handler("90", ctx);
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 90 · rung 4");
+    expect(episodes(entries).at(-1)).toMatchObject({ band: "pro", rung: 4 });
+  });
+
+  it("tool_call blocks bash and paths outside ctx.cwd, allows reads inside", async () => {
+    const { events, ctx } = await boot();
+    const call = (toolName: string, input: unknown) => events["tool_call"]({ type: "tool_call", toolCallId: "1", toolName, input }, ctx);
+    expect(await call("read", { path: "/etc/passwd" })).toMatchObject({ block: true });
+    expect(await call("bash", { command: "ls" })).toMatchObject({ block: true });
+    expect(await call("read", { path: "a.py" })).toBeUndefined();
   });
 });

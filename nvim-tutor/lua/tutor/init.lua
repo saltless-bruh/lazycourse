@@ -76,7 +76,8 @@ function M.setup(user_opts)
     pi_cmd = { "pi" }, cwd = vim.fn.getcwd(), width = 0.45, run_cmd = nil, check_version = true,
   }, user_opts or {})
   check_version()
-  M.state.term = term.new({ cmd = M.build_cmd(opts.pi_cmd), cwd = opts.cwd, width = opts.width })
+  -- PI_TUTOR=1 tells pi-tutor this Pi is the tutor; plain `pi` elsewhere stays untouched.
+  M.state.term = term.new({ cmd = M.build_cmd(opts.pi_cmd), cwd = opts.cwd, width = opts.width, env = { PI_TUTOR = "1" } })
   M.state.run_job = nil
   local cmd = vim.api.nvim_create_user_command
   cmd("Tutor", function() M.state.term:toggle() end, {})

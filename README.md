@@ -30,10 +30,18 @@ Milestone 2 done (2026-10-12): band system prompts (beginner / intermediate / pr
 selected per turn from the level slider; each turn carries the current buffer
 (beginner) or ±20 lines (others) plus diagnostics as a hidden message;
 `/tutor-level` / `:TutorLevel` persists across session resume; the model's trailing
-`tutor-judgment` block is parsed and shown in the widget (`judged correct`). See:
+`tutor-judgment` block is parsed and shown in the widget (`judged correct`).
+
+Milestone 3 done (2026-10-12): a persisting error, a long pause, or rewriting the same
+lines opens a stuck episode (widget shows `stuck: …`, Pi gets one `[tutor]` nudge); your
+chat questions open one too. Hints climb a five-rung ladder (question → concept → pointer
+→ pseudocode → reveal) only when the tutor judges your reasoning correct; pro stops at 4.
+A `tool_call` guard keeps the tutor to read-only tools inside the project folder.
+The tutor only exists in the Pi that `:Tutor` starts (`PI_TUTOR=1`); a plain `pi`
+elsewhere is untouched. See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
-- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts)
+- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard)
 
 ## How it works
 

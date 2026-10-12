@@ -1,7 +1,9 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** living document (rev 4, 2026-10-12: M2 editor context as a hidden
+**Status:** living document (rev 5, 2026-10-12: M3 stuck rules, chat episodes,
+one nudge per episode, guard blocks bash, tutor mode only under `PI_TUTOR=1`;
+rev 4: M2 editor context as a hidden
 message, level persistence; rev 3: Pi's own TUI in a terminal split, extension
 is a Neovim RPC client). Personal tool; expect frequent revision.
 
@@ -192,6 +194,13 @@ Rules:
 - Concepts with ease ≥ 0.7 start one rung lower next time (floor 1).
 - Beginner band may send proactive explanations outside an episode, at
   most once per 2 minutes.
+- Detector rules (M3): an error is its file plus first-error message and fires once; idle
+  fires once per idle stretch; churn fires when the same 20-line region of a file that has
+  an error churns twice within the idle threshold (churn alone is just typing). A trigger
+  refused because an episode is open is not consumed. Only error episodes hold their place;
+  an editor trigger replaces an open chat, idle or churn episode (`superseded`). An
+  editor-triggered episode sends one `[tutor]` nudge, only if Pi is idle and no nudge was
+  sent in the last 2 minutes. Only replies with `stopReason: "stop"` are judged.
 
 ## 6. Profile, interview, project suggestion, scaffold
 
@@ -309,9 +318,13 @@ nvim-tutor/lua/tutor/
   extension* through `nvim_exec_lua` when it connects, so the Lua
   plugin has nothing to keep in sync with the extension.
 
-Tool fence: Pi runs with `--tools read,grep,find,ls`; `bash` stays off
-until the M3 `tool_call` guard adds a read-only command filter. `read`
-is fenced to the project root by that guard.
+Tool fence: Pi runs with `--tools read,grep,find,ls`, and the `tool_call` guard (M3) blocks
+every other tool, including `bash` (no read-only shell filter: the learner runs code with
+`:TutorRun`), and any read/grep/find/ls path whose realpath is outside the project root.
+
+Tutor mode: pi-tutor is installed in Pi's global `packages`, so it loads in every Pi
+session. The split starts Pi with `PI_TUTOR=1`; without it the extension registers
+nothing, so a plain `pi` elsewhere is untouched.
 
 ## 9. pi-tutor package internals
 

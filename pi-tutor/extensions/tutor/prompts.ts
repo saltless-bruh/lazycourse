@@ -17,5 +17,5 @@ function read(name: string): string {
 }
 
 export function bandPrompt(band: Band): string {
-  return `${read(band)}\n\n${read("judgment")}\n`;
+  return `${read(band)}\n\n${read("ladder")}\n\n${read("judgment")}\n`;
 }

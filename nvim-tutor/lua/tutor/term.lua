@@ -2,7 +2,7 @@ local M = {}
 local Term = {}
 Term.__index = Term
 
----@param opts {cmd: string[], cwd: string, width: number}
+---@param opts {cmd: string[], cwd: string, width: number, env?: table<string,string>}
 function M.new(opts)
   return setmetatable({ opts = opts, buf = nil, win = nil, job = nil }, Term)
 end
@@ -18,6 +18,7 @@ function Term:_spawn()
     job = vim.fn.jobstart(self.opts.cmd, {
       term = true,
       cwd = self.opts.cwd,
+      env = self.opts.env,
       on_exit = function(id, code)
         -- An older job's exit must not clear a newer job.
         if self.job == id then self.job = nil end

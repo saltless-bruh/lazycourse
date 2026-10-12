@@ -19,4 +19,14 @@ describe("bandPrompt", () => {
     expect(bandPrompt("pro")).toMatch(/never write code/i);
     expect(bandPrompt("beginner")).toMatch(/why each part exists/i);
   });
+  it("puts the hint ladder between the band voice and the turn protocol", () => {
+    for (const b of ["beginner", "intermediate", "pro"] as const) {
+      const p = bandPrompt(b);
+      expect(p).toContain("## Hint ladder");
+      expect(p.indexOf(`# Tutor band: ${b}`)).toBeLessThan(p.indexOf("## Hint ladder"));
+      expect(p.indexOf("## Hint ladder")).toBeLessThan(p.indexOf("## Turn protocol"));
+      expect(p).toContain("[tutor]");
+      expect(p).toContain("[episode]");
+    }
+  });
 });

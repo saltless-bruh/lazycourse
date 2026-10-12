@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { formatEditorContext, MAX_SNAPSHOT_LINES } from "../extensions/tutor/context.js";
+import { formatEditorContext, formatEpisodeContext, MAX_SNAPSHOT_LINES } from "../extensions/tutor/context.js";
+import { openEpisode } from "../extensions/tutor/ladder.js";
 import type { EditorSnapshot } from "../extensions/tutor/nvim.js";
 
 const snap = (over: Partial<EditorSnapshot> = {}): EditorSnapshot => ({
@@ -34,5 +35,22 @@ describe("formatEditorContext", () => {
     const out = formatEditorContext(snap({ lines, diagnostics: [] }));
     expect(out).toContain(`--- lines 1-${MAX_SNAPSHOT_LINES} (truncated, ${MAX_SNAPSHOT_LINES + 50} total) ---`);
     expect(out).not.toContain(`l${MAX_SNAPSHOT_LINES + 1}`);
+  });
+});
+
+describe("formatEpisodeContext", () => {
+  it("states the trigger, the rung with its name and cap, turns and concepts", () => {
+    const ep = { ...openEpisode({ kind: "error", path: "/p/a.py", line: 3, msg: "boom" }, "pro", 1), turns: 2, concept_tags: ["types", "casts"] };
+    expect(formatEpisodeContext(ep).split("\n")).toEqual([
+      '[episode] stuck on: error "boom" at a.py:3',
+      "hint rung 1/4 (question), 2 turn(s) so far",
+      "concepts: types, casts",
+    ]);
+  });
+  it("omits the concepts line when there are none", () => {
+    expect(formatEpisodeContext(openEpisode({ kind: "chat" }, "beginner", 1)).split("\n")).toEqual([
+      "[episode] stuck on: learner question",
+      "hint rung 3/5 (pointer), 0 turn(s) so far",
+    ]);
   });
 });
