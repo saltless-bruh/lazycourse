@@ -237,4 +237,13 @@ describe("NvimLink editor-window resolution (M2 review fixes)", () => {
       expect(await other.lua("return vim.g.tutor_chan")).toBeNull();
     } finally { await other.close(); }
   }, 20000);
+
+  it("switchProject schedules require('tutor').switch(dir, file) after the call returns", async () => {
+    const { link } = await setup();
+    await link.raw.lua(`package.loaded.tutor = { switch = function(d, f) vim.g.switched = { d, f } end }`);
+    await link.switchProject("/x/proj", "spec/tasks.md");
+    expect(await link.raw.lua("return vim.g.switched")).toBeNull(); // deferred, not yet
+    await new Promise((r) => setTimeout(r, 800));
+    expect(await link.raw.lua("return vim.g.switched")).toEqual(["/x/proj", "spec/tasks.md"]);
+  }, 20000);
 });

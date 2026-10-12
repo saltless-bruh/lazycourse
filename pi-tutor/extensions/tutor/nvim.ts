@@ -163,6 +163,11 @@ export class NvimLink {
     await this.raw.lua(`local p, l = ...; vim.cmd.edit(vim.fn.fnameescape(p)); vim.api.nvim_win_set_cursor(0, { l, 0 })`, [path, line]);
   }
 
+  /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */
+  async switchProject(dir: string, file: string): Promise<void> {
+    await this.raw.lua(`local d, f = ...; vim.defer_fn(function() require("tutor").switch(d, f) end, 500)`, [dir, file]);
+  }
+
   async close(): Promise<void> {
     if (!this.connected) return;
     try { await this.raw.lua(`vim.g.tutor_chan = nil; if _G.__pi_tutor_timer then _G.__pi_tutor_timer:stop() end`); } catch { /* nvim may be gone */ }

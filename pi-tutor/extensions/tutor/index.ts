@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
@@ -6,8 +8,11 @@ import { bandPrompt } from "./prompts.js";
 import { parseJudgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall } from "./guard.js";
+import { Profile } from "./profile.js";
+import { runStart } from "./start.js";
+import type { Complete } from "./llm.js";
 
 type Ui = ExtensionContext["ui"];
 
@@ -39,6 +44,21 @@ function restoreEpisode(ctx: ExtensionContext): Episode | null {
   return ep && typeof ep.rung === "number" && ep.trigger && ep.closed === undefined ? ep : null;
 }
 
+function realCwd(cwd: string): string {
+  try { return realpathSync(cwd); } catch { return cwd; }
+}
+
+/** Pi's own model as a JSON-call function for the suggester and scaffold (spec §6). */
+function modelComplete(ctx: ExtensionContext): Complete {
+  return async (system, user) => {
+    const model = ctx.model;
+    if (!model) throw new Error("no model selected");
+    const r = await ctx.modelRegistry.complete(model, { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] });
+    if (r.stopReason !== "stop") throw new Error(`model stopped (${r.stopReason})${r.errorMessage ? `: ${r.errorMessage}` : ""}`);
+    return r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+  };
+}
+
 export default function (pi: ExtensionAPI): void {
   // pi-tutor is installed globally; only the Pi that nvim-tutor starts is the tutor.
   if (process.env.PI_TUTOR !== "1") return;
@@ -51,6 +71,7 @@ export default function (pi: ExtensionAPI): void {
   let signal = "idle";
   let tick: ReturnType<typeof setInterval> | null = null;
   let lastNudge = -Infinity;
+  let profile: Profile | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -88,9 +109,25 @@ export default function (pi: ExtensionAPI): void {
     }
   }
 
+  /** Spec §5: a closed episode is mirrored to the profile (needs a known language). */
+  function mirror(closed: Episode) {
+    if (!profile || !state.language || closed.closed === undefined) return;
+    const score = episodeScore(closed);
+    if (score === null) return;
+    profile.recordEpisode({
+      language: state.language,
+      project: session ? profile.projectAt(realCwd(session.cwd))?.path ?? null : null,
+      concept_tags: closed.concept_tags,
+      rungs_used: closed.rung - startRung(closed.band) + 1,
+      turns: closed.turns, opened: closed.opened, closed: closed.closed,
+    }, score);
+  }
+
   function closeEp(reason: CloseReason) {
     if (!episode) return;
-    pi.appendEntry("tutor_episode", closeEpisode(episode, reason, Date.now()));
+    const closed = closeEpisode(episode, reason, Date.now());
+    pi.appendEntry("tutor_episode", closed);
+    mirror(closed);
     episode = null;
     signal = `episode closed (${reason})`;
   }
@@ -120,7 +157,12 @@ export default function (pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     session = ctx;
     ui = ctx.hasUI ? ctx.ui : null;
-    state.level = restoreLevel(ctx) ?? DEFAULT_LEVEL;
+    if (!profile) {
+      try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
+    }
+    const proj = profile?.projectAt(realCwd(ctx.cwd));
+    if (proj) state.language = proj.language;
+    state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
     episode = restoreEpisode(ctx);
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
@@ -144,6 +186,8 @@ export default function (pi: ExtensionAPI): void {
   pi.on("session_shutdown", async () => {
     if (tick) clearInterval(tick);
     tick = null;
+    profile?.close();
+    profile = null;
     await link?.close();
     link = null;
     state.connected = false;
@@ -181,7 +225,7 @@ export default function (pi: ExtensionAPI): void {
       if (episode) {
         episode = applyJudgment(episode, j, Date.now());
         pi.appendEntry("tutor_episode", episode);
-        if (episode.closed !== undefined) { episode = null; signal = "episode closed (judged)"; }
+        if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
       }
     }
     paint();
@@ -216,8 +260,33 @@ export default function (pi: ExtensionAPI): void {
       }
       setLevel(n);
       pi.appendEntry("tutor_level", { level: n });
+      if (state.language) profile?.setLevel(state.language, n);
       paint();
       ctx.ui.notify(`tutor level set to ${n} (${bandFor(n)})`, "info");
+    },
+  });
+
+  pi.registerCommand("tutor-start", {
+    description: "Pick a language, get three project ideas, scaffold one (spec/ + AGENTS.md)",
+    handler: async (args, ctx) => {
+      if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
+      if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
+      const r = await runStart(args, {
+        ui: {
+          select: (t, o) => ctx.ui.select(t, o),
+          input: (t, p) => ctx.ui.input(t, p),
+          notify: (m, l) => ctx.ui.notify(m, l),
+          working: (m) => ctx.ui.setWorkingMessage(m),
+        },
+        profile, complete: modelComplete(ctx), now: Date.now, home: homedir(),
+      });
+      if (!r) return;
+      if (link) {
+        ctx.ui.notify(`scaffolded ${r.title} in ${r.dir}; switching the editor and tutor there…`, "info");
+        await link.switchProject(r.dir, "spec/tasks.md");
+      } else {
+        ctx.ui.notify(`scaffolded ${r.title} in ${r.dir}. Continue with: cd ${r.dir} && pi`, "info");
+      }
     },
   });
 

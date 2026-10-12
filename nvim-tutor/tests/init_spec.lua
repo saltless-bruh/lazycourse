@@ -18,6 +18,26 @@ describe("tutor.init", function()
     assert.equals("1", require("tutor").state.term.opts.env.PI_TUTOR)
   end)
 
+  it("switch cds into the project, opens the file and restarts pi there", function()
+    local tutor = require("tutor")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir .. "/spec", "p")
+    vim.fn.writefile({ "- [ ] P1.T1" }, dir .. "/spec/tasks.md")
+    vim.cmd("Tutor")
+    local old = tutor.state.term:job_id()
+    assert.is_true(tutor.switch(dir, "spec/tasks.md"))
+    local real = vim.fn.resolve(dir)
+    assert.equals(real, vim.fn.resolve(vim.fn.getcwd()))
+    assert.equals(dir, tutor.state.term.opts.cwd)
+    assert.are_not.equal(old, tutor.state.term:job_id())
+    local found = false
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.fn.resolve(vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))) == real .. "/spec/tasks.md" then found = true end
+    end
+    assert.is_true(found)
+    assert.is_false(tutor.switch(dir .. "/missing", "x"))
+  end)
+
   it("wrappers type slash commands into the terminal", function()
     local tutor = require("tutor")
     vim.cmd("Tutor")

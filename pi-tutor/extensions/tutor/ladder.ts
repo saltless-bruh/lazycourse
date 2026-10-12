@@ -75,3 +75,10 @@ export function describeTrigger(t: Trigger): string {
     case "chat": return "learner question";
   }
 }
+
+/** Ease sample for the profile (spec §5/§6): 1 at the start rung, one step less per extra rung; superseded is not a sample. */
+export function episodeScore(ep: Episode): number | null {
+  if (ep.closeReason === "superseded") return null;
+  const start = startRung(ep.band);
+  return Math.min(1, Math.max(0, 1 - (ep.rung - start) / (rungCap(ep.band) - start + 1)));
+}

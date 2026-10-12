@@ -172,3 +172,81 @@ describe("M3 episodes, ladder and guard", () => {
     expect(await call("read", { path: "a.py" })).toBeUndefined();
   });
 });
+
+describe("M4 profile and /tutor-start", () => {
+  it("registers /tutor-start", async () => {
+    const { commands } = await boot();
+    expect(Object.keys(commands)).toContain("tutor-start");
+  });
+
+  it("/tutor-start scaffolds through the real model call path and says how to continue when detached", async () => {
+    const { mkdtempSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "pitutor-smoke-"));
+    const b = await boot({ cwd: root });
+    b.replies.push(
+      JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
+      JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.py", run_cmd: "python src/main.py" }),
+    );
+    b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
+    await b.commands["tutor-start"].handler("python", b.ctx);
+    expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
+    expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
+  });
+
+  it("/tutor-start without a model says so and does nothing", async () => {
+    const b = await boot();
+    (b.ctx as { model?: unknown }).model = undefined;
+    await b.commands["tutor-start"].handler("python", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/no model/i);
+  });
+
+  it("a scaffolded project's language and level come from the profile; /tutor-level writes back; closed episodes are recorded", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-proj-"));
+    const file = join(dir, "profile.sqlite");
+    const seed = Profile.open(file);
+    seed.saveLanguage("rust", 20, {}, 1);
+    seed.addProject("rust", dir, "Todo CLI", 1);
+    seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ cwd: dir });
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
+      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["turn_end"]({ type: "turn_end", message: assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["traits"],"episode_closed":true}\n```') }, b.ctx);
+      await b.commands["tutor-level"].handler("70", b.ctx);
+      await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+      const check = Profile.open(file);
+      expect(check.language("rust")?.level).toBe(70);
+      expect(check.episodes("rust")).toEqual([expect.objectContaining({ project: dir, concept_tags: ["traits"], turns: 1, rungs_used: 2 })]);
+      expect(check.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: expect.closeTo(2 / 3), episodes: 1 }]);
+      check.close();
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+
+  it("keeps working without a profile when the profile file is from a newer pi-tutor", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { DatabaseSync } = await import("node:sqlite");
+    const { Profile, SCHEMA_VERSION } = await import("../extensions/tutor/profile.js");
+    const file = join(mkdtempSync(join(tmpdir(), "pitutor-newer-")), "p.sqlite");
+    Profile.open(file).close();
+    const db = new DatabaseSync(file); db.prepare("UPDATE schema_version SET v = ?").run(SCHEMA_VERSION + 1); db.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot();
+      expect(b.notes.some((n) => /newer/.test(n))).toBe(true);
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+      await b.commands["tutor-start"].handler("python", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/profile/i);
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+});

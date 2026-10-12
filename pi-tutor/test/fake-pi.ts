@@ -2,6 +2,7 @@ import extension from "../extensions/tutor/index.js";
 
 // The extension only activates when nvim-tutor started Pi (Task 6); tests are tutor mode.
 process.env.PI_TUTOR = "1";
+process.env.PI_TUTOR_PROFILE ??= ":memory:"; // each boot gets a private in-memory profile
 
 export type Handler = (...a: unknown[]) => unknown;
 
@@ -24,18 +25,27 @@ export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
   const statuses: Record<string, string | undefined> = {};
   const notes: string[] = [];
   const busy = { value: false };
+  const script: (string | undefined)[] = [];
+  const replies: string[] = [];
   return {
     ctx: {
-      hasUI: true, cwd,
+      hasUI: true, cwd, mode: "tui",
       isIdle: () => !busy.value,
       sessionManager: { getBranch: () => branch },
+      model: { id: "fake-model" },
+      modelRegistry: {
+        complete: async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] }),
+      },
       ui: {
         setWidget: (k: string, c: string[] | undefined) => { widgets[k] = c; },
         setStatus: (k: string, t: string | undefined) => { statuses[k] = t; },
+        setWorkingMessage: () => {},
         notify: (m: string) => notes.push(m),
+        select: async () => script.shift(),
+        input: async () => script.shift(),
       },
     },
-    widgets, statuses, notes, busy,
+    widgets, statuses, notes, busy, script, replies,
   };
 }
 

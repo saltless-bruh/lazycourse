@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
+import { episodeScore, yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], over: Partial<Judgment> = {}): Judgment =>
@@ -76,5 +76,20 @@ describe("yieldsTo (pane review I1)", () => {
     expect(yieldsTo(openEpisode({ kind: "idle", path: "/p/a.py", line: 1 }, "pro", 1))).toBe(true);
     expect(yieldsTo(openEpisode({ kind: "churn", path: "/p/a.py", region: [1, 20] }, "pro", 1))).toBe(true);
     expect(yieldsTo(openEpisode(err, "pro", 1))).toBe(false);
+  });
+});
+
+describe("episodeScore", () => {
+  const at = (band: "beginner" | "intermediate" | "pro", rung: number, closeReason = "judged") =>
+    ({ ...openEpisode({ kind: "chat" }, band, 1), rung, closed: 2, closeReason } as Parameters<typeof episodeScore>[0]);
+  it("is 1 at the start rung and falls one step per extra rung, floored at 0", () => {
+    expect(episodeScore(at("intermediate", 2))).toBe(1);
+    expect(episodeScore(at("intermediate", 3))).toBe(0.75);
+    expect(episodeScore(at("intermediate", 5))).toBe(0.25);
+    expect(episodeScore(at("pro", 4))).toBe(0.25);
+    expect(episodeScore(at("beginner", 5))).toBeCloseTo(1 / 3);
+  });
+  it("is null for a superseded episode", () => {
+    expect(episodeScore(at("pro", 1, "superseded"))).toBeNull();
   });
 });

@@ -71,6 +71,26 @@ local function slash(text)
   end
 end
 
+--- Re-root the tutor at `dir`: cd there, open `file` in the editor window, restart Pi with cwd = dir.
+---@return boolean ok
+function M.switch(dir, file)
+  if vim.fn.isdirectory(dir) == 0 then
+    vim.notify("[tutor] not a directory: " .. dir, vim.log.levels.WARN)
+    return false
+  end
+  opts.cwd = dir
+  vim.cmd.cd(vim.fn.fnameescape(dir))
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.bo[vim.api.nvim_win_get_buf(w)].buftype == "" then
+      vim.api.nvim_win_call(w, function() vim.cmd.edit(vim.fn.fnameescape(dir .. "/" .. file)) end)
+      break
+    end
+  end
+  M.state.term.opts.cwd = dir
+  M.state.term:restart()
+  return true
+end
+
 function M.setup(user_opts)
   opts = vim.tbl_deep_extend("force", {
     pi_cmd = { "pi" }, cwd = vim.fn.getcwd(), width = 0.45, run_cmd = nil, check_version = true,
