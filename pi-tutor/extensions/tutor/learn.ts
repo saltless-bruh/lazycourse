@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { RUNG_NAMES, describeTrigger, type Episode } from "./ladder.js";
 
 // /tutor-learn (spec §7): last closed episode → a drafted SKILL.md the learner edits, keeps, or discards.
@@ -64,25 +65,20 @@ export function renderLearned(language: string, l: Learned): string {
   return `---\nname: tutor-${language}-learned-${l.slug}\ndescription: ${JSON.stringify(l.description)}\n---\n${l.body}\n`;
 }
 
-function unquote(v: string): string {
-  const t = v.trim();
-  if (t.startsWith("\"")) { try { return String(JSON.parse(t)); } catch { return t; } }
-  if (t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1);
-  return t;
-}
-
-/** The frontmatter Pi needs to load a skill (docs/skills.md): a valid name and a description. */
+/**
+ * The frontmatter Pi needs to load a skill (docs/skills.md): a valid name and a description.
+ * Parsed with Pi's own parseFrontmatter (the yaml package Pi loads skills with), so a header
+ * that passes here also loads in Pi.
+ */
 export function parseSkillHeader(text: string): { name: string; description: string } {
-  const m = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
-  if (!m) throw new Error("missing --- frontmatter --- at the top");
-  const fields: Record<string, string> = {};
-  for (const line of m[1].split("\n")) {
-    const kv = /^([a-z-]+):\s*(.*)$/.exec(line);
-    if (kv) fields[kv[1]] = unquote(kv[2]);
+  if (!/^---\r?\n[\s\S]*?\r?\n---/.test(text)) throw new Error("missing --- frontmatter --- at the top");
+  let fields: Record<string, unknown>;
+  try { fields = parseFrontmatter(text).frontmatter; } catch (e) {
+    throw new Error(`frontmatter is not valid YAML: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
   }
-  const name = fields.name ?? "";
+  const name = typeof fields.name === "string" ? fields.name : "";
   if (!NAME.test(name) || name.length > 64) throw new Error("name must be lowercase letters, digits and single hyphens, at most 64 characters");
-  const description = fields.description ?? "";
+  const description = typeof fields.description === "string" ? fields.description.trim() : "";
   if (!description || description.length > 1024) throw new Error("description is required (at most 1024 characters)");
   return { name, description };
 }

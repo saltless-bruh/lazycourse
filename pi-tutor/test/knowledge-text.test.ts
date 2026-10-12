@@ -40,6 +40,10 @@ describe("sources", () => {
   const saved = process.env.PI_TUTOR_SOURCES;
   afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_SOURCES; else process.env.PI_TUTOR_SOURCES = saved; });
 
+  it("starts the Lua stdlib reference at §6, past the 120k cap's reach (M5 final review I2)", () => {
+    expect(SOURCES.lua.find((t) => t.slug === "stdlib")?.from).toBe("The Standard Libraries");
+  });
+
   it("covers every built-in /tutor-start language with valid slugs and http(s) urls", () => {
     for (const lang of LANGUAGES) {
       const topics = SOURCES[lang];

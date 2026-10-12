@@ -51,6 +51,19 @@ describe("learnPrompt / checkLearned / renderLearned", () => {
   });
 });
 
+describe("parseSkillHeader agrees with Pi's YAML loader (M5 final review I1)", () => {
+  const head = (desc: string) => `---\nname: ok-name\ndescription: ${desc}\n---\nbody\n`;
+  it("refuses headers Pi's YAML parser would reject, so a saved skill always loads", () => {
+    expect(() => parseSkillHeader(head('"Use when "x" happens"'))).toThrow(/YAML/);
+    expect(() => parseSkillHeader(head("Use when: borrow fails"))).toThrow(/YAML/);
+    expect(() => parseSkillHeader("---\nname: ok-name\ndescription: one\ndescription: two\n---\n")).toThrow(/YAML/);
+  });
+  it("reads the description exactly as Pi does (a # starts a comment)", () => {
+    expect(parseSkillHeader(head("Use when #1 thing")).description).toBe("Use when");
+    expect(parseSkillHeader(head('"Use when: borrow fails"')).description).toBe("Use when: borrow fails");
+  });
+});
+
 describe("parseSkillHeader", () => {
   it("refuses a draft edited into invalid frontmatter, with a reason", () => {
     expect(() => parseSkillHeader("no frontmatter")).toThrow(/frontmatter/);

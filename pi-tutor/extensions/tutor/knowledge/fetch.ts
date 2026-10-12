@@ -34,12 +34,14 @@ function refFile(i: number, url: string): string {
   return `${i + 1}-${base.replace(/[^A-Za-z0-9._-]+/g, "-").toLowerCase() || "doc"}.md`;
 }
 
-async function download(url: string, d: FetchDeps): Promise<string> {
+async function download(url: string, d: FetchDeps, from?: string): Promise<string> {
   const timeout = AbortSignal.timeout(d.timeoutMs ?? 30_000);
   const signal = d.signal ? AbortSignal.any([d.signal, timeout]) : timeout;
   const res = await d.fetch(url, { signal, redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return cap(toText(await res.text(), url, res.headers.get("content-type") ?? ""));
+  const text = toText(await res.text(), url, res.headers.get("content-type") ?? "");
+  const at = from ? text.indexOf(from) : -1;
+  return cap(at > 0 ? text.slice(at) : text);
 }
 
 function describePrompt(language: string, topics: { topic: Topic; refs: Ref[] }[]): string {
@@ -88,7 +90,7 @@ export async function fetchKnowledge(language: string, topics: Topic[], d: Fetch
     const refs: Ref[] = [];
     for (const [i, url] of topic.urls.entries()) {
       try {
-        refs.push({ file: refFile(i, url), url, text: await download(url, d) });
+        refs.push({ file: refFile(i, url), url, text: await download(url, d, topic.from) });
       } catch (e) {
         if (d.signal?.aborted) throw new Cancelled();
         const reason = e instanceof Error && e.name === "TimeoutError" ? "timed out" : e instanceof Error ? e.message : String(e);

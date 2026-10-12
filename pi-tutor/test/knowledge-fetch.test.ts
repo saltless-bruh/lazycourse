@@ -95,6 +95,15 @@ describe("fetchKnowledge", () => {
     expect(readdirSync(dir)).toEqual(["tutor-rust-style"]);
   });
 
+  it("keeps a reference from the topic's `from` marker on, so a capped page keeps the part that matters (M5 final review I2)", async () => {
+    const dir = root();
+    await fetchKnowledge("rust", [{ slug: "style", title: "x", urls: [`${base}/style.md`], from: "Use snake_case" }],
+      { fetch, complete: model(describeReply(["style"])).complete, root: dir });
+    const ref = readFileSync(join(dir, "tutor-rust-style", "references", "1-style.md"), "utf8");
+    expect(ref.startsWith("Use snake_case for functions.")).toBe(true);
+    expect(ref).not.toContain("# Naming");
+  });
+
   it("a re-fetch replaces the skill folder", async () => {
     const dir = root();
     mkdirSync(join(dir, "tutor-rust-style", "references"), { recursive: true });

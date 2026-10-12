@@ -3,7 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 // v1 source lists (spec §7): official style guide, idioms, stdlib/core per language. Raw text where possible.
-export interface Topic { slug: string; title: string; urls: string[] }
+/** `from`: keep each reference from the first occurrence of this text on (skips a long preamble before the cap). */
+export interface Topic { slug: string; title: string; urls: string[]; from?: string }
 
 const RAW = "https://raw.githubusercontent.com";
 export const SOURCES: Readonly<Record<string, Topic[]>> = {
@@ -27,7 +28,7 @@ export const SOURCES: Readonly<Record<string, Topic[]>> = {
   ],
   lua: [
     { slug: "style", title: "Lua style guide", urls: ["http://lua-users.org/wiki/LuaStyleGuide"] },
-    { slug: "stdlib", title: "Lua 5.4 reference manual", urls: ["https://www.lua.org/manual/5.4/manual.html"] },
+    { slug: "stdlib", title: "Lua 5.4 standard libraries", urls: ["https://www.lua.org/manual/5.4/manual.html"], from: "The Standard Libraries" },
   ],
 };
 
@@ -40,7 +41,8 @@ export function sourcesPath(): string {
 function validTopic(t: unknown): t is Topic {
   const o = t as Partial<Topic> | null;
   return !!o && typeof o.slug === "string" && SLUG.test(o.slug) && typeof o.title === "string" && o.title.trim() !== ""
-    && Array.isArray(o.urls) && o.urls.length > 0 && o.urls.every((u) => typeof u === "string" && /^https?:\/\//.test(u));
+    && Array.isArray(o.urls) && o.urls.length > 0 && o.urls.every((u) => typeof u === "string" && /^https?:\/\//.test(u))
+    && (o.from === undefined || typeof o.from === "string");
 }
 
 /** Built-in list, unless the override file names the language (spec §9 "knowledge source overrides"). */
