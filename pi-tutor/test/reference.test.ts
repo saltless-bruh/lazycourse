@@ -46,7 +46,7 @@ describe("fetchReference", () => {
     expect(r).toMatchObject({ status: "fetched", name: "tutor-python-ref", entries: 1, meta: { slug: "python~3.14", release: "3.14.8", mtime: 100, installed: "3.14.8", note: "" } });
     const skill = join(dir, "tutor-python-ref");
     expect(parseSkillHeader(readFileSync(join(skill, "SKILL.md"), "utf8")).name).toBe("tutor-python-ref");
-    expect(readFileSync(join(skill, "INDEX.md"), "utf8")).toContain("- pathlib.Path.rglob → references/library_pathlib.md");
+    expect(readFileSync(join(skill, "INDEX.md"), "utf8")).toMatch(/- pathlib\.Path\.rglob → references\/library_pathlib\.md:\d+/);
     expect(readFileSync(join(skill, "references", "library_pathlib.md"), "utf8")).toContain("Path.rglob(pattern)");
     expect(referenceInfo(dir, "python")).toEqual(r.meta);
     expect(hits).toEqual(["/docs.json", "/python~3.14/index.json", "/python~3.14/db.json"]);
@@ -59,6 +59,18 @@ describe("fetchReference", () => {
     expect((await fetchReference("python", deps(dir))).status).toBe("cached");
     expect(hits).toEqual(["/docs.json"]);
     expect((await fetchReference("python", deps(dir, { force: true }))).status).toBe("fetched");
+  });
+
+  it("a changed installed version refreshes SKILL.md from the small index, without the big download (final review I2)", async () => {
+    const dir = root();
+    await fetchReference("python", deps(dir, { installed: "3.14.2" }));
+    hits = [];
+    const r = await fetchReference("python", deps(dir, { installed: "3.14.8" }));
+    expect(r.status).toBe("refreshed");
+    expect(hits).toEqual(["/docs.json", "/python~3.14/index.json"]);
+    expect(referenceInfo(dir, "python")?.installed).toBe("3.14.8");
+    expect(readFileSync(join(dir, "tutor-python-ref", "SKILL.md"), "utf8")).toContain("Installed python: 3.14.8.");
+    expect(readFileSync(join(dir, "tutor-python-ref", "references", "library_pathlib.md"), "utf8")).toContain("Path.rglob");
   });
 
   it("an abort mid-download rejects with Cancelled, keeps the old skill, leaves no temp folder", async () => {

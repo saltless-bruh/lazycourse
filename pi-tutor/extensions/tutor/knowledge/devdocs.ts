@@ -45,16 +45,65 @@ export function chooseBundle(catalog: CatalogEntry[], devdocsType: string, insta
   return { entry: n, exact: false, note: `docs ${n.release} are newer than installed ${installed}: check that an item exists in ${installed} before teaching it` };
 }
 
-/** Split before <h1>-<h3> and pack sections into chunks of at most `max` HTML characters. */
-export function splitHtml(html: string, max = CHUNK_CHARS): string[] {
+/** Split points, coarse to fine: big headings, small headings, then block elements. */
+const SPLIT_LEVELS = [/(?=<h[1-3][\s>])/i, /(?=<h[4-6][\s>])/i, /(?=<(?:section|details|div|p|pre|table|dl|ul|ol)[\s>])/i];
+
+/**
+ * Split before headings and pack into chunks of at most `max` HTML characters. A section that is
+ * still too big is split again at the next finer level, so lookups land inside one Pi `read`
+ * (50 KB / 2000 lines); a single unsplittable block stays whole.
+ */
+export function splitHtml(html: string, max = CHUNK_CHARS, level = 0): string[] {
+  const parts = html.split(SPLIT_LEVELS[level]);
+  const fine: string[] = [];
+  for (const p of parts) fine.push(...(p.length > max && level + 1 < SPLIT_LEVELS.length ? splitHtml(p, max, level + 1) : [p]));
   const out: string[] = [];
   let cur = "";
-  for (const part of html.split(/(?=<h[1-3][\s>])/i)) {
+  for (const part of fine) {
     if (cur && cur.length + part.length > max) { out.push(cur); cur = ""; }
     cur += part;
   }
   if (cur || out.length === 0) out.push(cur);
   return out;
+}
+
+const MARK = /⟦A(\d+)⟧/g;
+
+/**
+ * Convert one chunk and find the converted line of each anchor: a marker is placed before the tag
+ * that carries the anchor, converted with the text, located, then removed. A marker left alone on
+ * its line (block tag before a heading) points at the next non-empty line.
+ */
+function convertWithAnchors(chunk: string): { text: string; lines: Map<string, number> } {
+  const starts = new Map<number, string[]>();
+  for (const m of chunk.matchAll(ANCHOR)) {
+    const at = chunk.lastIndexOf("<", m.index);
+    if (at < 0) continue;
+    const ids = starts.get(at) ?? [];
+    ids.push(m[1]);
+    starts.set(at, ids);
+  }
+  const order = [...starts.keys()].sort((a, b) => a - b);
+  const anchorsByMark = order.map((at) => starts.get(at) ?? []);
+  let marked = "";
+  let prev = 0;
+  order.forEach((at, k) => {
+    marked += chunk.slice(prev, at) + `⟦A${k}⟧`;
+    prev = at;
+  });
+  marked += chunk.slice(prev);
+  const raw = htmlToText(marked);
+  const rawLines = raw.split("\n");
+  const clean = rawLines.map((l) => l.replace(MARK, ""));
+  const lines = new Map<string, number>();
+  rawLines.forEach((l, i) => {
+    for (const m of l.matchAll(MARK)) {
+      let line = i;
+      while (line < clean.length - 1 && clean[line].trim() === "") line++;
+      for (const id of anchorsByMark[Number(m[1])] ?? []) if (!lines.has(id)) lines.set(id, line + 1);
+    }
+  });
+  return { text: clean.join("\n"), lines };
 }
 
 function safeName(page: string): string {
@@ -78,11 +127,12 @@ export async function buildReference(index: DevdocsIndex, db: Record<string, str
     used.add(base);
     chunks.forEach((chunk, i) => {
       const path = `references/${base}${chunks.length > 1 ? `.${i + 1}` : ""}.md`;
-      files.push({ path, text: `${htmlToText(chunk)}\n` });
-      if (i === 0) firstFile.set(page, path);
-      for (const m of chunk.matchAll(ANCHOR)) {
-        const key = `${page}#${m[1]}`;
-        if (!anchorFile.has(key)) anchorFile.set(key, path);
+      const { text, lines } = convertWithAnchors(chunk);
+      files.push({ path, text: `${text}\n` });
+      if (i === 0) firstFile.set(page, `${path}:1`);
+      for (const [id, line] of lines) {
+        const key = `${page}#${id}`;
+        if (!anchorFile.has(key)) anchorFile.set(key, `${path}:${line}`);
       }
     });
   }
@@ -95,7 +145,7 @@ export async function buildReference(index: DevdocsIndex, db: Record<string, str
     list.push(`- ${entry.name} → ${file}`);
     byType.set(entry.type, list);
   }
-  const lines = ["# Index", "", "grep this file for a name, then read the file it points to.", ""];
+  const lines = ["# Index", "", "grep this file for a name; each line ends with file:line. Read that file from that line (offset).", ""];
   for (const [type, list] of [...byType].sort((a, b) => a[0].localeCompare(b[0]))) lines.push(`## ${type}`, ...list, "");
   return { files, index: lines.join("\n"), entries: [...byType.values()].reduce((s, l) => s + l.length, 0) };
 }
@@ -107,8 +157,8 @@ export function referenceSkill(language: string, c: Choice, installed: string | 
   return `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n# ${c.entry.name} ${c.entry.release} reference\n\n` +
     `Installed ${language}: ${installed ?? "not detected"}.${c.note ? ` Note: ${c.note}.` : ""}\n\n` +
     "How to look something up:\n" +
-    "1. `grep` INDEX.md in this folder for the name (a function, type, module or keyword).\n" +
-    "2. `read` the file it points to.\n" +
+    "1. `grep` INDEX.md in this folder for the name (a function, type, module or keyword). Each line ends with `file:line`.\n" +
+    "2. `read` that file with `offset` set to the line and `limit` about 80. Never read a whole reference file: some are large.\n" +
     `3. In your hint, cite this skill (\`${name}\`) and the entry name.\n\n` +
     `Source: DevDocs \`${c.entry.slug}\`. ${htmlToText(c.entry.attribution).replace(/\s+/g, " ")}\n`;
 }

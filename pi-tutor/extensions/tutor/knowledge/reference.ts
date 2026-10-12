@@ -7,7 +7,8 @@ import { buildReference, chooseBundle, referenceSkill, type CatalogEntry, type D
 // Download a DevDocs bundle into ~/.pi/agent/skills/tutor-<lang>-ref (spec 2026-10-13 §5.2).
 export interface RefMeta { slug: string; release: string; mtime: number; installed: string | null; note: string }
 export interface RefDeps { fetch: typeof fetch; root: string; installed: string | null; devdocsType: string; override?: string; force?: boolean; signal?: AbortSignal; timeoutMs?: number }
-export interface RefResult { status: "fetched" | "cached"; name: string; meta: RefMeta; entries: number }
+/** `refreshed`: same bundle, but the installed version changed, so only SKILL.md and the meta were rewritten. */
+export interface RefResult { status: "fetched" | "cached" | "refreshed"; name: string; meta: RefMeta; entries: number }
 
 export function skillsRoot(): string {
   return join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "skills");
@@ -45,7 +46,15 @@ export async function fetchReference(language: string, d: RefDeps): Promise<RefR
   const name = `tutor-${language}-ref`;
   const meta: RefMeta = { slug: choice.entry.slug, release: choice.entry.release, mtime: choice.entry.mtime, installed: d.installed, note: choice.note };
   const prev = referenceInfo(d.root, language);
-  if (!d.force && prev && prev.slug === meta.slug && prev.mtime === meta.mtime) return { status: "cached", name, meta: prev, entries: 0 };
+  if (!d.force && prev && prev.slug === meta.slug && prev.mtime === meta.mtime) {
+    if (prev.installed === meta.installed && prev.note === meta.note) return { status: "cached", name, meta: prev, entries: 0 };
+    // Same docs, different installed version: rewrite the note from the small index, keep references/.
+    const small = await getJson<DevdocsIndex>(`${urls.documents}/${choice.entry.slug}/index.json?${choice.entry.mtime}`, d);
+    const dir = join(d.root, name);
+    writeFileSync(join(dir, "SKILL.md"), referenceSkill(language, choice, d.installed, small));
+    writeFileSync(join(dir, ".devdocs.json"), `${JSON.stringify(meta, null, 2)}\n`);
+    return { status: "refreshed", name, meta, entries: 0 };
+  }
 
   const docs = `${urls.documents}/${choice.entry.slug}`;
   const index = await getJson<DevdocsIndex>(`${docs}/index.json?${choice.entry.mtime}`, d);
@@ -53,7 +62,7 @@ export async function fetchReference(language: string, d: RefDeps): Promise<RefR
   const built = await buildReference(index, db, { signal: d.signal });
   if (d.signal?.aborted) throw new Cancelled();
 
-  // Dot-prefixed temp folder: Pi skips it and cachedSkills-style scans never match it.
+  // Dot-prefixed temp folder: Pi skips dot entries, so a half-built skill is never loaded.
   const dir = join(d.root, name);
   const tmp = join(d.root, `.${name}.tmp-${process.pid}`);
   rmSync(tmp, { recursive: true, force: true });

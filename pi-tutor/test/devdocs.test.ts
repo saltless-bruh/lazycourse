@@ -48,6 +48,14 @@ describe("splitHtml", () => {
   });
 });
 
+/** The converted line an INDEX entry points at (`- name → file:line`). */
+function lineAt(b: { files: { path: string; text: string }[]; index: string }, name: string): string {
+  const m = new RegExp(`^- ${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} → (\\S+):(\\d+)$`, "m").exec(b.index);
+  if (!m) throw new Error(`no index line for ${name}`);
+  const file = b.files.find((f) => f.path === m[1]);
+  return file ? file.text.split("\n")[Number(m[2]) - 1] ?? "" : "";
+}
+
 describe("buildReference", () => {
   const index: DevdocsIndex = {
     entries: [
@@ -66,20 +74,21 @@ describe("buildReference", () => {
     const paths = b.files.map((f) => f.path);
     expect(paths).toEqual(["references/manual.md", "references/library_pathlib.md"]);
     expect(b.files[0].text).toContain("string.format & more");
-    expect(b.index).toContain("## Standard Libraries\n- string.format → references/manual.md");
-    expect(b.index).toContain("## Files\n- pathlib → references/library_pathlib.md");
+    expect(b.index).toMatch(/## Standard Libraries\n- string\.format → references\/manual\.md:\d+/);
+    expect(b.index).toMatch(/## Files\n- pathlib → references\/library_pathlib\.md:1\n/);
     expect(b.index).not.toContain("gone");
     expect(b.entries).toBe(3);
     expect(b.index.indexOf("## Files")).toBeLessThan(b.index.indexOf("## Language"));
   });
 
   it("points an anchor in a later chunk to that chunk (one-page manuals like Lua)", async () => {
-    // filler after string.format pushes the whole §6 section into its own chunk
-    const big = { manual: manual.replace("string.format &amp; more</p>", "string.format &amp; more</p><p>" + "z".repeat(CHUNK_CHARS) + "</p>") };
+    // an oversize block before §6 becomes its own chunk, so §6 (string.format) lands in chunk 3
+    const big = { manual: manual.replace("<h2", "<p>" + "z".repeat(CHUNK_CHARS) + "</p><h2") };
     const b = await buildReference(index, big);
-    expect(b.files.map((f) => f.path)).toEqual(["references/manual.1.md", "references/manual.2.md"]);
-    expect(b.index).toContain("- string.format → references/manual.2.md");
-    expect(b.index).toContain("- Arithmetic Operators → references/manual.1.md");
+    expect(b.files.map((f) => f.path)).toEqual(["references/manual.1.md", "references/manual.2.md", "references/manual.3.md"]);
+    expect(b.index).toMatch(/- string\.format → references\/manual\.3\.md:\d+/);
+    expect(b.index).toMatch(/- Arithmetic Operators → references\/manual\.1\.md:\d+/);
+    for (const name of ["string.format", "Arithmetic Operators"]) expect(lineAt(b, name)).toMatch(name === "string.format" ? /string\.format/ : /Arithmetic/);
   });
 
   it("stops with Cancelled when aborted between pages", async () => {
@@ -99,5 +108,29 @@ describe("referenceSkill", () => {
     expect(text).toContain("Installed rust: 1.90.0. Note: docs 1.98.0 are newer than installed 1.90.0.");
     expect(text).toContain("`grep` INDEX.md");
     expect(text).toContain("© Example. Licensed under MIT.");
+  });
+});
+
+describe("final review I1: lookups land inside one read", () => {
+  it("splits an oversize section again at h4-h6, then at block elements", () => {
+    const sec = "<h2>S</h2>" + ["<h4>a</h4>", "<h4>b</h4>", "<h4>c</h4>"].map((h) => h + "x".repeat(40)).join("");
+    expect(splitHtml(sec, 60).length).toBeGreaterThanOrEqual(3);
+    for (const part of splitHtml(sec, 60)) expect(part.length).toBeLessThanOrEqual(60);
+    const blocks = "<h2>S</h2>" + Array.from({ length: 6 }, (_, i) => `<details><p>m${i}${"y".repeat(30)}</p></details>`).join("");
+    const parts = splitHtml(blocks, 100);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join("")).toBe(blocks); // nothing lost
+  });
+  it("records the converted line of each entry so read can start there", async () => {
+    const methods = Array.from({ length: 50 }, (_, i) => `<section id="method.m${i}"><h4>fn m${i}()</h4><p>does ${i}</p></section>`).join("");
+    const index: DevdocsIndex = { entries: [0, 25, 49].map((i) => ({ name: `Wrapping::m${i}`, path: `wrap#method.m${i}`, type: "std" })), types: [{ name: "std", count: 3, slug: "std" }] };
+    const b = await buildReference(index, { wrap: `<h1>Wrapping</h1>${methods}` });
+    for (const i of [0, 25, 49]) expect(lineAt(b, `Wrapping::m${i}`)).toContain(`fn m${i}()`);
+    expect(b.files.every((f) => !/⟦A\d+⟧/.test(f.text))).toBe(true); // markers removed
+  });
+  it("tells the model to read from the line, not the whole file", () => {
+    const text = referenceSkill("rust", { entry: e("rust", "rust", "1.98.0"), exact: true, note: "" }, "1.98.0", { entries: [], types: [] });
+    expect(text).toMatch(/offset/);
+    expect(text).toContain("file:line");
   });
 });

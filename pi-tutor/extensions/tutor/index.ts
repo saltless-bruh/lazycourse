@@ -312,7 +312,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   /** Spec 2026-10-13 §5.2: the language's DevDocs bundle at the installed version → tutor-<lang>-ref. */
-  async function fetchDocs(ctx: ExtensionContext, language: string, force: boolean): Promise<"fetched" | "cached" | "none" | "failed"> {
+  async function fetchDocs(ctx: ExtensionContext, language: string, force: boolean): Promise<"fetched" | "cached" | "refreshed" | "none" | "failed"> {
     const spec = LANGS[language];
     if (!spec) {
       ctx.ui.notify(`no cached docs for ${language}; the tutor relies on model knowledge`, "info");
@@ -325,7 +325,9 @@ export default function (pi: ExtensionAPI): void {
       const note = r.meta.note ? ` — ${r.meta.note}` : "";
       ctx.ui.notify(r.status === "cached"
         ? `${language} docs already current (${r.name}, ${r.meta.release})`
-        : `${language} docs: ${r.name} (${r.meta.release}, ${r.entries} entries)${note}`, "info");
+        : r.status === "refreshed"
+          ? `${language} docs updated for installed ${installed ?? "unknown"} (${r.name}, ${r.meta.release})${note}`
+          : `${language} docs: ${r.name} (${r.meta.release}, ${r.entries} entries)${note}`, "info");
       return r.status;
     } catch (e) {
       ctx.ui.notify(e instanceof Cancelled ? `${language} docs fetch cancelled` : `${language} docs fetch failed: ${e instanceof Error ? e.message : String(e)}`, "warning");
