@@ -14,6 +14,17 @@ export type TutorPayload =
   | { kind: "churn"; buf: number; path: string; region: [number, number]; edits: number }
   | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string };
 
+export interface EditorSnapshot {
+  path: string;
+  filetype: string;
+  /** 1-based cursor line. */
+  cursor: number;
+  /** 1-based line number of `lines[0]`. */
+  from: number;
+  lines: string[];
+  diagnostics: { line: number; severity: number; msg: string }[];
+}
+
 export interface NvimLinkOptions {
   socket?: string;
   root: string;
@@ -96,6 +107,23 @@ export class NvimLink {
       `local out = {} for _, d in ipairs(vim.diagnostic.get(...)) do out[#out+1] = { line = d.lnum + 1, severity = d.severity, msg = d.message } end return out`,
       [buf],
     )) as { line: number; severity: number; msg: string }[];
+  }
+
+  /** One round trip: current buffer's path, filetype, cursor, lines (all or ±radius) and diagnostics. */
+  async snapshot(mode: "full" | "window", radius = 20): Promise<EditorSnapshot | null> {
+    const s = (await this.raw.lua(
+      `local mode, radius = ...
+       local b = vim.api.nvim_get_current_buf()
+       local cur = vim.api.nvim_win_get_cursor(0)[1]
+       local from, to = 1, -1
+       if mode == "window" then from = math.max(1, cur - radius); to = cur + radius end
+       local lines = vim.api.nvim_buf_get_lines(b, from - 1, to, false)
+       local diags = {}
+       for _, d in ipairs(vim.diagnostic.get(b)) do diags[#diags + 1] = { line = d.lnum + 1, severity = d.severity, msg = d.message } end
+       return { path = vim.api.nvim_buf_get_name(b), filetype = vim.bo[b].filetype, cursor = cur, from = from, lines = lines, diagnostics = diags }`,
+      [mode, radius],
+    )) as EditorSnapshot;
+    return this.isInRoot(s.path) ? s : null;
   }
 
   async openLocation(path: string, line: number): Promise<void> {

@@ -151,4 +151,46 @@ describe("NvimLink hardening (review fixes)", () => {
       await until(() => payloads.some((p) => p.kind === "diagnostics"), 3000);
     } finally { await l?.close(); hh.kill(); rmSync(linkPath, { force: true }); }
   }, 20000);
+
+  it("snapshot('full') returns the whole buffer, filetype, cursor and diagnostics", async () => {
+    const { link, h } = await setup();
+    writeFileSync(join(h.root, "s.py"), Array.from({ length: 60 }, (_, i) => `line${i + 1}`).join("\n") + "\n");
+    await link.raw.command(`edit ${join(h.root, "s.py")}`);
+    await link.raw.lua(`vim.bo.filetype = "python"; vim.api.nvim_win_set_cursor(0, { 30, 0 })`);
+    await link.raw.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 4, col = 0, severity = 1, message = "boom" }})`);
+    const s = await link.snapshot("full");
+    expect(s).not.toBeNull();
+    expect(s!.path).toBe(join(h.root, "s.py"));
+    expect(s!.filetype).toBe("python");
+    expect(s!.cursor).toBe(30);
+    expect(s!.from).toBe(1);
+    expect(s!.lines).toHaveLength(60);
+    expect(s!.diagnostics).toEqual([{ line: 5, severity: 1, msg: "boom" }]);
+  }, 20000);
+
+  it("snapshot('window') returns radius lines around the cursor, clamped at the top", async () => {
+    const { link, h } = await setup();
+    writeFileSync(join(h.root, "w.py"), Array.from({ length: 60 }, (_, i) => `line${i + 1}`).join("\n") + "\n");
+    await link.raw.command(`edit ${join(h.root, "w.py")}`);
+    await link.raw.lua(`vim.api.nvim_win_set_cursor(0, { 30, 0 })`);
+    const mid = await link.snapshot("window", 20);
+    expect(mid!.from).toBe(10);
+    expect(mid!.lines).toHaveLength(41);
+    expect(mid!.lines[0]).toBe("line10");
+    await link.raw.lua(`vim.api.nvim_win_set_cursor(0, { 1, 0 })`);
+    const top = await link.snapshot("window", 20);
+    expect(top!.from).toBe(1);
+    expect(top!.lines).toHaveLength(21);
+    await link.raw.lua(`vim.api.nvim_win_set_cursor(0, { 60, 0 })`);
+    const bottom = await link.snapshot("window", 20);
+    expect(bottom!.from).toBe(40);
+    expect(bottom!.lines).toHaveLength(21);
+  }, 20000);
+
+  it("snapshot returns null for a buffer outside the root", async () => {
+    const { link } = await setup();
+    await link.raw.command(`edit /tmp/outside-snap-${process.pid}.py`);
+    expect(await link.snapshot("full")).toBeNull();
+    expect(await link.snapshot("window")).toBeNull();
+  }, 20000);
 });
