@@ -225,4 +225,16 @@ describe("NvimLink editor-window resolution (M2 review fixes)", () => {
     expect(r.diagnostics).toBeUndefined();
     expect(await link.snapshot("full")).toBeNull();
   }, 20000);
+
+  it("close detaches without quitting the user's Neovim", async () => {
+    const { link, h } = await setup();
+    await link.close();
+    await new Promise((r) => setTimeout(r, 200));
+    const { attach } = await import("neovim");
+    const other = attach({ socket: h.socket });
+    try {
+      expect(h.proc.exitCode).toBeNull();
+      expect(await other.lua("return vim.g.tutor_chan")).toBeNull();
+    } finally { await other.close(); }
+  }, 20000);
 });

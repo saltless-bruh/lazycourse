@@ -167,6 +167,7 @@ export class NvimLink {
     if (!this.connected) return;
     try { await this.raw.lua(`vim.g.tutor_chan = nil; if _G.__pi_tutor_timer then _G.__pi_tutor_timer:stop() end`); } catch { /* nvim may be gone */ }
     this.connected = false;
-    this.raw.quit?.();
+    // Close our socket only. `raw.quit()` is `:qa!`, which would kill the user's editor.
+    try { await this.raw.close(); } catch { /* already gone */ }
   }
 }
