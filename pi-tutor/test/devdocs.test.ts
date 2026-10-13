@@ -133,4 +133,11 @@ describe("final review I1: lookups land inside one read", () => {
     expect(text).toMatch(/offset/);
     expect(text).toContain("file:line");
   });
+  it("spells out with a worked example that the number is a line in the reference file, not in INDEX.md (live finding)", () => {
+    const text = referenceSkill("python", { entry: e("python~3.14", "python", "3.14.8"), exact: true, note: "" }, "3.14.8", { entries: [], types: [] });
+    expect(text).toContain("- os.walk → references/library_os.md:812");
+    expect(text).toContain("read `references/library_os.md` with offset 812");
+    expect(text).toMatch(/not a line in INDEX\.md/);
+    expect(text).toMatch(/never read SKILL\.md or INDEX\.md with that offset/i);
+  });
 });

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, existsSync, readdirSync, mkdirSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { fetchReference, referenceInfo, devdocsUrls, skillsRoot } from "../extensions/tutor/knowledge/reference.js";
+import { fetchReference, referenceInfo, devdocsUrls, skillsRoot, SKILL_FORMAT } from "../extensions/tutor/knowledge/reference.js";
 import { Cancelled } from "../extensions/tutor/progress.js";
 import { parseSkillHeader } from "../extensions/tutor/learn.js";
 
@@ -59,6 +59,22 @@ describe("fetchReference", () => {
     expect((await fetchReference("python", deps(dir))).status).toBe("cached");
     expect(hits).toEqual(["/docs.json"]);
     expect((await fetchReference("python", deps(dir, { force: true }))).status).toBe("fetched");
+  });
+
+  it("a skill written by an older SKILL.md format is refreshed in place, without the big download (live finding)", async () => {
+    const dir = root();
+    await fetchReference("python", deps(dir));
+    const metaFile = join(dir, "tutor-python-ref", ".devdocs.json");
+    const old = JSON.parse(readFileSync(metaFile, "utf8"));
+    delete old.format; // as written before the format number existed
+    writeFileSync(metaFile, JSON.stringify(old));
+    writeFileSync(join(dir, "tutor-python-ref", "SKILL.md"), "---\nname: tutor-python-ref\ndescription: \"old\"\n---\nold steps\n");
+    hits = [];
+    const r = await fetchReference("python", deps(dir));
+    expect(r.status).toBe("refreshed");
+    expect(hits).toEqual(["/docs.json", "/python~3.14/index.json"]);
+    expect(readFileSync(join(dir, "tutor-python-ref", "SKILL.md"), "utf8")).toMatch(/not a line in INDEX\.md/);
+    expect(referenceInfo(dir, "python")?.format).toBe(SKILL_FORMAT);
   });
 
   it("a changed installed version refreshes SKILL.md from the small index, without the big download (final review I2)", async () => {

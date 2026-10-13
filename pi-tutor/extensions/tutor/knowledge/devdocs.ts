@@ -158,7 +158,9 @@ export function referenceSkill(language: string, c: Choice, installed: string | 
     `Installed ${language}: ${installed ?? "not detected"}.${c.note ? ` Note: ${c.note}.` : ""}\n\n` +
     "How to look something up:\n" +
     "1. `grep` INDEX.md in this folder for the name (a function, type, module or keyword). Each line ends with `file:line`.\n" +
-    "2. `read` that file with `offset` set to the line and `limit` about 80. Never read a whole reference file: some are large.\n" +
+    "2. `read` that reference file with `offset` set to the number after the colon and `limit` about 80.\n" +
+    "   The number is a line in the reference file, not a line in INDEX.md. Never read SKILL.md or INDEX.md with that offset.\n" +
+    "   Example: the index line `- os.walk → references/library_os.md:812` means: read `references/library_os.md` with offset 812.\n" +
     `3. In your hint, cite this skill (\`${name}\`) and the entry name.\n\n` +
     `Source: DevDocs \`${c.entry.slug}\`. ${htmlToText(c.entry.attribution).replace(/\s+/g, " ")}\n`;
 }

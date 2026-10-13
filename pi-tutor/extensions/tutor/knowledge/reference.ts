@@ -5,7 +5,13 @@ import { Cancelled } from "../progress.js";
 import { buildReference, chooseBundle, referenceSkill, type CatalogEntry, type DevdocsIndex } from "./devdocs.js";
 
 // Download a DevDocs bundle into ~/.pi/agent/skills/tutor-<lang>-ref (spec 2026-10-13 §5.2).
-export interface RefMeta { slug: string; release: string; mtime: number; installed: string | null; note: string }
+/**
+ * Version of the SKILL.md wording. Bump it when referenceSkill's text changes: existing skills on
+ * disk then get their SKILL.md rewritten from the small index, without re-downloading the bundle.
+ */
+export const SKILL_FORMAT = 2;
+
+export interface RefMeta { slug: string; release: string; mtime: number; installed: string | null; note: string; format?: number }
 export interface RefDeps { fetch: typeof fetch; root: string; installed: string | null; devdocsType: string; override?: string; force?: boolean; signal?: AbortSignal; timeoutMs?: number }
 /** `refreshed`: same bundle, but the installed version changed, so only SKILL.md and the meta were rewritten. */
 export interface RefResult { status: "fetched" | "cached" | "refreshed"; name: string; meta: RefMeta; entries: number }
@@ -44,10 +50,10 @@ export async function fetchReference(language: string, d: RefDeps): Promise<RefR
   const choice = chooseBundle(catalog, d.devdocsType, d.installed, d.override);
   if (!choice) throw new Error(`DevDocs has no ${language} documentation`);
   const name = `tutor-${language}-ref`;
-  const meta: RefMeta = { slug: choice.entry.slug, release: choice.entry.release, mtime: choice.entry.mtime, installed: d.installed, note: choice.note };
+  const meta: RefMeta = { slug: choice.entry.slug, release: choice.entry.release, mtime: choice.entry.mtime, installed: d.installed, note: choice.note, format: SKILL_FORMAT };
   const prev = referenceInfo(d.root, language);
   if (!d.force && prev && prev.slug === meta.slug && prev.mtime === meta.mtime) {
-    if (prev.installed === meta.installed && prev.note === meta.note) return { status: "cached", name, meta: prev, entries: 0 };
+    if (prev.installed === meta.installed && prev.note === meta.note && prev.format === SKILL_FORMAT) return { status: "cached", name, meta: prev, entries: 0 };
     // Same docs, different installed version: rewrite the note from the small index, keep references/.
     const small = await getJson<DevdocsIndex>(`${urls.documents}/${choice.entry.slug}/index.json?${choice.entry.mtime}`, d);
     const dir = join(d.root, name);
