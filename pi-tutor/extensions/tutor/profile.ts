@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-// Learner profile (spec §6): node:sqlite, one migration per schema version.
+// Learner profile (spec §6; v2: spec 2026-10-13 §7.1, §8): node:sqlite, one migration per schema version.
 export interface LanguageRow { name: string; level: number; interview: Record<string, string>; created: number }
 export interface ConceptRow { language: string; tag: string; ease: number; episodes: number }
 export interface ProjectRow { id: number; language: string; path: string; title: string; status: string; created: number }
@@ -16,6 +16,14 @@ const MIGRATIONS: string[] = [
      rungs_used INTEGER NOT NULL, turns INTEGER NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL);
    CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT, language TEXT NOT NULL, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
      status TEXT NOT NULL, created INTEGER NOT NULL);`,
+  // v2 (spec 2026-10-13 §7.1, §7 #7, §8): tutor memory with a full-text index, and learner feedback.
+  `CREATE TABLE memory (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, text TEXT NOT NULL, language TEXT, project TEXT,
+     created INTEGER NOT NULL, updated INTEGER NOT NULL);
+   CREATE VIRTUAL TABLE memory_fts USING fts5(text, content='memory', content_rowid='id', tokenize='porter unicode61');
+   CREATE TRIGGER memory_ai AFTER INSERT ON memory BEGIN INSERT INTO memory_fts(rowid, text) VALUES (new.id, new.text); END;
+   CREATE TRIGGER memory_ad AFTER DELETE ON memory BEGIN INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.id, old.text); END;
+   CREATE TABLE feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, language TEXT, project TEXT, rung INTEGER,
+     created INTEGER NOT NULL);`,
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -28,6 +36,23 @@ export function defaultProfilePath(): string {
 type Row = Record<string, unknown>;
 const project = (r: Row): ProjectRow => ({
   id: Number(r.id), language: String(r.language), path: String(r.path), title: String(r.title), status: String(r.status), created: Number(r.created),
+});
+
+export type MemoryType = "learner" | "feedback" | "project" | "reference";
+export interface MemoryRow { id: number; type: MemoryType; text: string; language: string | null; project: string | null; created: number; updated: number }
+export type FeedbackKind = "too-long" | "too-vague" | "too-much-help" | "good";
+export interface FeedbackRow { kind: FeedbackKind; language: string | null; project: string | null; rung: number | null; created: number }
+
+/** A learner's words → FTS5 syntax: each term quoted, OR'd (idea from @pify/memory src/fts.ts, MIT). */
+export function toFtsQuery(query: string): string {
+  const terms = query.split(/\s+/).map((t) => t.replace(/"/g, "")).filter((t) => t.length > 1);
+  return terms.length ? terms.map((t) => `"${t}"`).join(" OR ") : '""';
+}
+
+const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
+const memoryRow = (r: Row): MemoryRow => ({
+  id: Number(r.id), type: String(r.type) as MemoryType, text: String(r.text), language: str(r.language), project: str(r.project),
+  created: Number(r.created), updated: Number(r.updated),
 });
 
 export class Profile {
@@ -117,5 +142,49 @@ export class Profile {
 
   projects(language: string): ProjectRow[] {
     return (this.db.prepare("SELECT * FROM projects WHERE language = ? ORDER BY id").all(language) as Row[]).map(project);
+  }
+
+  /** One fact; the same type+text again only bumps `updated` (spec 2026-10-13 §7.1). */
+  remember(m: { type: MemoryType; text: string; language: string | null; project: string | null }, now: number): { id: number; created: boolean } {
+    const old = this.db.prepare("SELECT id FROM memory WHERE type = ? AND text = ?").get(m.type, m.text) as Row | undefined;
+    if (old) {
+      this.db.prepare("UPDATE memory SET updated = ? WHERE id = ?").run(now, Number(old.id));
+      return { id: Number(old.id), created: false };
+    }
+    const r = this.db.prepare("INSERT INTO memory (type, text, language, project, created, updated) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(m.type, m.text, m.language, m.project, now, now) as Row;
+    return { id: Number(r.id), created: true };
+  }
+
+  /** Newest first; a language also gets the language-free memories, `null` gets every language. */
+  memories(o: { language: string | null; limit: number }): MemoryRow[] {
+    const rows = o.language === null
+      ? this.db.prepare("SELECT * FROM memory ORDER BY updated DESC, id DESC LIMIT ?").all(o.limit)
+      : this.db.prepare("SELECT * FROM memory WHERE language = ? OR language IS NULL ORDER BY updated DESC, id DESC LIMIT ?").all(o.language, o.limit);
+    return (rows as Row[]).map(memoryRow);
+  }
+
+  recall(query: string, limit: number): MemoryRow[] {
+    const q = toFtsQuery(query);
+    if (q === '""') return [];
+    return (this.db.prepare(`SELECT m.* FROM memory_fts f JOIN memory m ON m.id = f.rowid
+      WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?`).all(q, limit) as Row[]).map(memoryRow);
+  }
+
+  forget(id: number): boolean {
+    return Number(this.db.prepare("DELETE FROM memory WHERE id = ?").run(id).changes) > 0;
+  }
+
+  recordFeedback(f: Omit<FeedbackRow, "created">, now: number): void {
+    this.db.prepare("INSERT INTO feedback (kind, language, project, rung, created) VALUES (?, ?, ?, ?, ?)")
+      .run(f.kind, f.language, f.project, f.rung, now);
+  }
+
+  /** The learner's feedback for a language, oldest first (spec 2026-10-13 §7 #7). */
+  feedback(language: string): FeedbackRow[] {
+    return (this.db.prepare("SELECT * FROM feedback WHERE language = ? ORDER BY id").all(language) as Row[]).map((r) => ({
+      kind: String(r.kind) as FeedbackKind, language: str(r.language), project: str(r.project),
+      rung: r.rung === null ? null : Number(r.rung), created: Number(r.created),
+    }));
   }
 }

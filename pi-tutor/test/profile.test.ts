@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Profile, SCHEMA_VERSION, defaultProfilePath } from "../extensions/tutor/profile.js";
+import { Profile, SCHEMA_VERSION, defaultProfilePath, toFtsQuery } from "../extensions/tutor/profile.js";
 
 let p: Profile | undefined;
 afterEach(() => { p?.close(); p = undefined; });
@@ -107,5 +107,64 @@ describe("busy profile (final review I4)", () => {
       expect(() => p!.setLevel("rust", 1)).toThrow(/locked|busy/i);
       expect(Date.now() - t0).toBeGreaterThanOrEqual(40);
     } finally { other.exec("ROLLBACK"); other.close(); }
+  });
+});
+
+describe("profile v2: memory and feedback (spec 2026-10-13 §7.1, §7 #7, §8)", () => {
+  const open = () => Profile.open(":memory:");
+  it("is schema v2", () => { expect(SCHEMA_VERSION).toBe(2); expect(open().version).toBe(2); });
+  it("upgrades a v1 profile in place and keeps its rows", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "pitutor-v1-")), "profile.sqlite");
+    const raw = new DatabaseSync(file);
+    raw.exec(`CREATE TABLE schema_version (v INTEGER NOT NULL); INSERT INTO schema_version (v) VALUES (1);
+      CREATE TABLE languages (name TEXT PRIMARY KEY, level INTEGER NOT NULL, interview_json TEXT NOT NULL, created INTEGER NOT NULL);
+      INSERT INTO languages VALUES ('rust', 40, '{}', 1);`);
+    raw.close();
+    const q = Profile.open(file);
+    expect(q.version).toBe(2);
+    expect(q.language("rust")?.level).toBe(40);
+    expect(q.remember({ type: "learner", text: "knows Go", language: null, project: null }, 2).created).toBe(true);
+    q.close();
+  });
+  it("remember dedupes the same type+text and bumps updated", () => {
+    const q = open();
+    const a = q.remember({ type: "learner", text: "prefers Rust comparisons", language: "python", project: null }, 1);
+    const b = q.remember({ type: "learner", text: "prefers Rust comparisons", language: "python", project: null }, 5);
+    expect(b).toEqual({ id: a.id, created: false });
+    expect(q.memories({ language: "python", limit: 10 })[0].updated).toBe(5);
+  });
+  it("memories: newest first, the language plus language-free rows", () => {
+    const q = open();
+    q.remember({ type: "learner", text: "general fact", language: null, project: null }, 1);
+    q.remember({ type: "project", text: "python fact", language: "python", project: "/p" }, 2);
+    q.remember({ type: "project", text: "rust fact", language: "rust", project: "/r" }, 3);
+    expect(q.memories({ language: "python", limit: 10 }).map((m) => m.text)).toEqual(["python fact", "general fact"]);
+    expect(q.memories({ language: null, limit: 2 }).map((m) => m.text)).toEqual(["rust fact", "python fact"]);
+  });
+  it("recall searches words with BM25 and survives FTS syntax in the query", () => {
+    const q = open();
+    q.remember({ type: "learner", text: "struggles with closures and borrowing", language: "rust", project: null }, 1);
+    q.remember({ type: "reference", text: "uses pytest for tests", language: "python", project: null }, 2);
+    expect(q.recall("closures", 5).map((m) => m.text)).toEqual(["struggles with closures and borrowing"]);
+    expect(q.recall('closures" OR *', 5).length).toBe(1);
+    expect(q.recall("", 5)).toEqual([]);
+  });
+  it("forget removes the row and its index entry", () => {
+    const q = open();
+    const { id } = q.remember({ type: "learner", text: "likes diagrams", language: null, project: null }, 1);
+    expect(q.forget(id)).toBe(true);
+    expect(q.recall("diagrams", 5)).toEqual([]);
+    expect(q.forget(id)).toBe(false);
+  });
+  it("feedback is logged per language, oldest first", () => {
+    const q = open();
+    q.recordFeedback({ kind: "too-long", language: "python", project: "/p", rung: 2 }, 1);
+    q.recordFeedback({ kind: "good", language: "python", project: "/p", rung: null }, 2);
+    q.recordFeedback({ kind: "too-vague", language: "rust", project: null, rung: null }, 3);
+    expect(q.feedback("python").map((f) => f.kind)).toEqual(["too-long", "good"]);
+  });
+  it("toFtsQuery quotes each term and ORs them (from @pify/memory fts.ts)", () => {
+    expect(toFtsQuery('a closures "x" yz*')).toBe('"closures" OR "yz*"'); // one-letter terms are dropped, as upstream
+    expect(toFtsQuery("  ")).toBe('""');
   });
 });
