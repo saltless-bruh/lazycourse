@@ -92,6 +92,12 @@ describe("formatCheck", () => {
     expect(t).toMatch(/40 characters/);
     expect(t).toMatch(/tutor-judgment/);
   });
+  it("says the breaks are the tutor's own and must not reach the learner (live: model blamed the learner)", () => {
+    const t = formatCheck(["wide-diagram"]);
+    expect(t).toMatch(/your own previous reply/i);
+    expect(t).toMatch(/not the learner's/i);
+    expect(t).toMatch(/do not mention this note/i);
+  });
 });
 
 describe("replyReminder", () => {

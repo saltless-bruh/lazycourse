@@ -81,5 +81,9 @@ export function replyReminder(rung: number | null): string {
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
 export function formatCheck(issues: Issue[]): string {
-  return ["[tutor-check] your last reply broke these rules; follow them in this one:", ...issues.map((i) => `- ${FIX[i]}`)].join("\n");
+  // Live check: worded as "your last reply", the model blamed the learner's diagram for its own.
+  return [
+    "[tutor-check] Your own previous reply (the tutor's, not the learner's) broke these rules. Follow them in this reply, and do not mention this note to the learner:",
+    ...issues.map((i) => `- ${FIX[i]}`),
+  ].join("\n");
 }
