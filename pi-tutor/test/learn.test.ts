@@ -98,4 +98,18 @@ describe("M6c: saveSkill rename (M5 #34)", () => {
     expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toMatch(/^name: foo-2$/m);
     expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toContain("body");
   });
+  it("renames CRLF front matter, keeping its line endings (M6c M9)", () => {
+    const root = mkdtempSync(join(tmpdir(), "pitutor-learn-"));
+    const text = "---\r\nname: foo\r\ndescription: \"x\"\r\n---\r\nbody\r\n";
+    saveSkill(root, "foo", text);
+    const saved = readFileSync(join(saveSkill(root, "foo", text), "SKILL.md"), "utf8");
+    expect(saved).toBe(text.replace("name: foo\r\n", "name: foo-2\r\n"));
+    expect(parseSkillHeader(saved).name).toBe("foo-2");
+  });
+  it("adds a name line when the front matter has none, so the folder and the skill agree (M6c M9)", () => {
+    const root = mkdtempSync(join(tmpdir(), "pitutor-learn-"));
+    mkdirSync(join(root, "foo"));
+    const saved = readFileSync(join(saveSkill(root, "foo", "---\ndescription: \"x\"\n---\nbody\n"), "SKILL.md"), "utf8");
+    expect(saved).toBe("---\nname: foo-2\ndescription: \"x\"\n---\nbody\n");
+  });
 });

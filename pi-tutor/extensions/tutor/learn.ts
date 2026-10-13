@@ -90,9 +90,13 @@ export function saveSkill(root: string, name: string, text: string): string {
   const dir = join(root, final);
   mkdirSync(dir, { recursive: true });
   // M5 #34: rename the `name:` line wherever it sits in the front matter, never in the body.
+  // CRLF needs nothing extra: a multiline `$` also matches before "\r". Front matter without a
+  // `name:` line gets one after the opening `---`, so the folder and the skill name agree (M6c M9).
   const end = text.indexOf("\n---", 3);
+  const head = end < 0 ? "" : text.slice(0, end);
   const renamed = final === name || end < 0 ? text
-    : text.slice(0, end).replace(/^(name:[ \t]*)\S+[ \t]*$/m, `$1${final}`) + text.slice(end);
+    : /^name:/m.test(head) ? head.replace(/^(name:[ \t]*)\S+[ \t]*$/m, `$1${final}`) + text.slice(end)
+    : head.replace(/^---(\r?\n)/, `---$1name: ${final}$1`) + text.slice(end);
   writeFileSync(join(dir, "SKILL.md"), renamed, { flag: "wx" });
   return dir;
 }
