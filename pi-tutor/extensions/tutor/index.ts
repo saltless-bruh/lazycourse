@@ -8,7 +8,7 @@ import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, REPLY_REMINDER, type Issue } from "./compliance.js";
+import { guardJudgment, checkReply, formatCheck, replyReminder, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
@@ -297,7 +297,7 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     if (workflow) parts.push(formatWorkflowContext(workflow, band));
     if (lastIssues.length) parts.push(formatCheck(lastIssues));
-    parts.push(REPLY_REMINDER);
+    parts.push(replyReminder(run.rung));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });

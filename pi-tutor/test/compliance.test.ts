@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, REPLY_REMINDER } from "../extensions/tutor/compliance.js";
+import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder } from "../extensions/tutor/compliance.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ judgment, concept_tags: ["t"], task_done_ids: [], episode_closed: false, step_done });
 const fence = (tag: string, lines: string[]) => "```" + tag + "\n" + lines.join("\n") + "\n```";
-const JUDGED = fence("tutor-judgment", ['{"judgment":"none"}']);
+const JUDGED = "\n" + fence("tutor-judgment", ['{"judgment":"none"}']); // a fence opens on its own line
 const ok = { band: "intermediate" as const, rung: 2, judged: true, noCode: false };
 
 describe("hasReasoning", () => {
@@ -78,6 +78,13 @@ describe("checkReply after golden round 1 (nemotron, 2026-10-13)", () => {
   });
 });
 
+describe("checkReply after golden round 2", () => {
+  it("only fences that start a line count; an inline ``` in a sentence does not shift the pairing", () => {
+    const text = ["**What to try**: draw it in a ``` markdown block, as above.", "```", "a", "│", "▼", "b", "```", "**In short**: draw it.", JUDGED].join("\n");
+    expect(checkReply(text, ok)).toEqual([]);
+  });
+});
+
 describe("formatCheck", () => {
   it("is a [tutor-check] block naming each break", () => {
     const t = formatCheck(["wide-diagram", "missing-judgment"]);
@@ -87,11 +94,17 @@ describe("formatCheck", () => {
   });
 });
 
-describe("REPLY_REMINDER", () => {
+describe("replyReminder", () => {
   it("is one short line naming the structure and the judgment block", () => {
-    expect(REPLY_REMINDER.startsWith("[tutor-reply]")).toBe(true);
-    expect(REPLY_REMINDER).not.toContain("\n");
-    expect(REPLY_REMINDER).toContain("In short");
-    expect(REPLY_REMINDER).toContain("tutor-judgment");
+    const r = replyReminder(null);
+    expect(r.startsWith("[tutor-reply]")).toBe(true);
+    expect(r).not.toContain("\n");
+    expect(r).toContain("In short");
+    expect(r).toContain("tutor-judgment");
+  });
+  it("below rung 5 it names the rung and forbids stating the fix (golden round 2: fix leaked in words at rung 2)", () => {
+    expect(replyReminder(2)).toMatch(/rung 2 \(concept\): do not state the fix/);
+    expect(replyReminder(5)).not.toMatch(/do not state the fix/);
+    expect(replyReminder(null)).not.toMatch(/rung/);
   });
 });

@@ -1,5 +1,6 @@
 import type { Band } from "./policy.js";
 import type { Judgment } from "./judgment.js";
+import { RUNG_NAMES } from "./ladder.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -27,7 +28,8 @@ export function guardJudgment(j: Judgment, prompt: string): Judgment {
   return judgment === j.judgment && step_done === j.step_done ? j : { ...j, judgment, step_done };
 }
 
-const FENCES = /```([^\n`]*)\r?\n([\s\S]*?)```/g;
+/** Fences open and close at the start of a line; an inline ``` inside a sentence is not one. */
+const FENCES = /^```([^\n`]*)\r?\n([\s\S]*?)^```/gm;
 const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done|\[episode\]|\[workflow\]|\[tutor-check\]|\brung \d)/i;
 /** Fences quoting a document (spec/tasks.md, README): wrapping prose is harmless and it is not code. */
 const QUOTES = new Set(["markdown", "md"]);
@@ -69,9 +71,13 @@ const FIX: Record<Issue, string> = {
 
 /**
  * Last line of every turn's hidden context. Golden round 1 (nemotron): 3 of 5 replies dropped the
- * judgment block that the system prompt asks for; a reminder next to the learner's message is read last.
+ * judgment block that the system prompt asks for; round 2: a rung 2 reply stated the fix in words.
+ * A reminder next to the learner's message is read last.
  */
-export const REPLY_REMINDER = "[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the ```tutor-judgment block.";
+export function replyReminder(rung: number | null): string {
+  const hold = rung !== null && rung < 5 ? ` At rung ${rung} (${RUNG_NAMES[rung - 1]}): do not state the fix, in code or in words.` : "";
+  return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}`;
+}
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
 export function formatCheck(issues: Issue[]): string {

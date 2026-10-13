@@ -7,6 +7,13 @@ import type { Band } from "../extensions/tutor/policy.js";
 const APP = 'user = {"id": 7}\nprint("hello")\nprint(user["name"])\n';
 const KEYERROR = "My program app.py crashes with KeyError: 'name' on line 3. What does that mean?";
 const T = 600_000;
+/**
+ * The fix for each case, stated in words or code. checkReply only sees code blocks, so a reply can
+ * hand over the answer in prose and still be "clean" (side-agent note, golden round 1). Each case
+ * knows its own fix; below rung 5 the reply must not contain it.
+ */
+const KEYERROR_FIX = /\.get\(|["']name["']\s+in\b|add (?:a |the )?["']?name["']? key/i;
+const LOOP_FIX = /range\(len\(items\)\)|remove the `?-\s?1`?|drop the `?-\s?1`?/i;
 
 /** The reply, its judgment and its rule breaks; `show` is printed when an expectation fails. */
 function report(reply: string, o: { band: Band; rung: number | null; noCode: boolean }) {
@@ -22,12 +29,14 @@ describe("golden transcripts (model: GOLDEN_MODEL or the configured default)", (
     const { j, issues, show } = report(r.replies[0], { band: "beginner", rung: 3, noCode: false });
     expect(issues, show).toEqual([]);
     expect(j?.judgment, show).not.toBe("correct");
+    expect(r.replies[0], `rung 3 leaked the fix\n${show}`).not.toMatch(KEYERROR_FIX);
   }, T);
 
   it("pro: the same question gets no code block", async () => {
     const r = await runTutor({ level: 90, language: "python", files: { "app.py": APP }, messages: [KEYERROR] });
     const { issues, show } = report(r.replies[0] ?? "", { band: "pro", rung: 1, noCode: true });
     expect(issues, show).toEqual([]);
+    expect(r.replies[0], `rung 1 leaked the fix\n${show}`).not.toMatch(KEYERROR_FIX);
   }, T);
 
   it("intermediate: a question is not judged correct; stated reasoning is judged", async () => {
@@ -37,6 +46,7 @@ describe("golden transcripts (model: GOLDEN_MODEL or the configured default)", (
     const first = report(r.replies[0], { band: "intermediate", rung: 2, noCode: false });
     expect(first.issues, first.show).toEqual([]);
     expect(first.j?.judgment, first.show).not.toBe("correct");
+    expect(r.replies[0], `rung 2 leaked the fix\n${first.show}`).not.toMatch(LOOP_FIX);
     const second = report(r.replies[1], { band: "intermediate", rung: 2, noCode: false });
     expect(second.j?.judgment, second.show).toMatch(/correct|partial/);
   }, T);
