@@ -296,10 +296,13 @@ export default function (pi: ExtensionAPI): void {
     workflow = restoreWorkflow(ctx);
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
-      link = await NvimLink.connect({
+      // Pane review #5: an old link's disconnect can land after /new or /resume connected a new one;
+      // only the link that is still current may mark the editor as gone.
+      let mine: NvimLink | null = null;
+      link = mine = await NvimLink.connect({
         root: ctx.cwd,
         onPayload,
-        onDisconnect: () => { state.connected = false; link = null; if (closing) return; state.lost = true; paint(); },
+        onDisconnect: () => { if (mine === null || link !== mine) return; state.connected = false; link = null; if (closing) return; state.lost = true; paint(); },
       });
       state.connected = link !== null;
       if (link) state.lost = false;

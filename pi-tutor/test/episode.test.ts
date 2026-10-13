@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
 import { boot, episodes, turn, judged, assistant, REASONED } from "./fake-pi.js";
+import { NvimLink, type NvimLinkOptions } from "../extensions/tutor/nvim.js";
 
 let h: Headless | undefined;
 let nvim: NeovimClient | undefined;
@@ -185,6 +186,22 @@ describe("widget when the editor link ends (M1b #2, M3 #19)", () => {
     h!.kill(); h = undefined;
     await until(() => b.widgets["tutor"]?.[1]?.startsWith("nvim closed") === true);
     expect(b.widgets["tutor"]?.[1]).toMatch(/^nvim closed · stuck: .* · judged partial$/); // the state is clipped, never the judgment (M6c I2)
+  }, 20000);
+  it("the old link's late disconnect after /new does not mark the new link lost (pane review #5)", async () => {
+    const seen: NvimLinkOptions[] = [];
+    const real = NvimLink.connect.bind(NvimLink);
+    const spy = vi.spyOn(NvimLink, "connect").mockImplementation((o) => { seen.push(o); return real(o); });
+    try {
+      const b = await linked();
+      await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+      const saved = process.env.NVIM; process.env.NVIM = h!.socket;
+      try { await b.events["session_start"]({ type: "session_start", reason: "new" }, b.ctx); } finally { if (saved) process.env.NVIM = saved; else delete process.env.NVIM; }
+      expect(seen).toHaveLength(2);
+      expect(b.widgets["tutor"]?.[1]).not.toMatch(/outside nvim|nvim closed/); // the new link is up
+      seen[0].onDisconnect?.(); // the first link's disconnect, arriving after the new session connected
+      await b.commands["tutor-level"].handler("10", b.ctx); // repaint
+      expect(b.widgets["tutor"]?.[1]).not.toMatch(/outside nvim|nvim closed/);
+    } finally { spy.mockRestore(); }
   }, 20000);
   it("a session shutdown (/new, /resume) does not flash the detached wording", async () => {
     const b = await linked();
