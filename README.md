@@ -65,7 +65,8 @@ tells the model what to fix on the next turn; a `correct` judgment needs your re
 
 - `:TutorPlan <task id>` walks a task from `spec/tasks.md` through the six-step design recipe
   (Find, Shape, Examples, Steps, Map, Build); the widget shows `plan k/6`. The tutor moves to
-  the next step when your artifact is done; `:TutorPlan next` moves on yourself.
+  the next step when your artifact is done; `:TutorPlan next` moves on yourself, `:TutorPlan off`
+  stops the recipe. During the recipe the hint rung stays where it started.
 - `:TutorArchitect [question|off]` switches to the architecture professor (components, data
   flow, trade-offs, no code) until `off` or `:TutorPlan`.
 

@@ -114,3 +114,28 @@ describe("replyReminder", () => {
     expect(replyReminder(null)).not.toMatch(/rung/);
   });
 });
+
+describe("final review fixes", () => {
+  it("I1: questions and requests count as reasoning only with a strong marker", () => {
+    for (const t of ["what should I do?", "why is it's failing?", "how do I fix this", "help me with this error", "can you show me the answer", "just give me the code now"]) {
+      expect(hasReasoning(t), t).toBe(false);
+    }
+    for (const t of ["how about this: I think range stops early", "why does it fail? because x is None", "x is a string not an int", "I think range stops one early"]) {
+      expect(hasReasoning(t), t).toBe(true);
+    }
+  });
+  it("I3: a reply wrapped in a markdown fence is still checked, including code nested inside it", () => {
+    const wrapped = ["```markdown", "**What's happening**: see INDEX.md", "```python", "a = 1", "```", "**In short**: x", "```", JUDGED].join("\n");
+    const issues = checkReply(wrapped, { ...ok, rung: 2 });
+    expect(issues).toContain("internals");
+    expect(issues).toContain("code-above-rung");
+    expect(checkReply(fence("markdown", ["- [ ] P1.T1 Parse the command line into a Command"]) + JUDGED, ok)).toEqual([]);
+  });
+  it("I3: an unclosed fence runs to the end of the reply", () => {
+    expect(checkReply("**In short**: x\n```python\na = 1\nb = 2", { ...ok, rung: 2 })).toContain("code-above-rung");
+  });
+  it("I2: the reminder keeps the hold during a workflow even at rung 5", () => {
+    expect(replyReminder(5, true)).toMatch(/do not state the fix/);
+    expect(replyReminder(5, false)).not.toMatch(/do not state the fix/);
+  });
+});

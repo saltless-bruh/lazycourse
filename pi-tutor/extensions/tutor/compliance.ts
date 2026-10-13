@@ -11,14 +11,20 @@ export const DIAGRAM_COLS = 40;
 const SUMMARY_AFTER = 6;
 const TUTOR_PREFIX = "[tutor]";
 
-const REASONING = /\b(because|since|so that|therefore|i think|i guess|i believe|maybe|probably|should|must|means|the (?:fix|problem|issue|bug|error|cause) is|it'?s|that'?s|i'?ll|i would|i'd)\b/i;
+/** Markers that state a reason or an answer even inside a question ("why? because …"). */
+const STRONG = /\b(because|since|so that|therefore|i think|i guess|i believe|the (?:fix|problem|issue|bug|error|cause) is)\b/i;
+/** Weaker markers: they also turn up in questions and requests ("what should I do?"). */
+const WEAK = /\b(maybe|probably|should|must|means|it'?s|that'?s|i'?ll|i would|i'd)\b/i;
+/** A message that opens like a question or a request asks for help (final review I1). */
+const ASKING = /^(how|what|why|where|which|when|who|can|could|would|will|is|are|do|does|did|should|help|explain|show|give|tell|just|please)\b/i;
 
 /** Whether the learner's message states a reason or an answer the tutor can judge. */
 export function hasReasoning(prompt: string): boolean {
   const t = prompt.trim();
   if (!t || t.startsWith(TUTOR_PREFIX)) return false;
-  if (REASONING.test(t)) return true;
-  return !t.includes("?") && t.split(/\s+/).length >= 4;
+  if (STRONG.test(t)) return true;
+  if (ASKING.test(t) || t.includes("?")) return false;
+  return WEAK.test(t) || t.split(/\s+/).length >= 4;
 }
 
 /** Only reasoning can be `correct`; only the learner (not a [tutor] nudge) finishes a workflow step. */
@@ -28,10 +34,16 @@ export function guardJudgment(j: Judgment, prompt: string): Judgment {
   return judgment === j.judgment && step_done === j.step_done ? j : { ...j, judgment, step_done };
 }
 
-/** Fences open and close at the start of a line; an inline ``` inside a sentence is not one. */
-const FENCES = /^```([^\n`]*)\r?\n([\s\S]*?)^```/gm;
+/**
+ * Fences open at the start of a line and close on a bare ``` line; an inline ``` inside a sentence
+ * is not one, and an unclosed fence (a truncated reply) runs to the end of the text.
+ */
+const FENCES = /^```([^\n`]*)\r?\n([\s\S]*?)(?:^```[ \t]*$|(?![\s\S]))/gm;
 const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done|\[episode\]|\[workflow\]|\[tutor-check\]|\brung \d)/i;
-/** Fences quoting a document (spec/tasks.md, README): wrapping prose is harmless and it is not code. */
+/**
+ * Fences quoting a document (spec/tasks.md, README) are not code and may be wide; their content is
+ * still checked, because the model sometimes wraps its whole reply in one (final review I3).
+ */
 const QUOTES = new Set(["markdown", "md"]);
 
 function codeAllowed(o: { band: Band; rung: number | null; noCode: boolean }, lines: number): boolean {
@@ -47,7 +59,11 @@ export function checkReply(text: string, o: { band: Band; rung: number | null; j
   for (const m of text.matchAll(FENCES)) {
     const tag = m[1].trim().toLowerCase();
     const body = m[2].replace(/\r?\n$/, "").split(/\r?\n/);
-    if (tag === "tutor-judgment" || m[2].includes('"judgment"') || QUOTES.has(tag)) continue;
+    if (tag === "tutor-judgment" || m[2].includes('"judgment"')) continue;
+    if (QUOTES.has(tag)) {
+      for (const i of checkReply(m[2], { ...o, judged: true })) issues.add(i);
+      continue;
+    }
     if (tag === "" || tag === "text") {
       if (body.some((l) => Array.from(l).length > DIAGRAM_COLS)) issues.add("wide-diagram");
       continue;
@@ -74,8 +90,10 @@ const FIX: Record<Issue, string> = {
  * judgment block that the system prompt asks for; round 2: a rung 2 reply stated the fix in words.
  * A reminder next to the learner's message is read last.
  */
-export function replyReminder(rung: number | null): string {
-  const hold = rung !== null && rung < 5 ? ` At rung ${rung} (${RUNG_NAMES[rung - 1]}): do not state the fix, in code or in words.` : "";
+export function replyReminder(rung: number | null, recipe = false): string {
+  const hold = recipe
+    ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
+    : rung !== null && rung < 5 ? ` At rung ${rung} (${RUNG_NAMES[rung - 1]}): do not state the fix, in code or in words.` : "";
   return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}`;
 }
 

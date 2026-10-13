@@ -297,7 +297,7 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     if (workflow) parts.push(formatWorkflowContext(workflow, band));
     if (lastIssues.length) parts.push(formatCheck(lastIssues));
-    parts.push(replyReminder(run.rung));
+    parts.push(replyReminder(run.rung, workflow !== null));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -317,6 +317,7 @@ export default function (pi: ExtensionAPI): void {
   function applyTurnJudgment(j: Judgment) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
+    const inRecipe = workflow !== null;
     advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     if (!roleNamed(activeRole).ladder || !episode) return;
@@ -326,7 +327,11 @@ export default function (pi: ExtensionAPI): void {
       profileWrite(() => { known = new Map(p.concepts(lang).map((c) => [c.tag, c.ease])); });
       episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
     }
+    const rung = episode.rung;
     episode = applyJudgment(episode, j, Date.now());
+    // Spec §4: in the design recipe the learner writes every artifact; good step answers must not
+    // climb the ladder toward reveal (final review I2: the rung went 3 → 5 in the live walk).
+    if (inRecipe) episode = { ...episode, rung };
     pi.appendEntry("tutor_episode", episode);
     if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
   }
@@ -382,10 +387,19 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-plan", {
-    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1; /tutor-plan next moves on)",
+    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1; next moves on; off stops)",
     handler: async (args, ctx) => {
       const id = args.trim();
       // Live check: the model may call a step complete and never set step_done; the learner moves on.
+      if (id === "off") {
+        if (!workflow) { ctx.ui.notify("no design recipe in progress", "info"); return; }
+        const task = workflow.task;
+        pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() });
+        workflow = null;
+        paint();
+        ctx.ui.notify(`design recipe for ${task} stopped`, "info");
+        return;
+      }
       if (id === "next") {
         if (!workflow) { ctx.ui.notify("no design recipe in progress; start one with /tutor-plan <task id>", "info"); return; }
         const moved = advanceWorkflow(true);
@@ -395,7 +409,7 @@ export default function (pi: ExtensionAPI): void {
         }
         return;
       }
-      if (!TASK_ID.test(id)) { ctx.ui.notify("usage: /tutor-plan <task id>, e.g. /tutor-plan P1.T1, or /tutor-plan next", "warning"); return; }
+      if (!TASK_ID.test(id)) { ctx.ui.notify("usage: /tutor-plan <task id>, e.g. /tutor-plan P1.T1, or /tutor-plan next|off", "warning"); return; }
       let tasks: string;
       try { tasks = readFileSync(join(ctx.cwd, "spec", "tasks.md"), "utf8"); } catch {
         ctx.ui.notify("no spec/tasks.md in this project; /tutor-start scaffolds one", "warning");

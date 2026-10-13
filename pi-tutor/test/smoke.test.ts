@@ -655,3 +655,37 @@ describe("judgment written before a tool call (live check: block in a tool-use t
     expect(issues).not.toContain("missing-judgment");
   });
 });
+
+describe("final review fixes (workflow)", () => {
+  const project = () => {
+    const dir = mkd(pjoin(tmp(), "plan-"));
+    mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Parse argv into a Command\n");
+    return dir;
+  };
+  const stepDone = (judgment: string) => assistant('ok\n```tutor-judgment\n{"judgment":"' + judgment + '","step_done":true}\n```');
+  it("I2: correct step answers move the recipe on but leave the hint rung frozen", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    for (let i = 0; i < 3; i++) await turn(b.events, b.ctx, REASONED, stepDone("correct"));
+    expect(b.widgets["tutor"]?.[0]).toContain("plan 4/6");
+    expect(b.widgets["tutor"]?.[0]).toContain("rung 2");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ rung: 2 });
+  });
+  it("I4: /tutor-plan off ends the recipe; the context and widget label go away and stay away on resume", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    const n = b.sent.length;
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    expect(b.widgets["tutor"]?.[0]).not.toContain("plan");
+    expect(b.sent.length).toBe(n);
+    const last = b.entries.filter((e) => e.type === "tutor_workflow").at(-1);
+    expect(last?.data).toMatchObject({ task: "P1.T1", done: expect.any(Number) });
+    const opts = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(opts.message?.content).not.toContain("[workflow]");
+    const r = await boot({ branch: [{ type: "custom", customType: "tutor_workflow", data: last?.data }] });
+    expect(r.widgets["tutor"]?.[0]).not.toContain("plan");
+    await r.commands["tutor-plan"].handler("off", r.ctx);
+    expect(r.notes.at(-1)).toMatch(/no design recipe in progress/);
+  });
+});
