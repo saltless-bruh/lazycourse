@@ -119,6 +119,9 @@ Re-verify every line when bumping versions.
   `winnr("#")`, then any); the Pi pane is a terminal window, so "current window" is wrong when the
   user is typing in Pi. All pulls and the snapshot go through this resolver (`EDITOR_WIN_LUA`).
 - The snapshot Lua checks the root inside Neovim and returns `{ path }` only for outside buffers.
+  Root checks (snapshot Lua, push `in_root`, `NvimLink.isInRoot`) compare the resolved path only:
+  `vim.fn.resolve(p)` resolves symlinks in every component, also for a file not yet on disk
+  (probe 2026-10-13, 0.12.6); Node uses `realpathSync`, falling back to the directory's realpath.
 - `vim.bo[b].filetype`, `nvim_win_get_cursor(w)`, `nvim_buf_get_lines(b, from, to, false)` with
   `to` past EOF (strict_indexing=false clamps) — one `nvim_exec_lua` round trip in `NvimLink.snapshot()`.
 - `attach({ socket })`, `raw.request("nvim_get_api_info")` → `[channel, meta]`
@@ -126,7 +129,16 @@ Re-verify every line when bumping versions.
 - `raw.on("notification", (method, args))` receives `vim.rpcnotify(channel, "tutor", payload)`
 - `raw.on("disconnect")` fires when the socket closes (client.js:121); used for detached mode.
 - `raw.close()` (client.js:232) closes only our socket. Never `raw.quit()`: it is `command("qa!")`
-  (Neovim.js:715) and kills the user's editor; `NvimLink.close()` used it until M3.
+  (Neovim.js:715) and kills the user's editor; `NvimLink.close()` used it until M3. `raw.close()` is
+  `writer.end(cb)` (transport.js:206); `NvimLink.close()` bounds it and the cleanup Lua (1 s each) so a
+  Neovim blocked at a prompt cannot hang `session_shutdown`. A failed connect closes its client too.
+- nvim-tutor (Lua): `jobstart(cmd, { term = true })` throws E475 for a program that is not executable,
+  checked against Neovim's cwd even when `cwd` is given (probe 2026-10-13), so `:TutorRun` passes a
+  relative `run_cmd` program as `opts.cwd`-absolute. Textlock (an `<expr>` mapping, a lazy-load from a
+  keymap) makes `nvim_set_current_win`, `nvim_win_set_buf`, `nvim_win_close`, `:vsplit`, `:enew` and
+  `jobstart{term}` throw E565, while `nvim_create_buf` and `jobstop` work (probe 2026-10-13, 0.12.6).
+  `term.textlocked()` probes it with `nvim_set_current_win(current)` (a no-op without autocmds when
+  unlocked) and the pane reruns show/hide/restart via `vim.schedule`.
 - `require("tutor").switch(dir, file)` (nvim-tutor init.lua) is called by `NvimLink.switchProject` via
   `vim.defer_fn(…, 500)` so the restart that kills this Pi happens after `/tutor-start` returns.
 - The client logs via winston and patches `console`; `NVIM_NODE_LOG_FILE` is set before import
