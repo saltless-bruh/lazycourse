@@ -300,6 +300,44 @@ describe("M6c: link hardening", () => {
   }, 20000);
 });
 
+describe("M6c: link lifetime (pane review #6, #8)", () => {
+  /** A second client that keeps Neovim's main loop busy, as a hit-enter prompt or a long command does. */
+  async function block(socket: string, ms: number) {
+    const { attach } = await import("neovim");
+    const other = attach({ socket });
+    other.on("error", () => {});
+    await other.request("nvim_get_api_info", []);
+    void other.lua(`vim.uv.sleep(${ms})`).catch(() => {});
+    await new Promise((r) => setTimeout(r, 50));
+    return other;
+  }
+  it("close() returns within its timeout when Neovim does not answer", async () => {
+    const { link, h } = await setup();
+    const other = await block(h.socket, 4000);
+    const t0 = Date.now();
+    await link.close(300);
+    expect(Date.now() - t0).toBeLessThan(1500);
+    expect(link.connected).toBe(false);
+    void other.close().catch(() => {});
+  }, 20000);
+  it("a connect that times out closes its client and never reports a disconnect", async () => {
+    h = await startHeadlessNvim();
+    const other = await block(h.socket, 2000);
+    let disconnects = 0;
+    const r = await NvimLink.connect({ socket: h.socket, root: h.root, onPayload: () => {}, onDisconnect: () => { disconnects++; }, connectTimeoutMs: 300 });
+    expect(r).toBeNull();
+    await new Promise((res) => setTimeout(res, 2500)); // Neovim answers again
+    const { attach } = await import("neovim");
+    const probe = attach({ socket: h.socket });
+    probe.on("error", () => {});
+    const chans = (await probe.request("nvim_list_chans", [])) as { id: number; mode?: string; stream?: string }[];
+    // only `other` and `probe` remain: the failed link's socket is closed
+    expect(chans.filter((c) => c.stream === "socket")).toHaveLength(2);
+    expect(disconnects).toBe(0);
+    await probe.close(); await other.close().catch(() => {});
+  }, 20000);
+});
+
 describe("nvimLogPath (M1b #6)", () => {
   it("is per user under XDG_STATE_HOME, else ~/.local/state", () => {
     expect(nvimLogPath({ XDG_STATE_HOME: "/s" } as NodeJS.ProcessEnv)).toBe("/s/pi-tutor/nvim.log");

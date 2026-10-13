@@ -25,6 +25,13 @@ function realPath(p: string): string {
   try { return join(realpathSync(dirname(abs)), basename(abs)); } catch { return abs; }
 }
 
+/** `p`, or a rejection after `ms`; the timer is always cleared. */
+function bounded<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<T>((_, rej) => { timer = setTimeout(() => rej(new Error(`${what} timed out after ${ms}ms`)), ms); });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+}
+
 export type TutorPayload =
   | { kind: "diagnostics"; buf: number; path: string; errors: number; warnings: number; first?: { line: number; msg: string } }
   | { kind: "idle"; buf: number; path: string; line: number; since_ms: number }
@@ -92,6 +99,8 @@ export interface NvimLinkOptions {
   churnEdits?: number;
   onPayload: (p: TutorPayload) => void;
   onDisconnect?: () => void;
+  /** Bound on each connect round trip (default 3 s). */
+  connectTimeoutMs?: number;
 }
 
 export class NvimLink {
@@ -110,23 +119,27 @@ export class NvimLink {
     if (!socket || !existsSync(socket)) return null;
     let root: string;
     try { root = realpathSync(opts.root).replace(/\/+$/, ""); } catch { root = opts.root.replace(/\/+$/, ""); }
-    const timeoutMs = 3000;
+    const timeoutMs = opts.connectTimeoutMs ?? 3000;
+    let raw: NeovimClient | undefined;
+    let failed = false;
     try {
       const { attach } = await import("neovim");
-      const raw = attach({ socket });
+      raw = attach({ socket });
       // Swallow transport errors: a stale socket must degrade to detached mode, never throw.
       raw.on("error", () => {});
-      const withTimeout = <T,>(p: Promise<T>): Promise<T> =>
-        Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("nvim connect timeout")), timeoutMs))]);
-      const [channel] = (await withTimeout(raw.request("nvim_get_api_info", []))) as [number, unknown];
+      const [channel] = (await bounded(raw.request("nvim_get_api_info", []), timeoutMs, "nvim connect")) as [number, unknown];
       const link = new NvimLink(raw, channel, root);
       raw.on("notification", (method: string, args: unknown[]) => {
-        if (method === "tutor" && args[0]) opts.onPayload(args[0] as TutorPayload);
+        if (!failed && method === "tutor" && args[0]) opts.onPayload(args[0] as TutorPayload);
       });
-      raw.on("disconnect", () => { link.connected = false; opts.onDisconnect?.(); });
-      await withTimeout(raw.lua(PUSH_LUA, [channel, { root, idle_ms: opts.idleMs ?? 30000, churn_edits: opts.churnEdits ?? 10 }]));
+      // A client whose connect failed was never handed out: its disconnect is not the caller's (pane #8).
+      raw.on("disconnect", () => { link.connected = false; if (!failed) opts.onDisconnect?.(); });
+      await bounded(raw.lua(PUSH_LUA, [channel, { root, idle_ms: opts.idleMs ?? 30000, churn_edits: opts.churnEdits ?? 10 }]), timeoutMs, "nvim connect");
       return link;
     } catch {
+      failed = true;
+      // Close our socket only; never quit() (that is :qa! in the user's editor).
+      if (raw) { const r = raw; void bounded(r.close(), timeoutMs, "nvim close").catch(() => {}); }
       return null;
     }
   }
@@ -186,9 +199,7 @@ export class NvimLink {
   }
 
   private timed<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const limit = new Promise<T>((_, rej) => { timer = setTimeout(() => rej(new Error(`${what} timed out after ${ms}ms`)), ms); });
-    return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+    return bounded(p, ms, what);
   }
 
   /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */
@@ -196,11 +207,12 @@ export class NvimLink {
     await this.raw.lua(`local d, f = ...; vim.defer_fn(function() require("tutor").switch(d, f) end, 500)`, [dir, file]);
   }
 
-  async close(): Promise<void> {
+  /** Bounded by `timeoutMs` per step: a Neovim stuck at a prompt must not hang Pi on quit or /new (pane #6). */
+  async close(timeoutMs = 1000): Promise<void> {
     if (!this.connected) return;
-    try { await this.raw.lua(`vim.g.tutor_chan = nil; if _G.__pi_tutor_timer then _G.__pi_tutor_timer:stop() end`); } catch { /* nvim may be gone */ }
     this.connected = false;
+    try { await this.timed(this.raw.lua(`vim.g.tutor_chan = nil; if _G.__pi_tutor_timer then _G.__pi_tutor_timer:stop() end`), timeoutMs, "nvim cleanup"); } catch { /* nvim may be gone or busy */ }
     // Close our socket only. `raw.quit()` is `:qa!`, which would kill the user's editor.
-    try { await this.raw.close(); } catch { /* already gone */ }
+    try { await this.timed(this.raw.close(), timeoutMs, "nvim close"); } catch { /* already gone */ }
   }
 }
