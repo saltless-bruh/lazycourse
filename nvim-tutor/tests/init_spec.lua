@@ -57,6 +57,21 @@ describe("tutor.init", function()
     assert.same({ "too-long", "too-vague", "too-much-help", "good" }, vim.fn.getcompletion("TutorFeedback ", "cmdline"))
   end)
 
+  it("a slash wrapper run under textlock (an <expr> mapping) opens the pane later and types (pane #3)", function()
+    local tutor = require("tutor")
+    vim.keymap.set("n", "<F14>", function() vim.cmd("TutorDocs go"); return "" end, { expr = true })
+    vim.v.errmsg = ""
+    vim.api.nvim_feedkeys(vim.keycode("<F14>"), "x", false)
+    vim.keymap.del("n", "<F14>")
+    local has = function()
+      local buf = tutor.state.term:bufnr()
+      return buf ~= nil and vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "/tutor-docs go")
+    end
+    assert.is_true(vim.wait(2000, has))
+    assert.is_nil(vim.v.errmsg:find("E565"))
+    tutor.state.term:hide()
+  end)
+
   it(":TutorPlan needs a task id", function()
     assert.has_error(function() vim.cmd("TutorPlan") end)
   end)
@@ -174,6 +189,53 @@ describe("tutor.init", function()
     vim.notify = orig
     assert.is_truthy(msgs[1] and msgs[1]:find("not executable: no%-such%-program%-xyz"))
     assert.is_nil(tutor.state.run_job)
+  end)
+
+  it(":TutorRun accepts a string run_cmd (run through the shell) (M6c M3)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = "echo hi; exit 4" })
+    local got
+    tutor._notify_override = function(p) got = p end
+    assert.has_no.errors(function() vim.cmd("TutorRun") end)
+    vim.wait(2000, function() return got ~= nil end)
+    assert.equals(4, got.code)
+    assert.equals("hi\n", got.stdout)
+    assert.same({ "echo hi; exit 4" }, got.cmd)
+  end)
+
+  it(":TutorRun checks a relative run_cmd against the project cwd (pane #10)", function()
+    package.loaded["tutor"] = nil
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "#!/bin/sh", "echo ran" }, dir .. "/run.sh")
+    vim.fn.setfperm(dir .. "/run.sh", "rwxr-xr-x")
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false, run_cmd = { "./run.sh" } })
+    local got
+    tutor._notify_override = function(p) got = p end
+    vim.cmd("TutorRun")
+    vim.wait(2000, function() return got ~= nil end)
+    assert.is_truthy(got)
+    assert.equals("ran\n", got.stdout)
+  end)
+
+  it("setup again stops a pending run; the old run's exit does not clear a newer one (pane #10)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    local o = { pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 5" } }
+    tutor.setup(o)
+    tutor._notify_override = function() end
+    vim.cmd("TutorRun")
+    local first = tutor.state.run_job
+    tutor.setup(o)
+    assert.are_not.equal(-1, vim.fn.jobwait({ first }, 1000)[1]) -- the first run was stopped, not left running
+    vim.cmd("TutorRun")
+    local second = tutor.state.run_job
+    assert.is_number(second)
+    vim.wait(300)
+    assert.equals(second, tutor.state.run_job)
+    vim.fn.jobstop(second)
   end)
 
   it("setup twice stops the first pane's job (M1b #8)", function()

@@ -46,19 +46,32 @@ function M.run()
     vim.notify("[tutor] no run_cmd configured", vim.log.levels.WARN)
     return
   end
-  if vim.fn.executable(cmd[1]) == 0 then
-    vim.notify("[tutor] run_cmd is not executable: " .. tostring(cmd[1]), vim.log.levels.WARN)
-    return
+  -- A string run_cmd runs through 'shell' (jobstart does that); only a list names a program to check.
+  -- A relative program path (./run.sh) means the project's, not Neovim's cwd: jobstart checks it
+  -- against Neovim's cwd, so it gets the absolute path.
+  local argv = cmd
+  if type(cmd) == "table" then
+    argv = vim.deepcopy(cmd)
+    local exe = argv[1]
+    if type(exe) == "string" and exe:find("/") and not vim.startswith(exe, "/") and opts.cwd then
+      argv[1] = vim.fs.joinpath(opts.cwd, exe)
+    end
+    if type(argv[1]) ~= "string" or vim.fn.executable(argv[1]) == 0 then
+      vim.notify("[tutor] run_cmd is not executable: " .. tostring(cmd[1]), vim.log.levels.WARN)
+      return
+    end
   end
+  local payload_cmd = type(cmd) == "table" and cmd or { cmd }
   local out, err = {}, {}
-  local ok, job = pcall(vim.fn.jobstart, cmd, {
+  local ok, job = pcall(vim.fn.jobstart, argv, {
     cwd = opts.cwd,
     stdout_buffered = true, stderr_buffered = true,
     on_stdout = function(_, d) out = d end,
     on_stderr = function(_, d) err = d end,
-    on_exit = function(_, code)
-      M.state.run_job = nil
-      local payload = { kind = "run_output", cmd = cmd, code = code,
+    on_exit = function(id, code)
+      -- An older run's exit (one setup() stopped) must not clear a newer run.
+      if M.state.run_job == id then M.state.run_job = nil end
+      local payload = { kind = "run_output", cmd = payload_cmd, code = code,
         stdout = table.concat(out, "\n"), stderr = table.concat(err, "\n") }
       if not M.notify_tutor(payload) then
         vim.notify("[tutor] run finished (exit " .. code .. ") but pi-tutor is not connected", vim.log.levels.INFO)
@@ -73,12 +86,15 @@ function M.run()
 end
 
 local function slash(text)
-  return function(a)
+  local function run(a)
+    -- Under textlock (E565) the pane cannot open now: type the command from the event loop.
+    if term.textlocked() then vim.schedule(function() run(a) end); return end
     local t = M.state.term
     if not t:is_visible() then t:show() end
     local line = text .. (a and a.args ~= "" and (" " .. a.args) or "")
     if not t:send(line) then vim.notify("[tutor] pi is not running; :TutorRestart", vim.log.levels.WARN) end
   end
+  return run
 end
 
 --- Re-root the tutor at `dir`: cd there, open `file` in the editor window, restart Pi with cwd = dir.
@@ -123,6 +139,8 @@ function M.setup(user_opts)
   -- setup() again (e.g. a config reload) must not leave the old Pi running in a hidden buffer.
   if M.state.term then M.state.term:close() end
   M.state.term = term.new({ cmd = M.build_cmd(opts.pi_cmd), cwd = opts.cwd, width = opts.width, env = { PI_TUTOR = "1" } })
+  -- A pending run is stopped, not orphaned: its exit would otherwise land after a newer run started.
+  if M.state.run_job then pcall(vim.fn.jobstop, M.state.run_job) end
   M.state.run_job = nil
   local cmd = vim.api.nvim_create_user_command
   cmd("Tutor", function() M.state.term:toggle() end, {})
