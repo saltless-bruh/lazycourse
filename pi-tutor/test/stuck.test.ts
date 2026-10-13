@@ -135,3 +135,14 @@ describe("failing runs (spec 2026-10-13 §7 #4)", () => {
     expect(traceOf("", "y".repeat(10_000)).length).toBeLessThanOrEqual(TRACE_CHARS);
   });
 });
+
+describe("final review I2: test runners print the failure on stdout", () => {
+  it("carries the tail of both streams, labelled, when both have text", () => {
+    const t = traceOf("running 1 test\nthread 'tests::adds' panicked at src/lib.rs:9:5:\nassertion `left == right` failed", "   Compiling app v0.1.0\nerror: test failed, to rerun pass `--lib`");
+    expect(t).toContain("stdout:\n");
+    expect(t).toContain("assertion `left == right` failed");
+    expect(t).toContain("stderr:\n");
+    expect(t).toContain("error: test failed");
+    expect(t.length).toBeLessThanOrEqual(TRACE_CHARS + 20);
+  });
+});

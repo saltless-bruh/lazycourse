@@ -789,3 +789,27 @@ describe("M6a minors in the turn loop", () => {
     expect(back.message?.content).toContain("[workflow]");
   });
 });
+
+describe("final review I3: forgetting takes effect at once", () => {
+  it("after /tutor-memory forgets a memory, the next turn's tutor_memory section no longer has it", async () => {
+    const file = pjoin(mkd(pjoin(tmp(), "pitutor-forget-")), "profile.sqlite");
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const a = await boot();
+      await a.tools["tutor_remember"].execute("1", { type: "learner", text: "knows Go well" });
+      await a.tools["tutor_remember"].execute("2", { type: "learner", text: "likes diagrams" });
+      await a.events["session_shutdown"]({ type: "session_shutdown" }, a.ctx);
+      const b = await boot();
+      expect((await turn(b.events, b.ctx, "hi", judged("none"))).sections["tutor_memory"]).toContain("knows Go well");
+      b.script.push("#1 [learner] knows Go well", "Forget it");
+      await b.commands["tutor-memory"].handler("", b.ctx);
+      const next = await turn(b.events, b.ctx, "hi", judged("none"));
+      expect(next.sections["tutor_memory"]).not.toContain("knows Go well");
+      expect(next.sections["tutor_memory"]).toContain("likes diagrams");
+      await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    } finally {
+      if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
+    }
+  });
+});

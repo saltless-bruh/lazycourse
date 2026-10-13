@@ -176,22 +176,37 @@ export default function (pi: ExtensionAPI): void {
   function openEp(trigger: Trigger, nudge: boolean) {
     // Spec 2026-10-13 §7 #4: a failed run is the learner's explicit check; it replaces any episode and nudges without the gap.
     const run = trigger.kind === "run";
+    // Final review I1: re-running a still-failing program keeps the hint level; only the trace is new.
+    if (run && episode?.trigger.kind === "run") {
+      episode = { ...episode, trigger };
+      pi.appendEntry("tutor_episode", episode);
+      nudgeFor(trigger, nudge, true);
+      return;
+    }
     if (episode) {
       // Chat, idle and churn episodes may never close on their own; editor triggers must not be lost behind them.
       if (!nudge || !(run || yieldsTo(episode))) return;
       closeEp("superseded");
     }
-    const now = Date.now();
-    episode = openEpisode(trigger, bandFor(level()), now);
+    episode = openEpisode(trigger, bandFor(level()), Date.now());
     pi.appendEntry("tutor_episode", episode);
-    // Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running
-    // reply, and at most one per NUDGE_GAP_MS so a run of changing errors is not a run of turns.
+    nudgeFor(trigger, nudge, run);
+  }
+
+  /**
+   * Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running
+   * reply, and at most one per NUDGE_GAP_MS so a run of changing errors is not a run of turns
+   * (`anyGap`: a failed run skips the gap).
+   */
+  function nudgeFor(trigger: Trigger, nudge: boolean, anyGap: boolean) {
+    const now = Date.now();
     // The architect discusses design: editor stuck signals still open episodes but do not interrupt it.
-    if (nudge && roleNamed(activeRole).ladder && session?.isIdle() && (run || now - lastNudge >= NUDGE_GAP_MS)) {
+    if (nudge && roleNamed(activeRole).ladder && session?.isIdle() && (anyGap || now - lastNudge >= NUDGE_GAP_MS)) {
       lastNudge = now;
       pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
     }
   }
+
 
   /**
    * Spec §5: a closed episode is mirrored to the profile. Only inside a recorded project, and under
@@ -467,7 +482,8 @@ export default function (pi: ExtensionAPI): void {
       if ((await ctx.ui.select(pick, ["Keep it", "Forget it"])) !== "Forget it") return;
       const p = profile;
       let gone = false;
-      profileWrite(() => { gone = p.forget(id); });
+      // Final review I3: a forget is the learner correcting the tutor, so the snapshot is rebuilt now.
+      profileWrite(() => { gone = p.forget(id); if (gone) memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); });
       ctx.ui.notify(gone ? `forgot memory #${id}` : `memory #${id} was already gone`, "info");
     },
   });

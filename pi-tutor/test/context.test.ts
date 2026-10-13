@@ -64,3 +64,12 @@ describe("run episode context", () => {
     expect(c).toContain("tutor-stack-traces");
   });
 });
+
+describe("final review I2: run context does not assume where the message is", () => {
+  it("says to find the error message and the learner's frame, per the skill", () => {
+    const ep = openEpisode({ kind: "run", cmd: ["node", "a.js"], code: 1, trace: "TypeError: x" }, "beginner", 1);
+    const c = formatEpisodeContext(ep);
+    expect(c).not.toMatch(/from the last line up/);
+    expect(c).toMatch(/error message and the learner's own frame/);
+  });
+});

@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
-import { boot, episodes } from "./fake-pi.js";
+import { boot, episodes, turn, judged, REASONED } from "./fake-pi.js";
 
 let h: Headless | undefined;
 let nvim: NeovimClient | undefined;
@@ -158,5 +158,21 @@ describe("architect role and stuck signals (M6a minor)", () => {
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
     await new Promise((r) => setTimeout(r, 300));
     expect(b.sent).toEqual([]);
+  }, 20000);
+});
+
+describe("final review I1: a failing re-run keeps the hint level", () => {
+  it("a second failing run refreshes the run episode's trace in place and keeps its rung, turns and tags", async () => {
+    const b = await linked();
+    await runPayload(1, "KeyError: 'x'");
+    await until(() => b.sent.length === 1);
+    await turn(b.events, b.ctx, REASONED, judged("correct")); // beginner start rung 3 → 4
+    const before = episodes(b.entries).at(-1)!;
+    expect(before).toMatchObject({ rung: 4, turns: 1 });
+    await runPayload(1, "KeyError: 'y'");
+    await until(() => b.sent.length === 2); // still nudged
+    const after = episodes(b.entries).at(-1)!;
+    expect(after).toMatchObject({ id: before.id, rung: 4, turns: 1, trigger: { kind: "run", trace: "KeyError: 'y'" } });
+    expect(episodes(b.entries).some((e) => e.closeReason === "superseded")).toBe(false);
   }, 20000);
 });

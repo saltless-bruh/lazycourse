@@ -13,11 +13,21 @@ export type StuckEvent =
 export const TRACE_LINES = 30;
 export const TRACE_CHARS = 3000;
 
-/** The end of the output, where traces put the error: stderr, or stdout when stderr is blank. */
+function tail(text: string, lines: number, chars: number): string {
+  const t = text.split(/\r?\n/).filter((l) => l.trim()).slice(-lines).join("\n");
+  return t.length > chars ? t.slice(-chars) : t;
+}
+
+/**
+ * The end of the output, where traces put the error. Test runners (cargo test, npm test) print the
+ * failure on stdout and only a summary on stderr (final review I2), so when both streams have text
+ * the trace carries the tail of each, labelled.
+ */
 export function traceOf(stdout: string, stderr: string): string {
-  const src = stderr.trim() ? stderr : stdout;
-  const lines = src.split(/\r?\n/).filter((l) => l.trim()).slice(-TRACE_LINES).join("\n");
-  return lines.length > TRACE_CHARS ? lines.slice(-TRACE_CHARS) : lines;
+  const out = stdout.trim(), err = stderr.trim();
+  if (!out || !err) return tail(out || err, TRACE_LINES, TRACE_CHARS);
+  const half = Math.floor(TRACE_CHARS / 2) - 10;
+  return `stdout:\n${tail(out, TRACE_LINES / 2, half)}\nstderr:\n${tail(err, TRACE_LINES / 2, half)}`;
 }
 
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }
