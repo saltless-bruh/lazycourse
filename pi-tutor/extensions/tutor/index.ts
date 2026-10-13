@@ -10,7 +10,7 @@ import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judg
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, replyReminder, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
-import { TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
+import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -302,18 +302,22 @@ export default function (pi: ExtensionAPI): void {
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
 
+  /** Move the design recipe on one step when `stepDone`; persists it and drops it once finished. */
+  function advanceWorkflow(stepDone: boolean): Workflow | null {
+    if (!workflow) return null;
+    const next = advance(workflow, stepDone, Date.now());
+    if (next === workflow) return workflow;
+    pi.appendEntry("tutor_workflow", next);
+    if (next.done !== undefined) ui?.notify(`design recipe for ${next.task} finished`, "info");
+    workflow = next.done === undefined ? next : null;
+    return next;
+  }
+
   /** Apply one accepted judgment to the episode and the profile (spec §5). */
   function applyTurnJudgment(j: Judgment) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
-    if (workflow) {
-      const next = advance(workflow, j.step_done, Date.now());
-      if (next !== workflow) {
-        pi.appendEntry("tutor_workflow", next);
-        if (next.done !== undefined) ui?.notify(`design recipe for ${next.task} finished`, "info");
-        workflow = next.done === undefined ? next : null;
-      }
-    }
+    advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     if (!roleNamed(activeRole).ladder || !episode) return;
     if (episode.turns === 0 && project && profile) {
@@ -377,10 +381,20 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-plan", {
-    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1)",
+    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1; /tutor-plan next moves on)",
     handler: async (args, ctx) => {
       const id = args.trim();
-      if (!TASK_ID.test(id)) { ctx.ui.notify("usage: /tutor-plan <task id>, e.g. /tutor-plan P1.T1", "warning"); return; }
+      // Live check: the model may call a step complete and never set step_done; the learner moves on.
+      if (id === "next") {
+        if (!workflow) { ctx.ui.notify("no design recipe in progress; start one with /tutor-plan <task id>", "info"); return; }
+        const moved = advanceWorkflow(true);
+        paint();
+        if (moved && moved.done === undefined && ctx.hasUI) {
+          pi.sendUserMessage(`${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`);
+        }
+        return;
+      }
+      if (!TASK_ID.test(id)) { ctx.ui.notify("usage: /tutor-plan <task id>, e.g. /tutor-plan P1.T1, or /tutor-plan next", "warning"); return; }
       let tasks: string;
       try { tasks = readFileSync(join(ctx.cwd, "spec", "tasks.md"), "utf8"); } catch {
         ctx.ui.notify("no spec/tasks.md in this project; /tutor-start scaffolds one", "warning");

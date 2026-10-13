@@ -615,3 +615,27 @@ describe("per-turn reply reminder (golden round 1: 3 of 5 replies dropped the ju
     expect(tutor.message?.content.endsWith(replyReminder(2))).toBe(true);
   });
 });
+
+describe("/tutor-plan next (live check: the model called step 4 complete but never set step_done)", () => {
+  const project = () => {
+    const dir = mkd(pjoin(tmp(), "plan-"));
+    mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Parse argv into a Command\n");
+    return dir;
+  };
+  it("the learner moves the workflow on one step and the tutor is told which step is next", async () => {
+    const b = await boot({ cwd: project(), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 4, started: 1 } }] });
+    await b.commands["tutor-plan"].handler("next", b.ctx);
+    expect(b.widgets["tutor"]?.[0]).toContain("plan 5/6");
+    expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ step: 5 });
+    expect(b.sent.at(-1)?.text).toBe("[tutor] the learner moved on to step 5 (Map) of the design recipe for P1.T1.");
+  });
+  it("next after Build finishes the workflow; without a workflow it says so", async () => {
+    const b = await boot({ cwd: project(), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 6, started: 1 } }] });
+    await b.commands["tutor-plan"].handler("next", b.ctx);
+    expect(b.widgets["tutor"]?.[0]).not.toContain("plan");
+    expect(b.notes.join("\n")).toMatch(/design recipe for P1\.T1 finished/);
+    await b.commands["tutor-plan"].handler("next", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/no design recipe in progress/);
+  });
+});

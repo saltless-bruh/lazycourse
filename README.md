@@ -64,7 +64,8 @@ each reply (code above the hint rung, diagrams wider than 40 columns, missing ju
 tells the model what to fix on the next turn; a `correct` judgment needs your reasoning.
 
 - `:TutorPlan <task id>` walks a task from `spec/tasks.md` through the six-step design recipe
-  (Find, Shape, Examples, Steps, Map, Build); the widget shows `plan k/6`.
+  (Find, Shape, Examples, Steps, Map, Build); the widget shows `plan k/6`. The tutor moves to
+  the next step when your artifact is done; `:TutorPlan next` moves on yourself.
 - `:TutorArchitect [question|off]` switches to the architecture professor (components, data
   flow, trade-offs, no code) until `off` or `:TutorPlan`.
 
