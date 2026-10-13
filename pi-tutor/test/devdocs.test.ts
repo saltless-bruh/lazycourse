@@ -141,3 +141,11 @@ describe("final review I1: lookups land inside one read", () => {
     expect(text).toMatch(/never read SKILL\.md or INDEX\.md with that offset/i);
   });
 });
+
+describe("M6c: unindexed pages (M5-finish #47)", () => {
+  it("skips pages no index entry points to, like genindex", async () => {
+    const index: DevdocsIndex = { entries: [{ name: "pathlib", path: "library/pathlib", type: "Files" }], types: [{ name: "Files", count: 1, slug: "files" }] };
+    const b = await buildReference(index, { "library/pathlib": "<h1>pathlib</h1>", genindex: "<h1>Index</h1>" + "<p>x</p>".repeat(100) });
+    expect(b.files.map((f) => f.path)).toEqual(["references/library_pathlib.md"]);
+  });
+});

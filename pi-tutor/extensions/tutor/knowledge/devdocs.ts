@@ -115,8 +115,11 @@ export async function buildReference(index: DevdocsIndex, db: Record<string, str
   const anchorFile = new Map<string, string>();
   const firstFile = new Map<string, string>();
   const used = new Set<string>();
+  // M5-finish #47: pages no index entry points to (Python's genindex, contents) are never looked up.
+  const referenced = new Set(index.entries.map((e) => e.path.split("#")[0]));
   let n = 0;
   for (const [page, html] of Object.entries(db)) {
+    if (!referenced.has(page)) continue;
     if (++n % (opts.yieldEvery ?? 25) === 0) {
       await new Promise((r) => setImmediate(r)); // keep Pi's UI responsive on 70 MB bundles
       if (opts.signal?.aborted) throw new Cancelled();

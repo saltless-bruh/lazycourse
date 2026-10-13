@@ -88,3 +88,14 @@ describe("saveSkill", () => {
     expect(readdirSync(root).sort()).toEqual(["tutor-rust-learned-x", "tutor-rust-learned-x-2", "tutor-rust-learned-x-3"]);
   });
 });
+
+describe("M6c: saveSkill rename (M5 #34)", () => {
+  it("renames a duplicate skill whatever line `name:` is on", () => {
+    const root = mkdtempSync(join(tmpdir(), "pitutor-learn-"));
+    const text = "---\ndescription: \"x\"\nname: foo\n---\nbody\n";
+    saveSkill(root, "foo", text);
+    const dir = saveSkill(root, "foo", text);
+    expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toMatch(/^name: foo-2$/m);
+    expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toContain("body");
+  });
+});

@@ -96,11 +96,11 @@ function rawComplete(ctx: ExtensionContext, signal: AbortSignal): Complete {
  * Run slow work behind Pi's BorderedLoader (Esc cancels) in the TUI, or just a timeout elsewhere;
  * setWorkingMessage alone is invisible outside an agent turn.
  */
-async function withProgress<T>(ctx: ExtensionContext, label: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withProgress<T>(ctx: ExtensionContext, label: string, run: (signal: AbortSignal) => Promise<T>, what?: string): Promise<T> {
   if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") return run(AbortSignal.timeout(MODEL_TIMEOUT_MS));
   const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
   const make = (tui: unknown, theme: unknown, message: string) => new BorderedLoader(tui as never, theme as never, message, { cancellable: true });
-  return withLoader(ctx.ui.custom.bind(ctx.ui) as unknown as CustomUi, make, label, run, MODEL_TIMEOUT_MS);
+  return withLoader(ctx.ui.custom.bind(ctx.ui) as unknown as CustomUi, make, label, run, MODEL_TIMEOUT_MS, what);
 }
 
 /** Each model call gets its own loader showing `label()` (spec §6 suggest/scaffold). */
@@ -553,7 +553,7 @@ export default function (pi: ExtensionAPI): void {
     const installed = await detectVersion(language, (command, args, options) => pi.exec(command, args, options));
     try {
       const r = await withProgress(ctx, `tutor: fetching ${language} docs (DevDocs)…`, (signal) =>
-        fetchReference(language, { fetch, root: skillsRoot(), installed, devdocsType: spec.devdocsType, override: overrideFor(language), force, signal }));
+        fetchReference(language, { fetch, root: skillsRoot(), installed, devdocsType: spec.devdocsType, override: overrideFor(language), force, signal }), "docs download");
       const note = r.meta.note ? ` — ${r.meta.note}` : "";
       ctx.ui.notify(r.status === "cached"
         ? `${language} docs already current (${r.name}, ${r.meta.release})`

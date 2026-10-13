@@ -89,6 +89,10 @@ export function saveSkill(root: string, name: string, text: string): string {
   for (let n = 2; existsSync(join(root, final)); n++) final = `${name}-${n}`;
   const dir = join(root, final);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "SKILL.md"), final === name ? text : text.replace(/^(---\nname:\s*)\S+/, `$1${final}`), { flag: "wx" });
+  // M5 #34: rename the `name:` line wherever it sits in the front matter, never in the body.
+  const end = text.indexOf("\n---", 3);
+  const renamed = final === name || end < 0 ? text
+    : text.slice(0, end).replace(/^(name:[ \t]*)\S+[ \t]*$/m, `$1${final}`) + text.slice(end);
+  writeFileSync(join(dir, "SKILL.md"), renamed, { flag: "wx" });
   return dir;
 }

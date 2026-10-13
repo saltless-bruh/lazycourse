@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Cancelled } from "../progress.js";
@@ -46,7 +46,13 @@ async function getJson<T>(url: string, d: RefDeps): Promise<T> {
 
 export async function fetchReference(language: string, d: RefDeps): Promise<RefResult> {
   const urls = devdocsUrls();
-  const catalog = await getJson<CatalogEntry[]>(urls.catalog, d);
+  let catalog: CatalogEntry[];
+  try { catalog = await getJson<CatalogEntry[]>(urls.catalog, d); } catch (e) {
+    // M5-finish #43: offline with docs on disk keeps using them; a forced refresh still fails loudly.
+    const prev = referenceInfo(d.root, language);
+    if (e instanceof Cancelled || d.force || !prev) throw e;
+    return { status: "cached", name: `tutor-${language}-ref`, meta: prev, entries: 0 };
+  }
   const choice = chooseBundle(catalog, d.devdocsType, d.installed, d.override);
   if (!choice) throw new Error(`DevDocs has no ${language} documentation`);
   const name = `tutor-${language}-ref`;
@@ -68,19 +74,32 @@ export async function fetchReference(language: string, d: RefDeps): Promise<RefR
   const built = await buildReference(index, db, { signal: d.signal });
   if (d.signal?.aborted) throw new Cancelled();
 
-  // Dot-prefixed temp folder: Pi skips dot entries, so a half-built skill is never loaded.
-  const dir = join(d.root, name);
-  const tmp = join(d.root, `.${name}.tmp-${process.pid}`);
+  installSkillDir(d.root, name, (tmp) => {
+    for (const f of built.files) {
+      mkdirSync(dirname(join(tmp, f.path)), { recursive: true });
+      writeFileSync(join(tmp, f.path), f.text);
+    }
+    writeFileSync(join(tmp, "INDEX.md"), built.index);
+    writeFileSync(join(tmp, "SKILL.md"), referenceSkill(language, choice, d.installed, index));
+    writeFileSync(join(tmp, ".devdocs.json"), `${JSON.stringify(meta, null, 2)}\n`);
+  });
+  return { status: "fetched", name, meta, entries: built.entries };
+}
+
+/**
+ * Atomic install of a skill folder (M5-finish #44): write into a dot temp sibling (Pi skips dot
+ * entries), move the old folder aside, swap the new one in, then drop the old. A failed write
+ * removes the temp folder and leaves the old skill untouched.
+ */
+export function installSkillDir(root: string, name: string, write: (dir: string) => void): void {
+  const dir = join(root, name);
+  const tmp = join(root, `.${name}.tmp-${process.pid}`);
+  const old = join(root, `.${name}.old-${process.pid}`);
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
-  for (const f of built.files) {
-    mkdirSync(dirname(join(tmp, f.path)), { recursive: true });
-    writeFileSync(join(tmp, f.path), f.text);
-  }
-  writeFileSync(join(tmp, "INDEX.md"), built.index);
-  writeFileSync(join(tmp, "SKILL.md"), referenceSkill(language, choice, d.installed, index));
-  writeFileSync(join(tmp, ".devdocs.json"), `${JSON.stringify(meta, null, 2)}\n`);
-  rmSync(dir, { recursive: true, force: true });
+  try { write(tmp); } catch (e) { rmSync(tmp, { recursive: true, force: true }); throw e; }
+  rmSync(old, { recursive: true, force: true });
+  if (existsSync(dir)) renameSync(dir, old);
   renameSync(tmp, dir);
-  return { status: "fetched", name, meta, entries: built.entries };
+  rmSync(old, { recursive: true, force: true });
 }

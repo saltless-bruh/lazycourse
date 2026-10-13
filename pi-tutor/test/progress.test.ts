@@ -58,3 +58,11 @@ describe("withLoader (final review I1)", () => {
     await expect(withLoader(custom, make, "m", async () => { throw new Error("401 unauthorized"); }, 1000)).rejects.toThrow("401 unauthorized");
   });
 });
+
+describe("M6c: timeout wording (M5 #41)", () => {
+  it("names what timed out", async () => {
+    const { custom } = fakeCustom();
+    const p = withLoader(custom, make, "m", (signal) => new Promise<string>((_, rej) => signal.addEventListener("abort", () => rej(new Error("aborted")))), 1000, "docs download");
+    await expect(p).rejects.toThrow("docs download timed out after 1s");
+  });
+});

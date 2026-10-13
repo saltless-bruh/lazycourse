@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, existsSync, readdirSync, mkdirSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { fetchReference, referenceInfo, devdocsUrls, skillsRoot, SKILL_FORMAT } from "../extensions/tutor/knowledge/reference.js";
+import { fetchReference, referenceInfo, devdocsUrls, skillsRoot, SKILL_FORMAT, installSkillDir } from "../extensions/tutor/knowledge/reference.js";
 import { Cancelled } from "../extensions/tutor/progress.js";
 import { parseSkillHeader } from "../extensions/tutor/learn.js";
 
@@ -125,5 +125,27 @@ describe("devdocsUrls / skillsRoot", () => {
     try { expect(skillsRoot()).toBe("/agent/skills"); } finally {
       if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = saved;
     }
+  });
+});
+
+describe("M6c: offline and atomic install (M5-finish #43, #44)", () => {
+  it("offline: a catalog failure with docs on disk is cached, not a failure", async () => {
+    const dir = root();
+    await fetchReference("python", deps(dir));
+    process.env.PI_TUTOR_DEVDOCS = "http://127.0.0.1:9"; // refused
+    const r = await fetchReference("python", deps(dir));
+    expect(r.status).toBe("cached");
+    expect(r.meta.slug).toBe("python~3.14");
+    await expect(fetchReference("python", deps(dir, { force: true }))).rejects.toThrow();
+  });
+  it("installSkillDir: a failed write leaves the old skill and no temp folder; success swaps it in", () => {
+    const dir = root();
+    mkdirSync(join(dir, "tutor-x-ref")); writeFileSync(join(dir, "tutor-x-ref", "SKILL.md"), "old");
+    expect(() => installSkillDir(dir, "tutor-x-ref", (d) => { writeFileSync(join(d, "SKILL.md"), "new"); throw new Error("disk full"); })).toThrow("disk full");
+    expect(readFileSync(join(dir, "tutor-x-ref", "SKILL.md"), "utf8")).toBe("old");
+    expect(readdirSync(dir)).toEqual(["tutor-x-ref"]);
+    installSkillDir(dir, "tutor-x-ref", (d) => writeFileSync(join(d, "SKILL.md"), "new"));
+    expect(readFileSync(join(dir, "tutor-x-ref", "SKILL.md"), "utf8")).toBe("new");
+    expect(readdirSync(dir)).toEqual(["tutor-x-ref"]);
   });
 });

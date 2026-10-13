@@ -19,7 +19,8 @@ export class Cancelled extends Error {
   constructor() { super("cancelled"); this.name = "Cancelled"; }
 }
 
-export function withLoader<T>(custom: CustomUi, make: MakeLoader, message: string, run: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+/** `what` names the slow work in the timeout error (M5 #41: a docs download is not a model call). */
+export function withLoader<T>(custom: CustomUi, make: MakeLoader, message: string, run: (signal: AbortSignal) => Promise<T>, timeoutMs: number, what = "model call"): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     // A factory that throws (e.g. theme not ready) must reject, not leave /tutor-start hanging.
     custom<null>((tui, theme, _kb, done) => {
@@ -33,7 +34,7 @@ export function withLoader<T>(custom: CustomUi, make: MakeLoader, message: strin
         (v) => finish(() => resolve(v)),
         (e) => finish(() => reject(
           loader.signal.aborted ? new Cancelled()
-            : timeout.aborted ? new Error(`model call timed out after ${Math.round(timeoutMs / 1000)}s`)
+            : timeout.aborted ? new Error(`${what} timed out after ${Math.round(timeoutMs / 1000)}s`)
               : e)),
       );
       return loader;
