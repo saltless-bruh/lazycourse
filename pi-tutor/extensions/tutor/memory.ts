@@ -21,6 +21,14 @@ function profileOf(s: MemoryScope): Profile {
   return p;
 }
 
+/**
+ * One line, and no tutor section tags (Pi wraps each section as `<name>…</name>`,
+ * system-prompt.js:118), so a fact cannot reshape the prompt it is rendered into (M6b #58, M6c M8).
+ */
+export function cleanMemory(text: string): string {
+  return text.replace(/<\/?tutor[\w-]*>/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 export function rememberTool(s: MemoryScope) {
   return defineTool({
     name: "tutor_remember",
@@ -34,7 +42,7 @@ export function rememberTool(s: MemoryScope) {
       const type = String(params.type) as MemoryType;
       if (!MEMORY_TYPES.includes(type)) throw new Error(`type must be one of ${MEMORY_TYPES.join(", ")}`);
       // M6b #58: one line, and no section tags, so a saved fact cannot reshape the next prompt.
-      const text = String(params.text ?? "").replace(/<\/?tutor_memory>/gi, "").replace(/\s*\n\s*/g, " ").trim();
+      const text = cleanMemory(String(params.text ?? ""));
       if (!text) throw new Error("the memory text is empty");
       if (text.length > MAX_MEMORY_CHARS) throw new Error(`a memory is at most ${MAX_MEMORY_CHARS} characters; save one fact`);
       assertNoSecrets(text);
@@ -74,7 +82,7 @@ export function memorySnapshot(rows: MemoryRow[], maxChars = SNAPSHOT_CHARS): st
   const out = ["## What you remember about this learner", "Saved in earlier sessions with tutor_remember, newest first. Search for more with tutor_recall."];
   let size = out.join("\n").length;
   for (const r of rows) {
-    const l = `- [${r.type}] ${r.text}`;
+    const l = `- [${r.type}] ${cleanMemory(r.text)}`; // rows saved before the hygiene rule too
     if (size + 1 + l.length > maxChars) break;
     out.push(l);
     size += 1 + l.length;
