@@ -1,6 +1,8 @@
 import { bandFor } from "./policy.js";
 
 export interface TutorState {
+  /** Active role when it is not the default coding tutor (spec 2026-10-13 §3). */
+  role?: string;
   language?: string; level?: number; rung?: number; task?: string;
   state: string; connected: boolean;
   /** Latest judgment word from the model, or "missing" when a reply had no block. */
@@ -16,6 +18,7 @@ function clip(s: string): string {
 
 export function renderWidget(s: TutorState): string[] {
   const parts: string[] = [];
+  if (s.role) parts.push(s.role);
   if (s.language) parts.push(s.language);
   if (s.level !== undefined) parts.push(`lvl ${s.level}`);
   if (s.rung !== undefined) parts.push(`rung ${s.rung}`);

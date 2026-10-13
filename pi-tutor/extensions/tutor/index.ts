@@ -8,6 +8,7 @@ import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, type Issue } from "./compliance.js";
+import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -39,6 +40,18 @@ function restoreLevel(ctx: ExtensionContext): number | undefined {
     }
   }
   return level;
+}
+
+/** Last `tutor_role` entry on the active branch (spec 2026-10-13 §3). */
+function restoreRole(ctx: ExtensionContext): string {
+  let role = DEFAULT_ROLE;
+  for (const e of ctx.sessionManager.getBranch()) {
+    if (e.type === "custom" && e.customType === "tutor_role") {
+      const r = (e.data as { role?: unknown } | undefined)?.role;
+      if (typeof r === "string") role = r;
+    }
+  }
+  return role;
 }
 
 /** Last `tutor_episode` entry on the active branch, if it is still open. */
@@ -105,6 +118,8 @@ export default function (pi: ExtensionAPI): void {
   let run: { prompt: string; rung: number | null; judged: boolean } | null = null;
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
   let lastIssues: Issue[] = [];
+  /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
+  let activeRole = DEFAULT_ROLE;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -112,9 +127,18 @@ export default function (pi: ExtensionAPI): void {
   function paint() {
     state.rung = episode ? episode.rung : startRung(bandFor(level()));
     state.state = episode ? `stuck: ${describeTrigger(episode.trigger)}` : signal;
+    const r = roleNamed(activeRole);
+    state.role = r.name === DEFAULT_ROLE ? undefined : r.name;
+    if (!r.ladder) state.rung = undefined;
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));
+  }
+
+  function setRole(name: string) {
+    if (name === activeRole) return;
+    activeRole = name;
+    pi.appendEntry("tutor_role", { role: name });
   }
 
   function setLevel(n: number) {
@@ -211,6 +235,7 @@ export default function (pi: ExtensionAPI): void {
     if (proj) state.language = proj.language;
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
     episode = restoreEpisode(ctx);
+    activeRole = restoreRole(ctx);
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       link = await NvimLink.connect({
@@ -243,17 +268,18 @@ export default function (pi: ExtensionAPI): void {
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
     const band = bandFor(level());
-    event.systemPromptOptions.sections["tutor"] = tutorPrompt(band);
-    // A learner's chat message opens an episode; our own [tutor] nudges do not.
-    if (!episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
-    run = { prompt: event.prompt, rung: episode ? episode.rung : null, judged: false };
+    const role = roleNamed(activeRole);
+    event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
+    // A learner's chat message opens an episode; our own [tutor] nudges and non-ladder roles do not.
+    if (role.ladder && !episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
+    run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
     }
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
     const parts: string[] = [];
-    if (episode) parts.push(formatEpisodeContext(episode));
+    if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     if (lastIssues.length) parts.push(formatCheck(lastIssues));
     if (snap) parts.push(formatEditorContext(snap));
     if (parts.length === 0) return;
@@ -264,7 +290,8 @@ export default function (pi: ExtensionAPI): void {
   function applyTurnJudgment(j: Judgment) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
-    if (!episode) return;
+    // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
+    if (!roleNamed(activeRole).ladder || !episode) return;
     if (episode.turns === 0 && project && profile) {
       let known = new Map<string, number>();
       const p = profile, lang = project.language;
@@ -291,7 +318,7 @@ export default function (pi: ExtensionAPI): void {
     if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt)); }
     if (final) {
       if (!cur.judged) state.last = "missing";
-      lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" });
+      lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder });
       if (lastIssues.length) pi.appendEntry("tutor_check", { issues: lastIssues });
     }
     paint();
@@ -310,6 +337,19 @@ export default function (pi: ExtensionAPI): void {
     if (last < 0) return;
     const pruned = msgs.filter((m, i) => !(m.role === "custom" && m.customType === "tutor_editor" && i !== last));
     return pruned.length === msgs.length ? undefined : { messages: pruned };
+  });
+
+  pi.registerCommand("tutor-architect", {
+    description: "Architecture professor: components, data flow, trade-offs; /tutor-architect off to return",
+    handler: async (args, ctx) => {
+      const q = args.trim();
+      if (q === "off") { setRole(DEFAULT_ROLE); paint(); ctx.ui.notify("back to the coding tutor", "info"); return; }
+      setRole("architect");
+      paint();
+      // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
+      if (q && ctx.hasUI) pi.sendUserMessage(q);
+      else ctx.ui.notify("architecture professor: ask about components, data flow or trade-offs", "info");
+    },
   });
 
   pi.registerCommand("tutor-level", {

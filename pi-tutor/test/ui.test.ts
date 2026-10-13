@@ -19,6 +19,9 @@ describe("renderWidget", () => {
     for (const l of w) expect(l.length).toBeLessThanOrEqual(44);
     expect(w[1].endsWith("…")).toBe(true);
   });
+  it("shows a non-default role first on line 1", () => {
+    expect(renderWidget({ role: "architect", language: "python", level: 30, state: "idle", connected: true })[0]).toBe("tutor  architect · python · lvl 30");
+  });
   it("omits missing fields", () => {
     expect(renderWidget({ state: "idle", connected: true })[0]).toBe("tutor");
   });

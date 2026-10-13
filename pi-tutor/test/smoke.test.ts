@@ -492,3 +492,47 @@ describe("compliance in the turn loop", () => {
     expect(after.message?.content).not.toContain("[tutor-check]"); // a clean reply clears it
   });
 });
+
+describe("roles in the turn loop", () => {
+  it("/tutor-architect switches the prompt, records tutor_role, and off switches back", async () => {
+    const b = await boot();
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    expect(b.entries.at(-1)).toEqual({ type: "tutor_role", data: { role: "architect" } });
+    const opts = await turn(b.events, b.ctx, "how should I split modules?", judged("none"));
+    expect(opts.sections["tutor"]).toContain("# Role: architecture professor");
+    expect(opts.sections["tutor"]).not.toContain("## Hint ladder");
+    expect(b.widgets["tutor"]?.[0]).toContain("architect");
+    await b.commands["tutor-architect"].handler("off", b.ctx);
+    const back = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(back.sections["tutor"]).toContain("# Role: coding tutor");
+    expect(back.sections["tutor"]).toContain("## Hint ladder");
+  });
+  it("with a question, the TUI sends it as the learner's message; without a UI it only switches", async () => {
+    const b = await boot();
+    await b.commands["tutor-architect"].handler("how do layers talk?", b.ctx);
+    expect(b.sent.at(-1)?.text).toBe("how do layers talk?");
+    const n = b.sent.length;
+    await b.commands["tutor-architect"].handler("another?", { ...b.ctx, hasUI: false });
+    expect(b.sent.length).toBe(n);
+  });
+  it("architect turns leave the episode alone and never open one", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, REASONED, judged("none")); // opens a chat episode at rung 2
+    const before = episodes(b.entries).length;
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    const opts = await turn(b.events, b.ctx, REASONED, judged("correct", true));
+    expect(episodes(b.entries).length).toBe(before);
+    expect(opts.message?.content ?? "").not.toContain("[episode]");
+  });
+  it("architect replies may not hold code blocks", async () => {
+    const b = await boot();
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    await turn(b.events, b.ctx, "how do I split it?", assistant("```python\nimport x\n```\n```tutor-judgment\n{\"judgment\":\"none\"}\n```"));
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toEqual({ issues: ["code-above-rung"] });
+  });
+  it("restores the role from the branch", async () => {
+    const b = await boot({ branch: [{ type: "custom", customType: "tutor_role", data: { role: "architect" } }] });
+    const opts = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(opts.sections["tutor"]).toContain("# Role: architecture professor");
+  });
+});
