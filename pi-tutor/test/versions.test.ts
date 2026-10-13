@@ -37,3 +37,14 @@ describe("detectVersion", () => {
     expect(LANGS.typescript).toEqual({ devdocsType: "typescript", command: "tsc", args: ["--version"] });
   });
 });
+
+describe("Node floor (M6c M7)", () => {
+  it("pi-tutor's engines.node agrees with Pi's own floor and the README", async () => {
+    const { readFileSync } = await import("node:fs");
+    const json = (p: string) => JSON.parse(readFileSync(new URL(p, import.meta.url), "utf8")) as { engines: { node: string } };
+    const floor = (s: string) => /(\d+)\.(\d+)/.exec(s)!.slice(1).map(Number);
+    const ours = floor(json("../package.json").engines.node);
+    expect(ours).toEqual(floor(json("../node_modules/@earendil-works/pi-coding-agent/package.json").engines.node));
+    expect(ours).toEqual(floor(/Node ≥ ([\d.]+)/.exec(readFileSync(new URL("../../README.md", import.meta.url), "utf8"))![1]));
+  });
+});
