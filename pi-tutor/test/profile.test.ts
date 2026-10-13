@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Profile, SCHEMA_VERSION, defaultProfilePath, toFtsQuery } from "../extensions/tutor/profile.js";
+import { Profile, SCHEMA_VERSION, MIGRATIONS, defaultProfilePath, toFtsQuery } from "../extensions/tutor/profile.js";
 
 let p: Profile | undefined;
 afterEach(() => { p?.close(); p = undefined; });
@@ -166,5 +166,33 @@ describe("profile v2: memory and feedback (spec 2026-10-13 §7.1, §7 #7, §8)",
   it("toFtsQuery quotes each term and ORs them (from @pify/memory fts.ts)", () => {
     expect(toFtsQuery('a closures "x" yz*')).toBe('"closures" OR "yz*"'); // one-letter terms are dropped, as upstream
     expect(toFtsQuery("  ")).toBe('""');
+  });
+});
+
+describe("M6c: profile minors", () => {
+  it("remember keeps the same text for two languages apart (M6b #57)", () => {
+    const q = Profile.open(":memory:");
+    expect(q.remember({ type: "learner", text: "likes loops", language: "python", project: null }, 1).created).toBe(true);
+    expect(q.remember({ type: "learner", text: "likes loops", language: "rust", project: null }, 2).created).toBe(true);
+    expect(q.remember({ type: "learner", text: "likes loops", language: null, project: null }, 3).created).toBe(true);
+    expect(q.remember({ type: "learner", text: "likes loops", language: null, project: null }, 4).created).toBe(false);
+  });
+  it("a real v1 profile keeps languages, concepts, episodes and projects through the upgrade (M6b #60)", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "pitutor-v1full-")), "profile.sqlite");
+    const raw = new DatabaseSync(file);
+    raw.exec(`CREATE TABLE schema_version (v INTEGER NOT NULL); INSERT INTO schema_version (v) VALUES (1);`);
+    raw.exec(MIGRATIONS[0]);
+    raw.exec(`INSERT INTO languages VALUES ('rust', 40, '{}', 1);
+      INSERT INTO concepts VALUES ('rust', 'traits', 0.5, 2);
+      INSERT INTO episodes (language, project, concept_tags, rungs_used, turns, opened, closed) VALUES ('rust', '/p', '["traits"]', 2, 3, 1, 2);
+      INSERT INTO projects (language, path, title, status, created) VALUES ('rust', '/p', 'T', 'active', 1);`);
+    raw.close();
+    const q = Profile.open(file);
+    expect(q.version).toBe(2);
+    expect(q.language("rust")?.level).toBe(40);
+    expect(q.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: 0.5, episodes: 2 }]);
+    expect(q.episodes("rust")).toHaveLength(1);
+    expect(q.projectAt("/p")?.title).toBe("T");
+    q.close();
   });
 });

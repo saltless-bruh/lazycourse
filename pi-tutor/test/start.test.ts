@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readdirSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runStart, LANGUAGES, type StartDeps } from "../extensions/tutor/start.js";
@@ -109,5 +109,17 @@ describe("runStart", () => {
     const t = deps([]);
     expect(await runStart("rm -rf /", t.d)).toBeNull();
     expect(t.notes.at(-1)).toMatch(/language/);
+  });
+});
+
+describe("M6c: start under a symlinked folder (M4 #25)", () => {
+  it("records the project at its real path", async () => {
+    const t = deps(["2. Word Count (small) — Count words.", ""]);
+    t.profile.saveLanguage("rust", 80, {}, 1);
+    const real = mkdtempSync(join(tmpdir(), "pitutor-real-"));
+    symlinkSync(real, join(t.home, "lazycourse"));
+    const r = await runStart("rust", t.d);
+    expect(r?.dir).toBe(join(realpathSync(real), "rust-word-count"));
+    expect(t.profile.projectAt(join(realpathSync(real), "rust-word-count"))).toBeDefined();
   });
 });

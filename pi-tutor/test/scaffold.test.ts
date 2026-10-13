@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkScaffold, taskIds, slugify, commentPrefix, isEmptyOrMissing, writeScaffold, scaffoldPrompt, type ScaffoldSpec } from "../extensions/tutor/scaffold.js";
@@ -86,5 +86,14 @@ describe("writeScaffold", () => {
     const empty = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
     expect(isEmptyOrMissing(empty)).toBe(true);
     expect(writeScaffold(empty, spec(), meta)).toHaveLength(6);
+  });
+});
+
+describe("M6c: scaffold cleanup (M4 #26)", () => {
+  it("a failed write removes only what it created, so a retry works", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-half-"));
+    expect(() => writeScaffold(dir, spec({ entry_file: "spec/design.md" }), meta)).toThrow(); // collides with a file written earlier
+    expect(readdirSync(dir)).toEqual([]);
+    expect(writeScaffold(dir, spec(), meta)).toContain("spec/tasks.md");
   });
 });

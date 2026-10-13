@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, extname, join, normalize, isAbsolute } from "node:path";
 import type { Band } from "./policy.js";
 import type { InterviewAnswers } from "./interview.js";
@@ -101,10 +101,21 @@ export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta):
     ["spec/requirements.md", s.requirements_md],
     [entry, `${commentPrefix(entry)} Start here: spec/tasks.md, task ${first}. You write the code; the tutor coaches.\n`],
   ];
-  for (const [rel, text] of files) {
-    const abs = join(dir, rel);
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, text, { flag: "wx" });
+  const made: string[] = [];
+  const madeDirs: string[] = [];
+  try {
+    for (const [rel, text] of files) {
+      const abs = join(dir, rel);
+      for (let d = dirname(abs); d !== dir && !existsSync(d); d = dirname(d)) madeDirs.unshift(d);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, text, { flag: "wx" });
+      made.push(abs);
+    }
+  } catch (e) {
+    // M4 #26: never touch files this call did not create; remove ours, then our now-empty folders.
+    for (const f of made.reverse()) rmSync(f, { force: true });
+    for (const d of [...new Set(madeDirs)].reverse()) { try { rmdirSync(d); } catch { /* not empty: keep */ } }
+    throw e;
   }
   return files.map(([rel]) => rel);
 }

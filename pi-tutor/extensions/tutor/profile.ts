@@ -9,7 +9,7 @@ export interface ConceptRow { language: string; tag: string; ease: number; episo
 export interface ProjectRow { id: number; language: string; path: string; title: string; status: string; created: number }
 export interface EpisodeRecord { language: string; project: string | null; concept_tags: string[]; rungs_used: number; turns: number; opened: number; closed: number }
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `CREATE TABLE languages (name TEXT PRIMARY KEY, level INTEGER NOT NULL, interview_json TEXT NOT NULL, created INTEGER NOT NULL);
    CREATE TABLE concepts (language TEXT NOT NULL, tag TEXT NOT NULL, ease REAL NOT NULL, episodes INTEGER NOT NULL, PRIMARY KEY (language, tag));
    CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, language TEXT NOT NULL, project TEXT, concept_tags TEXT NOT NULL,
@@ -146,7 +146,8 @@ export class Profile {
 
   /** One fact; the same type+text again only bumps `updated` (spec 2026-10-13 §7.1). */
   remember(m: { type: MemoryType; text: string; language: string | null; project: string | null }, now: number): { id: number; created: boolean } {
-    const old = this.db.prepare("SELECT id FROM memory WHERE type = ? AND text = ?").get(m.type, m.text) as Row | undefined;
+    // M6b #57: the same words about another language are a different fact (`IS` matches NULL too).
+    const old = this.db.prepare("SELECT id FROM memory WHERE type = ? AND text = ? AND language IS ?").get(m.type, m.text, m.language) as Row | undefined;
     if (old) {
       this.db.prepare("UPDATE memory SET updated = ? WHERE id = ?").run(now, Number(old.id));
       return { id: Number(old.id), created: false };

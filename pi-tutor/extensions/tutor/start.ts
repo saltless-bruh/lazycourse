@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { bandFor } from "./policy.js";
 import type { Profile } from "./profile.js";
@@ -77,9 +78,11 @@ export async function runStart(arg: string, d: StartDeps): Promise<StartResult |
     d.ui.working("tutor: writing the spec…");
     const spec = await completeJson(d.complete, systemText("scaffold"), scaffoldPrompt({ language, level, band, project, interview }), checkScaffold);
     const files = writeScaffold(dir, spec, { language, level, band, title: project.title, summary: project.summary });
+    // M4 #25: the tutor finds its project by realpath(cwd); a symlinked parent must not hide it.
+    const real = realpathSync(dir);
     if (interview) d.profile.saveLanguage(language, level, interview as unknown as Record<string, string>, d.now());
-    d.profile.addProject(language, dir, project.title, d.now());
-    return { dir, language, level, title: project.title, files };
+    d.profile.addProject(language, real, project.title, d.now());
+    return { dir: real, language, level, title: project.title, files };
   } catch (e) {
     if (e instanceof Cancelled) d.ui.notify("tutor-start cancelled", "info");
     else d.ui.notify(`tutor-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
