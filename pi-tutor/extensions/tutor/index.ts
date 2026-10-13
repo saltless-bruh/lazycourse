@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
 import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
-import { bandPrompt, systemText } from "./prompts.js";
+import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
@@ -234,7 +234,7 @@ export default function (pi: ExtensionAPI): void {
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
     const band = bandFor(level());
-    event.systemPromptOptions.sections["tutor"] = bandPrompt(band);
+    event.systemPromptOptions.sections["tutor"] = tutorPrompt(band);
     // A learner's chat message opens an episode; our own [tutor] nudges do not.
     if (!episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     let snap: EditorSnapshot | null = null;

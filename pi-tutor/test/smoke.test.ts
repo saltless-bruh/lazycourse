@@ -48,7 +48,8 @@ describe("extension wiring", () => {
     const { events, commands, ctx } = await boot();
     const opts = { sections: {} as Record<string, string> };
     const r1 = (await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx)) as { message: { customType: string; content: string; display: boolean } };
-    expect(opts.sections["tutor"]).toMatch(/^# Tutor band: intermediate\n/);
+    expect(opts.sections["tutor"]).toContain("# Tutor band: intermediate\n");
+    expect(opts.sections["tutor"]).toContain("## Teaching style");
     expect(opts.sections["tutor"]).toContain("```tutor-judgment");
     expect(r1.message.customType).toBe("tutor_editor");
     expect(r1.message.display).toBe(false);
@@ -56,7 +57,7 @@ describe("extension wiring", () => {
     expect(r1.message.content).not.toContain("[editor]");
     await commands["tutor-level"].handler("5", ctx);
     await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx);
-    expect(opts.sections["tutor"]).toMatch(/^# Tutor band: beginner\n/);
+    expect(opts.sections["tutor"]).toContain("# Tutor band: beginner\n");
   });
 
   it("turn_end parses the judgment into the widget and a tutor_judgment entry", async () => {
