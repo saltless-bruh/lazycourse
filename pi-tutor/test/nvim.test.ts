@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
-import { NvimLink, SNAPSHOT_LUA, type TutorPayload } from "../extensions/tutor/nvim.js";
+import { NvimLink, SNAPSHOT_LUA, nvimLogPath, type TutorPayload } from "../extensions/tutor/nvim.js";
 
 let h: Headless | undefined;
 let link: NvimLink | null = null;
@@ -246,4 +246,33 @@ describe("NvimLink editor-window resolution (M2 review fixes)", () => {
     await new Promise((r) => setTimeout(r, 800));
     expect(await link.raw.lua("return vim.g.switched")).toEqual(["/x/proj", "spec/tasks.md"]);
   }, 20000);
+});
+
+describe("M6c: link hardening", () => {
+  it("openLocation refuses a path outside the root and reports it (M1b #5)", async () => {
+    const { link, h } = await setup();
+    writeFileSync(join(h.root, "e.py"), "a\nb\n");
+    expect(await link.openLocation("/etc/hosts", 1)).toBe(false);
+    expect(await link.openLocation(join(h.root, "e.py"), 2)).toBe(true);
+    expect(await link.cursorLine()).toBe(2);
+  }, 20000);
+  it("cursorLine is null when the editor buffer is outside the root (M1b #5)", async () => {
+    const { link } = await setup();
+    await link.raw.command("edit /etc/hosts");
+    expect(await link.cursorLine()).toBeNull();
+  }, 20000);
+  it("a snapshot on a blocked Neovim rejects after its timeout instead of hanging (M2 #12)", async () => {
+    const { link } = await setup();
+    void link.raw.lua("vim.uv.sleep(3000)").catch(() => {});
+    const t0 = Date.now();
+    await expect(link.snapshot("window", 20, 300)).rejects.toThrow(/timed out/);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  }, 20000);
+});
+
+describe("nvimLogPath (M1b #6)", () => {
+  it("is per user under XDG_STATE_HOME, else ~/.local/state", () => {
+    expect(nvimLogPath({ XDG_STATE_HOME: "/s" } as NodeJS.ProcessEnv)).toBe("/s/pi-tutor/nvim.log");
+    expect(nvimLogPath({ HOME: "/home/u" } as NodeJS.ProcessEnv)).toBe("/home/u/.local/state/pi-tutor/nvim.log");
+  });
 });

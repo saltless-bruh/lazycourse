@@ -14,10 +14,13 @@ export function formatEditorContext(s: EditorSnapshot): string {
     for (const d of s.diagnostics) out.push(`  L${d.line} ${SEV[d.severity] ?? "?"}: ${d.msg}`);
   }
   const total = s.lines.length;
-  const lines = total > MAX_SNAPSHOT_LINES ? s.lines.slice(0, MAX_SNAPSHOT_LINES) : s.lines;
-  const last = s.from + lines.length - 1;
-  out.push(total > MAX_SNAPSHOT_LINES ? `--- lines ${s.from}-${last} (truncated, ${total} total) ---` : `--- lines ${s.from}-${last} ---`);
-  lines.forEach((l, i) => out.push(`${String(s.from + i).padStart(4)}| ${l}`));
+  // M2 #9: a long buffer keeps the MAX_SNAPSHOT_LINES lines centred on the cursor, clamped to the buffer.
+  const at = Math.min(Math.max(0, s.cursor - s.from), Math.max(0, total - 1));
+  const start = total > MAX_SNAPSHOT_LINES ? Math.max(0, Math.min(at - MAX_SNAPSHOT_LINES / 2, total - MAX_SNAPSHOT_LINES)) : 0;
+  const lines = s.lines.slice(start, start + MAX_SNAPSHOT_LINES);
+  const first = s.from + start, last = first + lines.length - 1;
+  out.push(total > MAX_SNAPSHOT_LINES ? `--- lines ${first}-${last} (truncated, ${total} total) ---` : `--- lines ${first}-${last} ---`);
+  lines.forEach((l, i) => out.push(`${String(first + i).padStart(4)}| ${l}`));
   return out.join("\n");
 }
 

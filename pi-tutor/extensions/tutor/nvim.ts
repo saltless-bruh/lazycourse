@@ -1,12 +1,22 @@
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { existsSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import type { NeovimClient } from "neovim";
 import { PUSH_LUA } from "./push.lua.js";
 
 // The neovim client logs through winston and patches console; route it to a file
 // before it loads so nothing ever reaches Pi's terminal.
-process.env.NVIM_NODE_LOG_FILE ||= join(tmpdir(), "pi-tutor-nvim.log");
+/** Per-user log for the neovim client (M1b #6): never one /tmp file shared by every user. */
+export function nvimLogPath(env: NodeJS.ProcessEnv): string {
+  const state = env.XDG_STATE_HOME || join(env.HOME || homedir(), ".local", "state");
+  return join(state, "pi-tutor", "nvim.log");
+}
+if (!process.env.NVIM_NODE_LOG_FILE) {
+  const p = nvimLogPath(process.env);
+  try { mkdirSync(dirname(p), { recursive: true }); process.env.NVIM_NODE_LOG_FILE = p; } catch {
+    process.env.NVIM_NODE_LOG_FILE = join(tmpdir(), `pi-tutor-nvim-${process.getuid?.() ?? "u"}.log`);
+  }
+}
 
 export type TutorPayload =
   | { kind: "diagnostics"; buf: number; path: string; errors: number; warnings: number; first?: { line: number; msg: string } }
@@ -139,7 +149,9 @@ export class NvimLink {
     return lines.join("\n");
   }
 
-  async cursorLine(): Promise<number> {
+  /** The editor window's cursor line, or null when its buffer is outside the root (M1b #5). */
+  async cursorLine(): Promise<number | null> {
+    if ((await this.currentBufIfInRoot()) === null) return null;
     return (await this.raw.lua(EDITOR_WIN_LUA + `return vim.api.nvim_win_get_cursor(__editor_win())[1]`)) as number;
   }
 
@@ -153,14 +165,24 @@ export class NvimLink {
   }
 
   /** One round trip: the editor buffer's path, filetype, cursor, lines (all or ±radius) and diagnostics. */
-  async snapshot(mode: "full" | "window", radius = 20): Promise<EditorSnapshot | null> {
-    const s = (await this.raw.lua(SNAPSHOT_LUA, [mode, radius, this.root])) as Partial<EditorSnapshot> & { path: string };
+  async snapshot(mode: "full" | "window", radius = 20, timeoutMs = 2000): Promise<EditorSnapshot | null> {
+    // M2 #12: a busy Neovim (a pending prompt, a long command) must not stall the turn.
+    const s = (await this.timed(this.raw.lua(SNAPSHOT_LUA, [mode, radius, this.root]), timeoutMs, "snapshot")) as Partial<EditorSnapshot> & { path: string };
     if (!s.lines || !this.isInRoot(s.path)) return null;
     return s as EditorSnapshot;
   }
 
-  async openLocation(path: string, line: number): Promise<void> {
+  /** Jump the editor to path:line; false (and nothing opened) for a path outside the root (M1b #5). */
+  async openLocation(path: string, line: number): Promise<boolean> {
+    if (!this.isInRoot(path)) return false;
     await this.raw.lua(`local p, l = ...; vim.cmd.edit(vim.fn.fnameescape(p)); vim.api.nvim_win_set_cursor(0, { l, 0 })`, [path, line]);
+    return true;
+  }
+
+  private timed<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<T>((_, rej) => { timer = setTimeout(() => rej(new Error(`${what} timed out after ${ms}ms`)), ms); });
+    return Promise.race([p, limit]).finally(() => clearTimeout(timer));
   }
 
   /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */

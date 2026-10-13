@@ -73,3 +73,13 @@ describe("final review I2: run context does not assume where the message is", ()
     expect(c).toMatch(/error message and the learner's own frame/);
   });
 });
+
+describe("M6c: long buffers keep the lines around the cursor (M2 #9)", () => {
+  it("a 1000-line full snapshot keeps a window around the cursor, not the first 400", () => {
+    const lines = Array.from({ length: 1000 }, (_, i) => `l${i + 1}`);
+    const c = formatEditorContext({ path: "/p/a.py", filetype: "python", cursor: 900, from: 1, lines, diagnostics: [] });
+    expect(c).toContain("--- lines 601-1000 (truncated, 1000 total) ---"); // cursor ± 200, clamped to the buffer
+    expect(c).toContain(" 900| l900");
+    expect(c).not.toContain("   1| l1\n");
+  });
+});

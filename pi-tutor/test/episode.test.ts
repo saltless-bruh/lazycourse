@@ -247,3 +247,11 @@ describe("M6c: episodes against a real Neovim", () => {
     }
   }, 20000);
 });
+
+describe("M6c: connected turn context (M2 #15)", () => {
+  it("a connected before_agent_start carries the [editor] snapshot of the open file", async () => {
+    const b = await linked();
+    const t = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(t.message?.content).toMatch(/\[editor\] .*a\.py \(python\), cursor line 1/);
+  }, 20000);
+});
