@@ -139,3 +139,11 @@ describe("final review fixes", () => {
     expect(replyReminder(5, false)).not.toMatch(/do not state the fix/);
   });
 });
+
+describe("M6a minors: fence forms", () => {
+  it("an indented fence inside a list item and a ~~~ fence are checked", () => {
+    const listed = ["1. Try this:", "   ```python", "   a = 1", "   ```", JUDGED].join("\n");
+    expect(checkReply(listed, { ...ok, rung: 2 })).toContain("code-above-rung");
+    expect(checkReply(["~~~", "x".repeat(DIAGRAM_COLS + 1), "~~~", JUDGED].join("\n"), ok)).toContain("wide-diagram");
+  });
+});

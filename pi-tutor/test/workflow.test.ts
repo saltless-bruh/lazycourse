@@ -14,7 +14,7 @@ describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
     expect(workflowLabel(w)).toBe("plan 6/6");
     w = advance(w, true, 9);
     expect(w.done).toBe(9);
-    expect(workflowLabel(w)).toBe("plan done");
+    expect(workflowLabel({ ...w, done: undefined })).toBe("plan 6/6"); // a finished workflow is dropped, never labelled
     expect(advance(w, true, 10)).toBe(w);
   });
   it("tells the model the step, its artifact and the band's mode", () => {

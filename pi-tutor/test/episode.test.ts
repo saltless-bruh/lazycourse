@@ -149,3 +149,14 @@ describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
     await until(() => b.widgets["tutor"]?.[1] === "episode closed (run_passed)");
   }, 20000);
 });
+
+describe("architect role and stuck signals (M6a minor)", () => {
+  it("an editor error opens an episode silently while the architect is active", async () => {
+    const b = await linked();
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    await setError("boom");
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(b.sent).toEqual([]);
+  }, 20000);
+});

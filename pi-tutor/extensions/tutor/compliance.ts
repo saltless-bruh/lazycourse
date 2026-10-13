@@ -35,10 +35,11 @@ export function guardJudgment(j: Judgment, prompt: string): Judgment {
 }
 
 /**
- * Fences open at the start of a line and close on a bare ``` line; an inline ``` inside a sentence
- * is not one, and an unclosed fence (a truncated reply) runs to the end of the text.
+ * Fences (``` or ~~~, indented up to 3 spaces as inside list items) open at the start of a line and
+ * close on a bare fence line; an inline ``` in a sentence is not one, and an unclosed fence (a
+ * truncated reply) runs to the end of the text.
  */
-const FENCES = /^```([^\n`]*)\r?\n([\s\S]*?)(?:^```[ \t]*$|(?![\s\S]))/gm;
+const FENCES = /^ {0,3}(`{3,}|~{3,})([^\n`~]*)\r?\n([\s\S]*?)(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
 const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done|\[episode\]|\[workflow\]|\[tutor-check\]|\brung \d)/i;
 /**
  * Fences quoting a document (spec/tasks.md, README) are not code and may be wide; their content is
@@ -57,11 +58,11 @@ export function checkReply(text: string, o: { band: Band; rung: number | null; j
   const issues = new Set<Issue>();
   if (!o.judged) issues.add("missing-judgment");
   for (const m of text.matchAll(FENCES)) {
-    const tag = m[1].trim().toLowerCase();
-    const body = m[2].replace(/\r?\n$/, "").split(/\r?\n/);
-    if (tag === "tutor-judgment" || m[2].includes('"judgment"')) continue;
+    const tag = m[2].trim().toLowerCase();
+    const body = m[3].replace(/\r?\n$/, "").split(/\r?\n/).map((l) => l.replace(/^ {0,3}/, ""));
+    if (tag === "tutor-judgment" || m[3].includes('"judgment"')) continue;
     if (QUOTES.has(tag)) {
-      for (const i of checkReply(m[2], { ...o, judged: true })) issues.add(i);
+      for (const i of checkReply(m[3], { ...o, judged: true })) issues.add(i);
       continue;
     }
     if (tag === "" || tag === "text") {

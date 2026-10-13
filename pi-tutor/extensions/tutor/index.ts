@@ -186,7 +186,8 @@ export default function (pi: ExtensionAPI): void {
     pi.appendEntry("tutor_episode", episode);
     // Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running
     // reply, and at most one per NUDGE_GAP_MS so a run of changing errors is not a run of turns.
-    if (nudge && session?.isIdle() && (run || now - lastNudge >= NUDGE_GAP_MS)) {
+    // The architect discusses design: editor stuck signals still open episodes but do not interrupt it.
+    if (nudge && roleNamed(activeRole).ladder && session?.isIdle() && (run || now - lastNudge >= NUDGE_GAP_MS)) {
       lastNudge = now;
       pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
     }
@@ -315,11 +316,12 @@ export default function (pi: ExtensionAPI): void {
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
     const parts: string[] = [];
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
-    if (workflow) parts.push(formatWorkflowContext(workflow, band));
+    // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
+    if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
     if (lastIssues.length) parts.push(formatCheck(lastIssues));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(replyReminder(run.rung, workflow !== null));
+    parts.push(replyReminder(run.rung, workflow !== null && role.ladder));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -339,10 +341,11 @@ export default function (pi: ExtensionAPI): void {
   function applyTurnJudgment(j: Judgment) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
-    const inRecipe = workflow !== null;
-    advanceWorkflow(j.step_done);
+    const ladder = roleNamed(activeRole).ladder;
+    const inRecipe = workflow !== null && ladder;
+    if (ladder) advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
-    if (!roleNamed(activeRole).ladder || !episode) return;
+    if (!ladder || !episode) return;
     if (episode.turns === 0 && project && profile) {
       let known = new Map<string, number>();
       const p = profile, lang = project.language;
@@ -363,7 +366,7 @@ export default function (pi: ExtensionAPI): void {
     const m = event.message;
     if (m.role !== "assistant") return;
     // Aborted, errored and truncated turns carry no judgment.
-    if (m.stopReason === "aborted" || m.stopReason === "error" || m.stopReason === "length") return;
+    if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
     const cur = run ?? (run = { prompt: "", rung: episode ? episode.rung : null, judged: false });
     let callArgs: unknown;
     for (const c of m.content) if (c.type === "toolCall" && isJudgmentTool(c.name)) callArgs = c.arguments;

@@ -767,3 +767,25 @@ describe("/tutor-feedback in the extension", () => {
     expect(episodes(b.entries).length).toBe(before);
   });
 });
+
+describe("M6a minors in the turn loop", () => {
+  it("turns that stop for any reason other than stop or toolUse carry no judgment", async () => {
+    const b = await boot();
+    for (const stop of ["pending", "deferred"]) await turn(b.events, b.ctx, REASONED, judged("correct", false, stop));
+    expect(b.entries.some((e) => e.type === "tutor_judgment")).toBe(false);
+  });
+  it("the architect role suspends an active recipe: no [workflow] context, no step_done, no recipe hold", async () => {
+    const dir = mkd(pjoin(tmp(), "plan-")); mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Parse argv\n");
+    const b = await boot({ cwd: dir });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    const opts = await turn(b.events, b.ctx, REASONED, assistant('ok\n```tutor-judgment\n{"judgment":"none","step_done":true}\n```'));
+    expect(opts.message?.content ?? "").not.toContain("[workflow]");
+    expect(opts.message?.content ?? "").not.toContain("During the design recipe");
+    expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ step: 1 });
+    await b.commands["tutor-architect"].handler("off", b.ctx);
+    const back = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(back.message?.content).toContain("[workflow]");
+  });
+});

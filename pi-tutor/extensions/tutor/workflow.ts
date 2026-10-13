@@ -32,8 +32,9 @@ export function advance(w: Workflow, stepDone: boolean, now: number): Workflow {
   return w.step >= STEPS.length ? { ...w, done: now } : { ...w, step: w.step + 1 };
 }
 
+/** The widget label; a finished workflow is dropped by the extension, so it is never shown. */
 export function workflowLabel(w: Workflow): string {
-  return w.done !== undefined ? "plan done" : `plan ${w.step}/${STEPS.length}`;
+  return `plan ${w.step}/${STEPS.length}`;
 }
 
 export function formatWorkflowContext(w: Workflow, band: Band): string {
