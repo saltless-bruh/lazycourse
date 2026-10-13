@@ -70,6 +70,18 @@ tells the model what to fix on the next turn; a `correct` judgment needs your re
 - `:TutorArchitect [question|off]` switches to the architecture professor (components, data
   flow, trade-offs, no code) until `off` or `:TutorPlan`.
 
+Milestone 6b (2026-10-13): the tutor remembers you across sessions. When you say how you learn,
+what you know or how you want to be taught, it saves one short fact with its `tutor_remember` tool
+(never secrets: keys and tokens are refused). From the next session on it sees those facts and can
+search them with `tutor_recall`. Everything lives in your profile (`profile.sqlite`).
+
+- `/tutor-memory` lists what the tutor remembers; pick an entry to forget it.
+- A failing `:TutorRun` opens a stuck episode carrying the end of the error output; the tutor
+  teaches you to read the trace (`tutor-stack-traces` skill).
+- `:TutorFeedback too-long|too-vague|too-much-help|good` tells the tutor how it is doing; it
+  adjusts its style (and the hint level for `too-much-help` / `too-vague`) and keeps that per
+  language until you say `good`.
+
 ## How it works
 
 - **Level slider (0–100)** per language. Beginner (0–33) streams buffer snapshots, diagnostics, idle time and run output to the tutor and explains how code is structured. Intermediate (34–66) names concepts and points at docs. Pro (67–100) sends diagnostics, idle time and run output only, and gives hints, never code.
@@ -114,7 +126,7 @@ return {
     dir = "<repo>/nvim-tutor",
     name = "nvim-tutor",
     cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn",
-            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect" },
+            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback" },
     keys = {
       { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
       { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },

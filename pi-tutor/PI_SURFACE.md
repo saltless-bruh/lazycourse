@@ -56,6 +56,18 @@ Re-verify every line when bumping versions.
   prompt would throw "Agent is already processing" (agent-session.js:1552).
 - `parseFrontmatter(text)` → `{ frontmatter, body }` (`dist/utils/frontmatter.d.ts`, exported from the
   package index): role files `agents/*.md` and learned skills.
+- `pi.registerTool(defineTool({ name, label, description, parameters, execute(toolCallId, params, signal,
+  onUpdate, ctx) }))` → `{ content: [{ type: "text", text }], details }` (types.d.ts:446-505,
+  examples/extensions/hello.ts): `tutor_remember`, `tutor_recall` (M6b). A tool that throws becomes an
+  error result carrying `error.message` (pi-agent-core agent-loop.js:536); the secret scanner's refusal
+  reaches the model that way. Parameters use `Type` from `typebox`, which Pi's loader aliases to its own
+  copy (loader.js getAliases; also `@earendil-works/pi-ai`).
+- `--tools <list>` is an allowlist of "built-in, extension, or custom tools" (docs/cli.md:120): nvim-tutor
+  starts Pi with `--tools read,grep,find,ls,tutor_remember,tutor_recall`; the guard allows the two
+  memory tools by name.
+- `systemPromptOptions.sections` are "XML-wrapped prompt sections keyed by tag name"
+  (system-prompt.d.ts:25): `tutor` (role, style, band, ladder, protocol) and `tutor_memory` (the frozen
+  memory snapshot, set only when there are memories).
 - `ctx.modelRegistry.complete(ctx.model, { systemPrompt, messages: [UserMessage] })` → `AssistantMessage`
   (model-registry.d.ts:40; pattern from examples/extensions/qna.ts). Used by `/tutor-start` for the
   suggester and the scaffold; non-`"stop"` `stopReason` is an error (`errorMessage` shown).
@@ -82,6 +94,7 @@ Re-verify every line when bumping versions.
   `tutor_editor` custom message. `CustomMessage` is `{ role: "custom", customType, content, display }`.
 - Custom entry types we write: `tutor_signal`, `tutor_level { level }`, `tutor_judgment` (Judgment),
   `tutor_role { role }`, `tutor_workflow { task, step, started, done? }`, `tutor_check { issues }`,
+  `tutor_feedback { kind, rung }`, `tutor_episode` with a `run` trigger `{ cmd, code, trace }` (M6b),
   `tutor_episode` (Episode, written on open / judgment / reband / close; the last open one is restored).
 - System prompt section key: `tutor`. `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.
@@ -110,6 +123,8 @@ Re-verify every line when bumping versions.
 ## Node
 - `node:sqlite` `DatabaseSync` (profile). No ExperimentalWarning on Node 26.11.1 (2026-10-12); on Node 22.x it
   warns on stderr — check before supporting an older Node, the warning would draw over Pi's TUI.
+- `node:sqlite` has FTS5 with `bm25()` (probe 2026-10-13). Profile schema v2: `memory` + `memory_fts`
+  (external content, kept in sync by insert/delete triggers) and `feedback`.
 
 ## DevDocs (external, verified 2026-10-13)
 - Catalog `https://devdocs.io/docs.json`: `[{ name, slug, type, version, release, mtime, db_size, attribution }]`.
