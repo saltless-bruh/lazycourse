@@ -148,17 +148,40 @@ describe("tutor.init", function()
     assert.equals("err\n", got.stderr)
   end)
 
-  it(":TutorRun refuses a second run while one is pending", function()
+  it(":TutorRun refuses a second run while one is pending (real job, M1b #3)", function()
+    package.loaded["tutor"] = nil
     local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 2" } })
     tutor._notify_override = function() end
-    tutor.state.run_job = 12345 -- pretend a run is pending
     local msgs = {}
     local orig = vim.notify
     vim.notify = function(m) table.insert(msgs, m) end
     vim.cmd("TutorRun")
+    vim.cmd("TutorRun")
     vim.notify = orig
     assert.is_true(#msgs == 1 and msgs[1]:find("already running") ~= nil)
-    tutor.state.run_job = nil
+    vim.fn.jobstop(tutor.state.run_job)
+  end)
+
+  it(":TutorRun with a missing program says so (M1b #4)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "no-such-program-xyz" } })
+    local msgs = {}
+    local orig = vim.notify
+    vim.notify = function(m) table.insert(msgs, m) end
+    assert.has_no.errors(function() vim.cmd("TutorRun") end)
+    vim.notify = orig
+    assert.is_truthy(msgs[1] and msgs[1]:find("not executable: no%-such%-program%-xyz"))
+    assert.is_nil(tutor.state.run_job)
+  end)
+
+  it("setup twice stops the first pane's job (M1b #8)", function()
+    local tutor = require("tutor")
+    vim.cmd("Tutor")
+    local first = tutor.state.term
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false })
+    assert.is_false(first:is_running())
   end)
 
   it("notify_tutor returns false when no extension is connected", function()

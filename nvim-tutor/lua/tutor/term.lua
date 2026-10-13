@@ -54,9 +54,20 @@ end
 
 function Term:hide()
   if self.win and vim.api.nvim_win_is_valid(self.win) then
-    vim.api.nvim_win_close(self.win, true)
+    -- The last window cannot be closed (E444): show an empty buffer there instead.
+    if not pcall(vim.api.nvim_win_close, self.win, true) then
+      vim.api.nvim_win_call(self.win, function() vim.cmd("enew") end)
+    end
   end
   self.win = nil
+end
+
+--- Stop the job, close the pane and wipe its buffer (used when setup() runs again).
+function Term:close()
+  if self.job then vim.fn.jobstop(self.job); self.job = nil end
+  self:hide()
+  if self.buf and vim.api.nvim_buf_is_valid(self.buf) then vim.api.nvim_buf_delete(self.buf, { force = true }) end
+  self.buf = nil
 end
 
 function Term:toggle()

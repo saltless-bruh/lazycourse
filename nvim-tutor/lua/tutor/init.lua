@@ -46,8 +46,12 @@ function M.run()
     vim.notify("[tutor] no run_cmd configured", vim.log.levels.WARN)
     return
   end
+  if vim.fn.executable(cmd[1]) == 0 then
+    vim.notify("[tutor] run_cmd is not executable: " .. tostring(cmd[1]), vim.log.levels.WARN)
+    return
+  end
   local out, err = {}, {}
-  M.state.run_job = vim.fn.jobstart(cmd, {
+  local ok, job = pcall(vim.fn.jobstart, cmd, {
     cwd = opts.cwd,
     stdout_buffered = true, stderr_buffered = true,
     on_stdout = function(_, d) out = d end,
@@ -61,6 +65,11 @@ function M.run()
       end
     end,
   })
+  if not ok or type(job) ~= "number" or job <= 0 then
+    vim.notify("[tutor] could not start run_cmd: " .. tostring(job), vim.log.levels.WARN)
+    return
+  end
+  M.state.run_job = job
 end
 
 local function slash(text)
@@ -111,6 +120,8 @@ function M.setup(user_opts)
   }, user_opts or {})
   check_version()
   -- PI_TUTOR=1 tells pi-tutor this Pi is the tutor; plain `pi` elsewhere stays untouched.
+  -- setup() again (e.g. a config reload) must not leave the old Pi running in a hidden buffer.
+  if M.state.term then M.state.term:close() end
   M.state.term = term.new({ cmd = M.build_cmd(opts.pi_cmd), cwd = opts.cwd, width = opts.width, env = { PI_TUTOR = "1" } })
   M.state.run_job = nil
   local cmd = vim.api.nvim_create_user_command
