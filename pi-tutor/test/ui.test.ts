@@ -15,6 +15,17 @@ describe("renderWidget", () => {
     expect(renderWidget({ state: "idle", connected: false, last: "wrong" })[1]).toBe("outside nvim · idle · judged wrong");
     expect(renderWidget({ state: "stuck: learner question", connected: false, lost: true })[1]).toBe("nvim closed · stuck: learner question");
   });
+  it("clips the state, never the judgment, so '· judged X' survives at 44 columns (M6c I2)", () => {
+    for (const [lost, prefix] of [[true, "nvim closed · "], [false, "outside nvim · "]] as const) {
+      const l = renderWidget({ state: "stuck: learner question", connected: false, lost, last: "partial" })[1];
+      expect(l.startsWith(`${prefix}stuck:`)).toBe(true);
+      expect(l.endsWith("… · judged partial")).toBe(true);
+      expect(visibleWidth(l)).toBeLessThanOrEqual(44);
+    }
+    const wide = renderWidget({ state: "error: 変数が見つかりません 変数が見つかりません", connected: false, last: "wrong" })[1];
+    expect(wide.endsWith("· judged wrong")).toBe(true);
+    expect(visibleWidth(wide)).toBeLessThanOrEqual(44);
+  });
   it("collapses newlines and clips by display width, not code points (M3 #22)", () => {
     const w = renderWidget({ state: "error: 変数が\n見つかりません 変数が見つかりません 変数が見つかりません", connected: true });
     expect(w[1]).not.toContain("\n");
@@ -24,7 +35,8 @@ describe("renderWidget", () => {
   it("keeps both lines within 44 cells", () => {
     const w = renderWidget({ language: "typescript", level: 100, rung: 5, task: "P12.T34.S56", state: "stuck: cannot borrow `x` as mutable more than once at a time", connected: true, last: "partial" });
     for (const l of w) expect(l.length).toBeLessThanOrEqual(44);
-    expect(w[1].endsWith("…")).toBe(true);
+    expect(w[1].startsWith("stuck: cannot borrow")).toBe(true);
+    expect(w[1].endsWith("… · judged partial")).toBe(true);
   });
   it("shows a non-default role first on line 1", () => {
     expect(renderWidget({ role: "architect", language: "python", level: 30, state: "idle", connected: true })[0]).toBe("tutor  architect · python · lvl 30");

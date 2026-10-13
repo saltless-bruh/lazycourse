@@ -184,7 +184,7 @@ describe("widget when the editor link ends (M1b #2, M3 #19)", () => {
     await turn(b.events, b.ctx, REASONED, judged("partial"));
     h!.kill(); h = undefined;
     await until(() => b.widgets["tutor"]?.[1]?.startsWith("nvim closed") === true);
-    expect(b.widgets["tutor"]?.[1]).toMatch(/^nvim closed · stuck: learner question/); // 44-column clip; ui.test covers the judgment part
+    expect(b.widgets["tutor"]?.[1]).toMatch(/^nvim closed · stuck: .* · judged partial$/); // the state is clipped, never the judgment (M6c I2)
   }, 20000);
   it("a session shutdown (/new, /resume) does not flash the detached wording", async () => {
     const b = await linked();
