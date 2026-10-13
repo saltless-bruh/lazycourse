@@ -112,6 +112,59 @@ describe("tutor.term restart (review fixes)", function()
   end)
 end)
 
+describe("tutor.term pane review (M6c final)", function()
+  local function new(cmd)
+    return require("tutor.term").new({ cmd = cmd or { "cat" }, cwd = vim.fn.getcwd(), width = 0.4 })
+  end
+  --- Run fn inside an <expr> mapping, where textlock forbids window changes (E565).
+  local function under_textlock(fn)
+    vim.keymap.set("n", "<F13>", function() fn(); return "" end, { expr = true })
+    vim.api.nvim_feedkeys(vim.keycode("<F13>"), "x", false)
+    vim.keymap.del("n", "<F13>")
+  end
+
+  it("a pi that cannot start leaves no dead pane and says so (pane #2)", function()
+    local wins = #vim.api.nvim_tabpage_list_wins(0)
+    local msgs = {}
+    local orig = vim.notify
+    vim.notify = function(m) table.insert(msgs, m) end
+    local t = new({ "/nonexistent/no-such-pi" })
+    local ok = pcall(function() t:show() end)
+    vim.notify = orig
+    assert.is_true(ok)
+    assert.is_false(t:is_visible())
+    assert.is_nil(t:bufnr())
+    assert.is_false(t:is_running())
+    assert.equals(wins, #vim.api.nvim_tabpage_list_wins(0))
+    assert.is_truthy(msgs[1] and msgs[1]:find("could not start"))
+  end)
+
+  it("show, hide and restart under textlock retry on the event loop (pane #3)", function()
+    local t = new()
+    vim.v.errmsg = ""
+    under_textlock(function() t:show() end)
+    assert.is_true(vim.wait(1000, function() return t:is_visible() and t:is_running() end))
+    under_textlock(function() t:hide() end)
+    assert.is_true(vim.wait(1000, function() return not t:is_visible() end))
+    local job = t:job_id()
+    under_textlock(function() t:restart() end)
+    assert.is_true(vim.wait(1000, function() return t:is_running() and t:job_id() ~= job end))
+    assert.is_nil(vim.v.errmsg:find("E565"))
+    t:close()
+  end)
+
+  it("the old job's exit code does not land on the restarted pane (pane #9)", function()
+    local t = new()
+    t:show()
+    local old = t:bufnr()
+    t:restart()
+    vim.wait(500)
+    assert.are_not.equal(old, t:bufnr())
+    assert.is_nil(vim.b[t:bufnr()].tutor_exit_code)
+    t:close()
+  end)
+end)
+
 -- Last: `:only` changes the window layout the other tests rely on.
 describe("tutor.term minors (M6c)", function()
   it("hiding the pane when it is the only window does not raise E444 (M1b #1)", function()
