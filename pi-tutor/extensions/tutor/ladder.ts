@@ -9,7 +9,9 @@ export type Trigger =
   | { kind: "error"; path: string; line: number; msg: string }
   | { kind: "idle"; path: string; line: number }
   | { kind: "churn"; path: string; region: [number, number] }
-  | { kind: "chat" };
+  | { kind: "chat" }
+  /** A failing :TutorRun with the end of its output (spec 2026-10-13 §7 #4). */
+  | { kind: "run"; cmd: string[]; code: number; trace: string };
 
 /** `superseded`: an editor trigger replaced an open chat, idle or churn episode. */
 export type CloseReason = "cleared" | "run_passed" | "judged" | "superseded";
@@ -32,7 +34,7 @@ export interface Episode {
  * idle and churn episodes would otherwise swallow every later trigger.
  */
 export function yieldsTo(ep: Episode | null): boolean {
-  return ep === null || ep.trigger.kind !== "error";
+  return ep === null || (ep.trigger.kind !== "error" && ep.trigger.kind !== "run");
 }
 
 export function rungCap(band: Band): 4 | 5 {
@@ -73,6 +75,10 @@ export function describeTrigger(t: Trigger): string {
     case "idle": return `idle at ${basename(t.path)}:${t.line}`;
     case "churn": return `rewriting ${basename(t.path)}:${t.region[0]}-${t.region[1]}`;
     case "chat": return "learner question";
+    case "run": {
+      const cmd = t.cmd.join(" ");
+      return `run failed (exit ${t.code}): ${cmd.length > 60 ? `${cmd.slice(0, 59)}…` : cmd}`;
+    }
   }
 }
 

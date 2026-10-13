@@ -9,6 +9,17 @@ export type StuckEvent =
   | { type: "cleared"; path: string; msg: string }
   | { type: "run_passed" };
 
+/** How much of a failing run's output an episode carries (spec 2026-10-13 §7 #4). */
+export const TRACE_LINES = 30;
+export const TRACE_CHARS = 3000;
+
+/** The end of the output, where traces put the error: stderr, or stdout when stderr is blank. */
+export function traceOf(stdout: string, stderr: string): string {
+  const src = stderr.trim() ? stderr : stdout;
+  const lines = src.split(/\r?\n/).filter((l) => l.trim()).slice(-TRACE_LINES).join("\n");
+  return lines.length > TRACE_CHARS ? lines.slice(-TRACE_CHARS) : lines;
+}
+
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }
 
 export class StuckDetector {
@@ -72,7 +83,8 @@ export class StuckDetector {
         break;
       }
       case "run_output":
-        if (p.code === 0) out.push({ type: "run_passed" });
+        // A failed run is the learner's own explicit check: it opens even when another episode is open.
+        out.push(p.code === 0 ? { type: "run_passed" } : { type: "open", trigger: { kind: "run", cmd: p.cmd, code: p.code, trace: traceOf(p.stdout, p.stderr) } });
         break;
     }
     return out;

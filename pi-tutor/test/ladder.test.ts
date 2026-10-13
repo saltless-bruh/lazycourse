@@ -108,3 +108,11 @@ describe("easeStart (spec §5 ease ≥ 0.7 starts one rung lower)", () => {
     expect(easeStart(openEpisode({ kind: "chat" }, "pro", 1), ["traits"], ease({ traits: 1 })).rung).toBe(1);
   });
 });
+
+describe("run episodes", () => {
+  const run = { kind: "run" as const, cmd: ["cargo", "run"], code: 101, trace: "thread 'main' panicked at src/main.rs:4:5" };
+  it("hold their place against editor triggers and describe the failed command", () => {
+    expect(yieldsTo(openEpisode(run, "beginner", 1))).toBe(false);
+    expect(describeTrigger(run)).toBe("run failed (exit 101): cargo run");
+  });
+});

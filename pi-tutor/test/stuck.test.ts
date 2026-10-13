@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StuckDetector } from "../extensions/tutor/stuck.js";
+import { StuckDetector, traceOf, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
 import type { TutorPayload } from "../extensions/tutor/nvim.js";
 
 const diag = (path: string, errors: number, msg = "boom", line = 1): TutorPayload =>
@@ -113,7 +113,25 @@ describe("StuckDetector with a busy caller (final review I1)", () => {
 describe("StuckDetector runs", () => {
   it("reports run_passed on exit 0 only", () => {
     const d = det(0);
-    expect(d.observe({ kind: "run_output", cmd: ["x"], code: 1, stdout: "", stderr: "" }, 0)).toEqual([]);
+    expect(d.observe({ kind: "run_output", cmd: ["x"], code: 1, stdout: "", stderr: "" }, 0)).toMatchObject([{ type: "open", trigger: { kind: "run", code: 1 } }]); // spec 2026-10-13 §7 #4
     expect(d.observe({ kind: "run_output", cmd: ["x"], code: 0, stdout: "", stderr: "" }, 0)).toEqual([{ type: "run_passed" }]);
+  });
+});
+
+describe("failing runs (spec 2026-10-13 §7 #4)", () => {
+  const det = () => new StuckDetector(() => ({ errorMs: 0, idleMs: 1000 }), () => false); // canOpen false: a run still opens
+  it("a non-zero exit opens a run trigger carrying the trace; zero passes", () => {
+    const d = det();
+    expect(d.observe({ kind: "run_output", cmd: ["python", "a.py"], code: 1, stdout: "", stderr: "Traceback\n  File \"a.py\", line 3\nKeyError: 'x'" }, 1))
+      .toEqual([{ type: "open", trigger: { kind: "run", cmd: ["python", "a.py"], code: 1, trace: "Traceback\n  File \"a.py\", line 3\nKeyError: 'x'" } }]);
+    expect(d.observe({ kind: "run_output", cmd: ["x"], code: 0, stdout: "", stderr: "" }, 2)).toEqual([{ type: "run_passed" }]);
+  });
+  it("traceOf keeps the last lines of stderr (stdout when stderr is blank), capped", () => {
+    const long = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
+    const t = traceOf("", long);
+    expect(t.split("\n")).toHaveLength(TRACE_LINES);
+    expect(t.endsWith("line 99")).toBe(true);
+    expect(traceOf("only stdout", "  \n")).toBe("only stdout");
+    expect(traceOf("", "y".repeat(10_000)).length).toBeLessThanOrEqual(TRACE_CHARS);
   });
 });

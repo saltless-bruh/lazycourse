@@ -171,9 +171,11 @@ export default function (pi: ExtensionAPI): void {
   }
 
   function openEp(trigger: Trigger, nudge: boolean) {
+    // Spec 2026-10-13 §7 #4: a failed run is the learner's explicit check; it replaces any episode and nudges without the gap.
+    const run = trigger.kind === "run";
     if (episode) {
       // Chat, idle and churn episodes may never close on their own; editor triggers must not be lost behind them.
-      if (!nudge || !yieldsTo(episode)) return;
+      if (!nudge || !(run || yieldsTo(episode))) return;
       closeEp("superseded");
     }
     const now = Date.now();
@@ -181,7 +183,7 @@ export default function (pi: ExtensionAPI): void {
     pi.appendEntry("tutor_episode", episode);
     // Spec §4 "Intervenes": one nudge per editor-triggered episode, never on top of a running
     // reply, and at most one per NUDGE_GAP_MS so a run of changing errors is not a run of turns.
-    if (nudge && session?.isIdle() && now - lastNudge >= NUDGE_GAP_MS) {
+    if (nudge && session?.isIdle() && (run || now - lastNudge >= NUDGE_GAP_MS)) {
       lastNudge = now;
       pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
     }

@@ -119,3 +119,33 @@ describe("profile language in a scaffolded project (M4 final review I3)", () => 
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   }, 20000);
 });
+
+/** What `:TutorRun` sends (nvim-tutor init.lua M.run → M.notify_tutor). */
+const runPayload = (code: number, stderr = "") =>
+  nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["python3", "a.py"], code, stdout: "", stderr }]);
+
+describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
+  it("a failing run takes over an open error episode and nudges inside the gap", async () => {
+    const b = await linked();
+    await setError("boom");
+    await until(() => b.sent.length === 1); // the error episode's nudge starts the 2-minute gap
+    await runPayload(1, "Traceback (most recent call last):\n  File \"a.py\", line 1\nKeyError: 'x'");
+    await until(() => b.sent.length === 2);
+    expect(b.sent[1].text).toBe("[tutor] stuck signal: run failed (exit 1): python3 a.py");
+    const eps = episodes(b.entries);
+    expect(eps.at(-1)).toMatchObject({ trigger: { kind: "run", code: 1, trace: expect.stringContaining("KeyError: 'x'") } });
+    expect(eps.find((e) => (e.trigger as { kind: string }).kind === "error" && e.closeReason === "superseded")).toBeTruthy();
+    expect(b.widgets["tutor"]?.[1]).toBe("stuck: run failed (exit 1): python3 a.py");
+  }, 20000);
+
+  it("a passing run closes the run episode; an editor error does not replace it", async () => {
+    const b = await linked();
+    await runPayload(1, "KeyError: 'x'");
+    await until(() => b.widgets["tutor"]?.[1]?.startsWith("stuck: run failed") === true);
+    await setError("later"); // run episodes hold their place
+    await new Promise((r) => setTimeout(r, 300));
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "run" } });
+    await runPayload(0);
+    await until(() => b.widgets["tutor"]?.[1] === "episode closed (run_passed)");
+  }, 20000);
+});

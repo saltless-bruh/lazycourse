@@ -54,3 +54,13 @@ describe("formatEpisodeContext", () => {
     ]);
   });
 });
+
+describe("run episode context", () => {
+  it("carries the trace and points at the stack-trace skill", () => {
+    const ep = openEpisode({ kind: "run", cmd: ["python", "a.py"], code: 1, trace: "KeyError: 'x'" }, "beginner", 1);
+    const c = formatEpisodeContext(ep);
+    expect(c).toMatch(/^\[episode\] stuck on: run failed \(exit 1\): python a\.py/);
+    expect(c).toContain("```text\nKeyError: 'x'\n```");
+    expect(c).toContain("tutor-stack-traces");
+  });
+});
