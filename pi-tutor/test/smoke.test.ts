@@ -62,11 +62,11 @@ describe("extension wiring", () => {
 
   it("turn_end parses the judgment into the widget and a tutor_judgment entry", async () => {
     const { events, ctx, entries } = await boot();
-    await events["turn_end"]({ type: "turn_end", message: assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["x"]}\n```') }, ctx);
-    expect(entries.at(-1)).toEqual({ type: "tutor_judgment", data: { judgment: "correct", concept_tags: ["x"], task_done_ids: [], episode_closed: false, step_done: false } });
+    await turn(events, ctx, REASONED, assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["x"]}\n```'));
+    expect(entries.filter((e) => e.type === "tutor_judgment").at(-1)).toEqual({ type: "tutor_judgment", data: { judgment: "correct", concept_tags: ["x"], task_done_ids: [], episode_closed: false, step_done: false } });
     const n = entries.length;
-    await events["turn_end"]({ type: "turn_end", message: assistant("no block here") }, ctx);
-    expect(entries.length).toBe(n); // a missing block is shown, not persisted
+    await turn(events, ctx, "hi", assistant("no block here"));
+    expect(entries.slice(n).map((e) => e.type)).toEqual(["tutor_check"]); // a missing block is recorded as a rule break, not as a judgment
   });
 
   it("turn_end ignores turns that end in tool calls and never throws on malformed blocks", async () => {
@@ -220,8 +220,7 @@ describe("M4 profile and /tutor-start", () => {
     try {
       const b = await boot({ cwd: dir });
       expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
-      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
-      await b.events["turn_end"]({ type: "turn_end", message: assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["traits"],"episode_closed":true}\n```') }, b.ctx);
+      await turn(b.events, b.ctx, REASONED, assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["traits"],"episode_closed":true}\n```'));
       await b.commands["tutor-level"].handler("70", b.ctx);
       await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
       const check = Profile.open(file);
@@ -272,7 +271,7 @@ describe("M4 review fixes", () => {
     try {
       const b = await boot({ cwd: dir });
       other.exec("BEGIN EXCLUSIVE"); // another tutor holds the write lock past the busy timeout
-      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
       await expect(b.events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, b.ctx)).resolves.toBeUndefined();
       expect(b.widgets["tutor"]?.[1]).toMatch(/detached|episode closed/); // the episode still closed
       await expect(b.commands["tutor-level"].handler("70", b.ctx)).resolves.toBeUndefined();
@@ -472,5 +471,24 @@ describe("one judgment per run", () => {
     const b = await boot();
     await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
     expect(b.entries.some((e) => e.type === "tutor_judgment")).toBe(true);
+  });
+});
+
+describe("compliance in the turn loop", () => {
+  it("a correct judgment on a bare question does not advance the rung", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what does KeyError mean?", judged("correct"));
+    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(b.entries.filter((e) => e.type === "tutor_judgment").at(-1)?.data).toMatchObject({ judgment: "none" });
+  });
+  it("records rule breaks and quotes them to the model on the next turn", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "hi", assistant("See INDEX.md line 40.\n```\n" + "x".repeat(60) + "\n```"));
+    const check = b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data as { issues: string[] };
+    expect(check.issues).toEqual(expect.arrayContaining(["missing-judgment", "wide-diagram", "internals"]));
+    const next = await turn(b.events, b.ctx, "ok", judged("none"));
+    expect(next.message?.content).toContain("[tutor-check]");
+    const after = await turn(b.events, b.ctx, "ok", judged("none"));
+    expect(after.message?.content).not.toContain("[tutor-check]"); // a clean reply clears it
   });
 });

@@ -7,6 +7,7 @@ import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
+import { guardJudgment, checkReply, formatCheck, type Issue } from "./compliance.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -102,6 +103,8 @@ export default function (pi: ExtensionAPI): void {
    * and then writes the fence must not move the rung twice.
    */
   let run: { prompt: string; rung: number | null; judged: boolean } | null = null;
+  /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
+  let lastIssues: Issue[] = [];
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -251,6 +254,7 @@ export default function (pi: ExtensionAPI): void {
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
     const parts: string[] = [];
     if (episode) parts.push(formatEpisodeContext(episode));
+    if (lastIssues.length) parts.push(formatCheck(lastIssues));
     if (snap) parts.push(formatEditorContext(snap));
     if (parts.length === 0) return;
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
@@ -284,8 +288,12 @@ export default function (pi: ExtensionAPI): void {
     const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
     const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     const j = callArgs !== undefined ? toJudgment(callArgs) : final ? parseJudgment(text) : null;
-    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(j); }
-    if (final && !cur.judged) state.last = "missing";
+    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt)); }
+    if (final) {
+      if (!cur.judged) state.last = "missing";
+      lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" });
+      if (lastIssues.length) pi.appendEntry("tutor_check", { issues: lastIssues });
+    }
     paint();
   });
 
