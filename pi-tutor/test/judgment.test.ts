@@ -1,19 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { parseJudgment } from "../extensions/tutor/judgment.js";
+import { parseJudgment, toJudgment, isJudgmentTool } from "../extensions/tutor/judgment.js";
 
 const block = (json: string) => "Some explanation.\n\n```tutor-judgment\n" + json + "\n```\n";
 
 describe("parseJudgment", () => {
   it("parses a well-formed trailing block", () => {
     const j = parseJudgment(block('{"judgment":"correct","concept_tags":["ownership"],"task_done_ids":["P1.T1"],"episode_closed":true}'));
-    expect(j).toEqual({ judgment: "correct", concept_tags: ["ownership"], task_done_ids: ["P1.T1"], episode_closed: true });
+    expect(j).toEqual({ judgment: "correct", concept_tags: ["ownership"], task_done_ids: ["P1.T1"], episode_closed: true, step_done: false });
   });
   it("fills missing optional fields with defaults", () => {
-    expect(parseJudgment(block('{"judgment":"partial"}'))).toEqual({ judgment: "partial", concept_tags: [], task_done_ids: [], episode_closed: false });
+    expect(parseJudgment(block('{"judgment":"partial"}'))).toEqual({ judgment: "partial", concept_tags: [], task_done_ids: [], episode_closed: false, step_done: false });
   });
   it("returns null when there is no block", () => {
     expect(parseJudgment("just prose")).toBeNull();
-    expect(parseJudgment("```json\n{\"judgment\":\"correct\"}\n```")).toBeNull();
+    expect(parseJudgment("```python\n{\"judgment\":\"correct\"}\n```")).toBeNull(); // a code block is not a judgment (json/untagged fences are: fallbacks)
   });
   it("returns null on malformed JSON or an unknown judgment value", () => {
     expect(parseJudgment(block("{judgment: correct}"))).toBeNull();
@@ -28,5 +28,31 @@ describe("parseJudgment", () => {
     const j = parseJudgment(block('{"judgment":"correct","concept_tags":["a",1,null],"task_done_ids":[2,"P1.T2"]}'));
     expect(j?.concept_tags).toEqual(["a"]);
     expect(j?.task_done_ids).toEqual(["P1.T2"]);
+  });
+});
+
+describe("judgment fallbacks (live findings: nemotron)", () => {
+  it("reads step_done, defaulting to false", () => {
+    expect(parseJudgment(block('{"judgment":"none","step_done":true}'))?.step_done).toBe(true);
+    expect(parseJudgment(block('{"judgment":"none"}'))?.step_done).toBe(false);
+  });
+  it("accepts a json fence or an untagged fence holding the judgment object", () => {
+    expect(parseJudgment('hint\n```json\n{"judgment":"partial","concept_tags":["a"]}\n```')?.judgment).toBe("partial");
+    expect(parseJudgment('hint\n```\n{"judgment":"wrong"}\n```')?.judgment).toBe("wrong");
+  });
+  it("accepts a bare trailing JSON object with a judgment key", () => {
+    expect(parseJudgment('Try printing x.\n{"judgment":"none","concept_tags":["debugging"]}\n')?.concept_tags).toEqual(["debugging"]);
+  });
+  it("prefers the tagged fence over the fallbacks, and ignores unrelated JSON", () => {
+    expect(parseJudgment('```json\n{"judgment":"wrong"}\n```\n' + block('{"judgment":"none"}'))?.judgment).toBe("none");
+    expect(parseJudgment('```json\n{"name":"x"}\n```')).toBeNull();
+    expect(parseJudgment('a dict like {"a": 1} in prose')).toBeNull();
+  });
+  it("turns a tool call's arguments into a judgment", () => {
+    expect(isJudgmentTool("tutor-judgment")).toBe(true);
+    expect(isJudgmentTool("tutor_judgment")).toBe(true);
+    expect(isJudgmentTool("read")).toBe(false);
+    expect(toJudgment({ judgment: "partial", concept_tags: ["x"] })).toEqual({ judgment: "partial", concept_tags: ["x"], task_done_ids: [], episode_closed: false, step_done: false });
+    expect(toJudgment({ judgment: "great" })).toBeNull();
   });
 });

@@ -1,4 +1,6 @@
-// Parses the fenced `tutor-judgment` JSON block the band prompt asks the model to end every turn with (spec §5).
+// Parses the judgment the turn protocol asks the model to end every reply with (spec §5).
+// Fallbacks for live findings (2026-10-13): models also emit it as a `json`/untagged fence,
+// as a bare trailing object, or as a call to a tool that does not exist.
 export type JudgmentValue = "correct" | "partial" | "wrong" | "none";
 
 export interface Judgment {
@@ -6,21 +8,20 @@ export interface Judgment {
   concept_tags: string[];
   task_done_ids: string[];
   episode_closed: boolean;
+  /** Design-recipe workflow: the learner finished the current step's artifact (spec 2026-10-13 §4). */
+  step_done: boolean;
 }
 
 const VALUES: readonly JudgmentValue[] = ["correct", "partial", "wrong", "none"];
-const FENCE = /```tutor-judgment[ \t]*\r?\n([\s\S]*?)```/g;
+const TAGGED = /```tutor-judgment[ \t]*\r?\n([\s\S]*?)```/g;
+const LOOSE = /```(?:json)?[ \t]*\r?\n([\s\S]*?)```/g;
+const BARE = /\{[^{}]*"judgment"[^{}]*\}\s*$/;
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
-export function parseJudgment(text: string): Judgment | null {
-  let body: string | null = null;
-  for (const m of text.matchAll(FENCE)) body = m[1];
-  if (body === null) return null;
-  let raw: unknown;
-  try { raw = JSON.parse(body.trim()); } catch { return null; }
+export function toJudgment(raw: unknown): Judgment | null {
   if (typeof raw !== "object" || raw === null) return null;
   const o = raw as Record<string, unknown>;
   if (!VALUES.includes(o.judgment as JudgmentValue)) return null;
@@ -29,5 +30,30 @@ export function parseJudgment(text: string): Judgment | null {
     concept_tags: strings(o.concept_tags),
     task_done_ids: strings(o.task_done_ids),
     episode_closed: o.episode_closed === true,
+    step_done: o.step_done === true,
   };
+}
+
+function fromJson(body: string): Judgment | null {
+  try { return toJudgment(JSON.parse(body.trim())); } catch { return null; }
+}
+
+function lastOf(text: string, re: RegExp, accept: (body: string) => boolean = () => true): string | null {
+  let body: string | null = null;
+  for (const m of text.matchAll(re)) if (accept(m[1])) body = m[1];
+  return body;
+}
+
+export function parseJudgment(text: string): Judgment | null {
+  const tagged = lastOf(text, TAGGED);
+  if (tagged !== null) return fromJson(tagged);
+  const loose = lastOf(text, LOOSE, (b) => b.includes('"judgment"'));
+  if (loose !== null) return fromJson(loose);
+  const bare = BARE.exec(text);
+  return bare ? fromJson(bare[0]) : null;
+}
+
+/** The model sometimes "calls" the judgment block as a tool; Pi answers "not found", we keep the arguments. */
+export function isJudgmentTool(name: string): boolean {
+  return /^tutor[-_ ]?judgment$/i.test(name);
 }

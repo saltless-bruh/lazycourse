@@ -5,7 +5,7 @@ import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
 import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
-import { parseJudgment } from "./judgment.js";
+import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -96,6 +96,12 @@ export default function (pi: ExtensionAPI): void {
   let profile: Profile | null = null;
   /** The recorded project this Pi runs in (cwd), if any: the source of the profile language. */
   let project: ProjectRow | null = null;
+  /**
+   * The agent run in flight (before_agent_start → turn_end…): the learner message it answers and
+   * whether a judgment was already applied. One judgment per run: a model that "calls" tutor-judgment
+   * and then writes the fence must not move the rung twice.
+   */
+  let run: { prompt: string; rung: number | null; judged: boolean } | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -237,6 +243,7 @@ export default function (pi: ExtensionAPI): void {
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band);
     // A learner's chat message opens an episode; our own [tutor] nudges do not.
     if (!episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
+    run = { prompt: event.prompt, rung: episode ? episode.rung : null, judged: false };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -249,29 +256,36 @@ export default function (pi: ExtensionAPI): void {
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
 
-  // Spec §5: parse the trailing tutor-judgment block and apply it to the open episode.
+  /** Apply one accepted judgment to the episode and the profile (spec §5). */
+  function applyTurnJudgment(j: Judgment) {
+    state.last = j.judgment;
+    pi.appendEntry("tutor_judgment", j);
+    if (!episode) return;
+    if (episode.turns === 0 && project && profile) {
+      let known = new Map<string, number>();
+      const p = profile, lang = project.language;
+      profileWrite(() => { known = new Map(p.concepts(lang).map((c) => [c.tag, c.ease])); });
+      episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
+    }
+    episode = applyJudgment(episode, j, Date.now());
+    pi.appendEntry("tutor_episode", episode);
+    if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
+  }
+
+  // Spec §5: take the judgment (fence, fallback, or invented tool call) and apply it once per run.
   pi.on("turn_end", async (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
-    // Aborted, errored, truncated and tool-call turns carry no final judgment.
-    if (m.stopReason !== "stop" || m.content.some((c) => c.type === "toolCall")) return;
+    // Aborted, errored and truncated turns carry no judgment.
+    if (m.stopReason === "aborted" || m.stopReason === "error" || m.stopReason === "length") return;
+    const cur = run ?? (run = { prompt: "", rung: episode ? episode.rung : null, judged: false });
+    let callArgs: unknown;
+    for (const c of m.content) if (c.type === "toolCall" && isJudgmentTool(c.name)) callArgs = c.arguments;
+    const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
     const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-    const j = parseJudgment(text);
-    state.last = j ? j.judgment : "missing";
-    if (j) {
-      pi.appendEntry("tutor_judgment", j);
-      if (episode) {
-        if (episode.turns === 0 && project && profile) {
-          let known = new Map<string, number>();
-          const p = profile, lang = project.language;
-          profileWrite(() => { known = new Map(p.concepts(lang).map((c) => [c.tag, c.ease])); });
-          episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
-        }
-        episode = applyJudgment(episode, j, Date.now());
-        pi.appendEntry("tutor_episode", episode);
-        if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
-      }
-    }
+    const j = callArgs !== undefined ? toJudgment(callArgs) : final ? parseJudgment(text) : null;
+    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(j); }
+    if (final && !cur.judged) state.last = "missing";
     paint();
   });
 

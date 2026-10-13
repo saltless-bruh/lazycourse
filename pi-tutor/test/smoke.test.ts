@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fakePi, boot, assistant, judged, episodes } from "./fake-pi.js";
+import { fakePi, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
 import extension from "../extensions/tutor/index.js";
 
 describe("extension wiring", () => {
@@ -63,7 +63,7 @@ describe("extension wiring", () => {
   it("turn_end parses the judgment into the widget and a tutor_judgment entry", async () => {
     const { events, ctx, entries } = await boot();
     await events["turn_end"]({ type: "turn_end", message: assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["x"]}\n```') }, ctx);
-    expect(entries.at(-1)).toEqual({ type: "tutor_judgment", data: { judgment: "correct", concept_tags: ["x"], task_done_ids: [], episode_closed: false } });
+    expect(entries.at(-1)).toEqual({ type: "tutor_judgment", data: { judgment: "correct", concept_tags: ["x"], task_done_ids: [], episode_closed: false, step_done: false } });
     const n = entries.length;
     await events["turn_end"]({ type: "turn_end", message: assistant("no block here") }, ctx);
     expect(entries.length).toBe(n); // a missing block is shown, not persisted
@@ -114,13 +114,15 @@ describe("M3 episodes, ladder and guard", () => {
 
   it("a chat message opens an episode; correct advances, wrong holds, episode_closed closes", async () => {
     const { events, ctx, entries, widgets } = await boot();
-    await events["before_agent_start"](bas("why does this fail?"), ctx);
+    await events["before_agent_start"](bas(REASONED), ctx);
     expect(episodes(entries).at(-1)).toMatchObject({ trigger: { kind: "chat" }, rung: 2, turns: 0 });
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2"); // line 2 says "detached" in these boots
     await events["turn_end"]({ type: "turn_end", message: judged("correct") }, ctx);
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
+    await events["before_agent_start"](bas(REASONED), ctx);
     await events["turn_end"]({ type: "turn_end", message: judged("wrong") }, ctx);
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
+    await events["before_agent_start"](bas(REASONED), ctx);
     await events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, ctx);
     expect(episodes(entries).at(-1)).toMatchObject({ rung: 4, turns: 3, closeReason: "judged" });
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
@@ -157,8 +159,7 @@ describe("M3 episodes, ladder and guard", () => {
 
   it("/tutor-level into pro re-caps an open episode's rung and persists it", async () => {
     const { events, commands, ctx, entries, widgets } = await boot();
-    await events["before_agent_start"](bas("q"), ctx);
-    for (let i = 0; i < 3; i++) await events["turn_end"]({ type: "turn_end", message: judged("correct") }, ctx);
+    for (let i = 0; i < 3; i++) await turn(events, ctx, REASONED, judged("correct"));
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 5");
     await commands["tutor-level"].handler("90", ctx);
     expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 90 · rung 4");
@@ -455,5 +456,21 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
     expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
     expect(b.notes.some((n) => /go docs fetch failed/.test(n))).toBe(true);
     expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
+  });
+});
+
+describe("one judgment per run", () => {
+  it("a tool-call judgment followed by a fenced one moves the rung once", async () => {
+    const b = await boot();
+    const call = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "1", name: "tutor-judgment", arguments: { judgment: "correct", concept_tags: ["loops"] } }] };
+    await turn(b.events, b.ctx, REASONED, call, judged("correct"));
+    const eps = episodes(b.entries);
+    expect(eps.at(-1)?.rung).toBe(3); // intermediate starts at 2; one step
+    expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(1);
+  });
+  it("a turn_end without a before_agent_start still applies (Pi always sends one; defensive)", async () => {
+    const b = await boot();
+    await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
+    expect(b.entries.some((e) => e.type === "tutor_judgment")).toBe(true);
   });
 });

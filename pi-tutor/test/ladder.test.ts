@@ -3,7 +3,7 @@ import { easeStart, episodeScore, yieldsTo, openEpisode, nextRung, applyJudgment
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], over: Partial<Judgment> = {}): Judgment =>
-  ({ judgment, concept_tags: [], task_done_ids: [], episode_closed: false, ...over });
+  ({ judgment, concept_tags: [], task_done_ids: [], episode_closed: false, step_done: false, ...over });
 const err = { kind: "error" as const, path: "/p/src/a.py", line: 3, msg: "boom" };
 
 describe("openEpisode", () => {

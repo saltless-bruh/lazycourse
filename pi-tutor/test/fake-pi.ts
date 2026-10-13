@@ -89,3 +89,14 @@ export const judged = (judgment: string, episode_closed = false, stopReason = "s
 
 export const episodes = (entries: { type: string; data: unknown }[]) =>
   entries.filter((e) => e.type === "tutor_episode").map((e) => e.data as Record<string, unknown>);
+
+/** A learner message that states reasoning, so a `correct` judgment stands (compliance.hasReasoning). */
+export const REASONED = "I think the loop stops early because range excludes the end";
+
+/** One agent run as Pi drives it: before_agent_start for `prompt`, then the given assistant turn(s). */
+export async function turn(events: Record<string, Handler>, ctx: unknown, prompt: string, ...messages: unknown[]) {
+  const opts = { sections: {} as Record<string, string> };
+  const r = (await events["before_agent_start"]({ type: "before_agent_start", prompt, systemPromptOptions: opts }, ctx)) as { message?: { content: string } } | undefined;
+  for (const message of messages) await events["turn_end"]({ type: "turn_end", message }, ctx);
+  return Object.assign(opts, { message: r?.message }); // sections + the hidden per-turn context
+}
