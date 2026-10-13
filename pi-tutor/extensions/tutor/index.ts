@@ -342,7 +342,8 @@ export default function (pi: ExtensionAPI): void {
     for (const c of m.content) if (c.type === "toolCall" && isJudgmentTool(c.name)) callArgs = c.arguments;
     const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
     const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-    const j = callArgs !== undefined ? toJudgment(callArgs) : final ? parseJudgment(text) : null;
+    // A judgment may come in a tool-use turn's text too (live check); the first one in the run counts.
+    const j = callArgs !== undefined ? toJudgment(callArgs) : parseJudgment(text);
     if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt)); }
     if (final) {
       if (!cur.judged) state.last = "missing";

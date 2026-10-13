@@ -639,3 +639,19 @@ describe("/tutor-plan next (live check: the model called step 4 complete but nev
     expect(b.notes.at(-1)).toMatch(/no design recipe in progress/);
   });
 });
+
+describe("judgment written before a tool call (live check: block in a tool-use turn, none in the final reply)", () => {
+  it("is taken from the tool-use turn's text, once per run", async () => {
+    const b = await boot();
+    const mid = { role: "assistant", stopReason: "toolUse", content: [
+      { type: "text", text: "Let me look.\n```tutor-judgment\n{\"judgment\":\"partial\",\"concept_tags\":[\"argv\"]}\n```" },
+      { type: "toolCall", id: "1", name: "read", arguments: { path: "todo.py" } },
+    ] };
+    await turn(b.events, b.ctx, REASONED, mid, assistant("**In short**: look at line 9."));
+    const js = b.entries.filter((e) => e.type === "tutor_judgment");
+    expect(js).toHaveLength(1);
+    expect(js[0].data).toMatchObject({ judgment: "partial", concept_tags: ["argv"] });
+    const issues = (b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data as { issues: string[] } | undefined)?.issues ?? [];
+    expect(issues).not.toContain("missing-judgment");
+  });
+});
