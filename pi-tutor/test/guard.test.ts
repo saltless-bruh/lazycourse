@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { guardToolCall, resolveToolPath, realpathLoose, skillDirs } from "../extensions/tutor/guard.js";
+import { guardToolCall, resolveToolPath, realpathLoose, skillDirs, MEMORY_TOOLS } from "../extensions/tutor/guard.js";
 
 let root: string;
 beforeAll(() => {
@@ -99,5 +99,13 @@ describe("skill folders (M5)", () => {
       { source: "prompt", sourceInfo: { path: "/a/prompts/x.md" } },
       { source: "skill", sourceInfo: {} },
     ])).toEqual(["/a/skills/tutor-rust-style"]);
+  });
+});
+
+describe("memory tools (spec 2026-10-13 §7.1)", () => {
+  it("allows tutor_remember and tutor_recall by name and nothing else new", () => {
+    expect([...MEMORY_TOOLS].sort()).toEqual(["tutor_recall", "tutor_remember"]);
+    for (const t of MEMORY_TOOLS) expect(guardToolCall(t, { text: "x" }, "/tmp")).toBeUndefined();
+    expect(guardToolCall("memory_write", { text: "x" }, "/tmp")?.block).toBe(true);
   });
 });

@@ -14,6 +14,11 @@ describe("tutor.init", function()
     assert.equals(job, t:job_id())
   end)
 
+  it("starts pi with the read tools plus the two tutor memory tools", function()
+    local cmd = require("tutor").build_cmd({ "pi" })
+    assert.same({ "pi", "--tools", "read,grep,find,ls,tutor_remember,tutor_recall" }, cmd)
+  end)
+
   it("starts pi in tutor mode (PI_TUTOR=1)", function()
     assert.equals("1", require("tutor").state.term.opts.env.PI_TUTOR)
   end)

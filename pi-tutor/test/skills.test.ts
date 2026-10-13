@@ -12,7 +12,7 @@ const diagramLines = (t: string) => [...t.matchAll(/```([^\n`]*)\r?\n([\s\S]*?)`
   .filter((m) => ["", "text"].includes(m[1].trim())).flatMap((m) => m[2].split("\n"));
 
 describe("bundled skills", () => {
-  for (const name of ["tutor-teaching-style", "tutor-design-recipe"]) {
+  for (const name of ["tutor-teaching-style", "tutor-design-recipe", "tutor-memory"]) {
     it(`${name} loads in Pi (name matches folder, description ≤ 1024)`, () => {
       const h = parseSkillHeader(read(name));
       expect(h.name).toBe(name);
@@ -31,5 +31,13 @@ describe("bundled skills", () => {
   it("tutor-design-recipe covers the six steps and the band table", () => {
     const t = read("tutor-design-recipe");
     for (const s of ["1. Find", "2. Shape", "3. Examples", "4. Steps", "5. Map", "6. Build", "beginner", "intermediate", "pro", "step_done"]) expect(t).toContain(s);
+  });
+});
+
+describe("tutor-memory skill", () => {
+  it("names the four types, both tools and what never to save", () => {
+    const t = read("tutor-memory");
+    for (const s of ["learner", "feedback", "project", "reference", "tutor_remember", "tutor_recall"]) expect(t).toContain(s);
+    expect(t).toMatch(/never save/i);
   });
 });

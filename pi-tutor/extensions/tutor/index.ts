@@ -10,6 +10,7 @@ import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judg
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, replyReminder, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
+import { rememberTool, recallTool, memorySnapshot } from "./memory.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -136,6 +137,12 @@ export default function (pi: ExtensionAPI): void {
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
+  // Spec 2026-10-13 §7.1: the model's two memory tools, scoped to this session's project.
+  const memoryScope = { profile: () => profile, language: () => project?.language ?? null, project: () => project?.path ?? null, now: Date.now };
+  pi.registerTool(rememberTool(memoryScope));
+  pi.registerTool(recallTool(memoryScope));
+  /** Frozen at session start (spec §7.1): a stable prompt within a session; new memories show next session. */
+  let memoryNote: string | null = null;
 
   function paint() {
     state.rung = episode ? episode.rung : startRung(bandFor(level()));
@@ -248,6 +255,8 @@ export default function (pi: ExtensionAPI): void {
     project = proj ?? null;
     if (proj) state.language = proj.language;
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
+    memoryNote = null;
+    if (profile) { const p = profile; profileWrite(() => { memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); }); }
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
@@ -285,6 +294,7 @@ export default function (pi: ExtensionAPI): void {
     const band = bandFor(level());
     const role = roleNamed(activeRole);
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
+    if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
     // A learner's chat message opens an episode; our own [tutor] nudges and non-ladder roles do not.
     if (role.ladder && !episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false };
@@ -425,6 +435,25 @@ export default function (pi: ExtensionAPI): void {
       // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
       if (ctx.hasUI) pi.sendUserMessage(kickoff);
       else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
+    },
+  });
+
+  pi.registerCommand("tutor-memory", {
+    description: "List what the tutor remembers about you; pick one to forget it",
+    handler: async (_args, ctx) => {
+      if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
+      const rows = profile.memories({ language: null, limit: 50 });
+      if (rows.length === 0) { ctx.ui.notify("the tutor has not saved any memories yet", "info"); return; }
+      const lines = rows.map((r) => `#${r.id} [${r.type}] ${r.text}`);
+      if (!ctx.hasUI) { ctx.ui.notify(lines.join("\n"), "info"); return; }
+      const pick = await ctx.ui.select("Saved memories (Esc to close)", lines);
+      if (!pick) return;
+      const id = Number(/^#(\d+)/.exec(pick)?.[1]);
+      if ((await ctx.ui.select(pick, ["Keep it", "Forget it"])) !== "Forget it") return;
+      const p = profile;
+      let gone = false;
+      profileWrite(() => { gone = p.forget(id); });
+      ctx.ui.notify(gone ? `forgot memory #${id}` : `memory #${id} was already gone`, "info");
     },
   });
 

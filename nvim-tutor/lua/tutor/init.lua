@@ -9,7 +9,8 @@ local opts = {}
 function M.build_cmd(pi_cmd)
   local cmd = vim.deepcopy(pi_cmd)
   if vim.fs.basename(cmd[1]) == "pi" then
-    vim.list_extend(cmd, { "--tools", "read,grep,find,ls" })
+    -- pi-tutor's memory tools (spec 2026-10-13 §7.1); --tools is an allowlist for extension tools too.
+    vim.list_extend(cmd, { "--tools", "read,grep,find,ls,tutor_remember,tutor_recall" })
   end
   return cmd
 end

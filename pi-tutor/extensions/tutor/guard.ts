@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 // Tool fence (spec §8): read-only tools, project root only. Defence in depth behind `--tools`.
 export const READ_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "find", "ls"]);
+/** Tutor memory tools (spec 2026-10-13 §7.1): allowed by name; they touch only the profile. */
+export const MEMORY_TOOLS: ReadonlySet<string> = new Set(["tutor_remember", "tutor_recall"]);
 
 export type GuardResult = { block: true; reason: string } | undefined;
 
@@ -38,6 +40,7 @@ export function realpathLoose(abs: string): string {
 
 export function guardToolCall(toolName: string, input: Record<string, unknown>, cwd: string, extraRoots: string[] = []): GuardResult {
   if (toolName === "bash") return { block: true, reason: BASH_REASON };
+  if (MEMORY_TOOLS.has(toolName)) return undefined;
   if (!READ_TOOLS.has(toolName)) return { block: true, reason: `the tutor is read-only: ${toolName} is not allowed` };
   const p = input.path;
   if (p === undefined && toolName !== "read") return undefined; // defaults to cwd

@@ -689,3 +689,37 @@ describe("final review fixes (workflow)", () => {
     expect(r.notes.at(-1)).toMatch(/no design recipe in progress/);
   });
 });
+
+describe("tutor memory in the extension (spec 2026-10-13 §7.1)", () => {
+  it("registers both tools; a saved memory shows in the next session's frozen tutor_memory section", async () => {
+    const file = pjoin(mkd(pjoin(tmp(), "pitutor-mem-")), "profile.sqlite");
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const a = await boot();
+      expect(Object.keys(a.tools).sort()).toEqual(["tutor_recall", "tutor_remember"]);
+      await a.tools["tutor_remember"].execute("1", { type: "learner", text: "learns best from Rust comparisons" });
+      const same = await turn(a.events, a.ctx, "hi", judged("none"));
+      expect(same.sections["tutor_memory"]).toBeUndefined(); // frozen: this session started empty
+      await a.events["session_shutdown"]({ type: "session_shutdown" }, a.ctx);
+      const b = await boot();
+      const next = await turn(b.events, b.ctx, "hi", judged("none"));
+      expect(next.sections["tutor_memory"]).toContain("- [learner] learns best from Rust comparisons");
+      await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    } finally {
+      if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
+    }
+  });
+  it("/tutor-memory lists memories and forgets the one the learner picks", async () => {
+    const b = await boot();
+    await b.tools["tutor_remember"].execute("1", { type: "learner", text: "likes diagrams" });
+    await b.tools["tutor_remember"].execute("2", { type: "project", text: "uses pytest" });
+    b.script.push("#1 [learner] likes diagrams", "Forget it");
+    await b.commands["tutor-memory"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toBe("forgot memory #1");
+    b.script.push(undefined);
+    await b.commands["tutor-memory"].handler("", b.ctx);
+    const left = await b.tools["tutor_recall"].execute("3", { query: "diagrams pytest" }) as { content: { text: string }[] };
+    expect(left.content[0].text).toBe("#2 [project] uses pytest");
+  });
+});
