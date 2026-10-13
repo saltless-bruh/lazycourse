@@ -25,7 +25,7 @@ describe("extension wiring", () => {
 
   it("starts detached at the default level", async () => {
     const { widgets, statuses } = await boot();
-    expect(widgets["tutor"]?.[1]).toBe("detached: pi started outside Neovim");
+    expect(widgets["tutor"]?.[1]).toBe("outside nvim · idle");
     expect(statuses["tutor"]).toBe("tutor lvl 50 · intermediate");
   });
 
@@ -276,7 +276,7 @@ describe("M4 review fixes", () => {
       other.exec("BEGIN EXCLUSIVE"); // another tutor holds the write lock past the busy timeout
       await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
       await expect(b.events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, b.ctx)).resolves.toBeUndefined();
-      expect(b.widgets["tutor"]?.[1]).toMatch(/detached|episode closed/); // the episode still closed
+      expect(b.widgets["tutor"]?.[1]).toMatch(/outside nvim|episode closed/); // the episode still closed
       await expect(b.commands["tutor-level"].handler("70", b.ctx)).resolves.toBeUndefined();
       expect(b.notes.some((n) => /profile write failed/.test(n))).toBe(true);
     } finally {

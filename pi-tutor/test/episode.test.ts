@@ -23,7 +23,7 @@ async function linked(busy = false, branch: (root: string) => unknown[] = () => 
   h = await startHeadlessNvim();
   const b = await boot({ nvim: h.socket, cwd: h.root, branch: branch(h.root) });
   shutdown = () => b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
-  expect(b.widgets["tutor"]?.[1]).not.toMatch(/detached/);
+  expect(b.widgets["tutor"]?.[1]).not.toMatch(/outside nvim|nvim closed/);
   await b.commands["tutor-level"].handler("10", b.ctx);
   b.busy.value = busy;
   const { attach } = await import("neovim");
@@ -174,5 +174,26 @@ describe("final review I1: a failing re-run keeps the hint level", () => {
     const after = episodes(b.entries).at(-1)!;
     expect(after).toMatchObject({ id: before.id, rung: 4, turns: 1, trigger: { kind: "run", trace: "KeyError: 'y'" } });
     expect(episodes(b.entries).some((e) => e.closeReason === "superseded")).toBe(false);
+  }, 20000);
+});
+
+describe("widget when the editor link ends (M1b #2, M3 #19)", () => {
+  it("Neovim closing is shown as nvim closed, with state and judgment", async () => {
+    const b = await linked();
+    await turn(b.events, b.ctx, REASONED, judged("partial"));
+    h!.kill(); h = undefined;
+    await until(() => b.widgets["tutor"]?.[1]?.startsWith("nvim closed") === true);
+    expect(b.widgets["tutor"]?.[1]).toMatch(/^nvim closed · stuck: learner question/); // 44-column clip; ui.test covers the judgment part
+  }, 20000);
+  it("a session shutdown (/new, /resume) does not flash the detached wording", async () => {
+    const b = await linked();
+    const seen: string[] = [];
+    const ui = b.ctx.ui as { setWidget: (k: string, c: string[] | undefined) => void };
+    const orig = ui.setWidget;
+    ui.setWidget = (k, c) => { if (c) seen.push(c[1]); orig(k, c); };
+    await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(seen.filter((l) => /outside nvim|nvim closed|detached/.test(l))).toEqual([]);
+    shutdown = undefined;
   }, 20000);
 });

@@ -120,6 +120,8 @@ export default function (pi: ExtensionAPI): void {
   let signal = "idle";
   let tick: ReturnType<typeof setInterval> | null = null;
   let lastNudge = -Infinity;
+  /** session_shutdown in progress (/new, /resume, quit): our own link close is not the editor going away (M3 #19). */
+  let closing = false;
   let profile: Profile | null = null;
   /** The recorded project this Pi runs in (cwd), if any: the source of the profile language. */
   let project: ProjectRow | null = null;
@@ -267,6 +269,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    closing = false;
     session = ctx;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
@@ -291,9 +294,10 @@ export default function (pi: ExtensionAPI): void {
       link = await NvimLink.connect({
         root: ctx.cwd,
         onPayload,
-        onDisconnect: () => { state.connected = false; link = null; paint(); },
+        onDisconnect: () => { state.connected = false; link = null; if (closing) return; state.lost = true; paint(); },
       });
       state.connected = link !== null;
+      if (link) state.lost = false;
     }
     if (!tick) {
       tick = setInterval(() => {
@@ -306,6 +310,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
+    closing = true;
     if (tick) clearInterval(tick);
     tick = null;
     profile?.close();
