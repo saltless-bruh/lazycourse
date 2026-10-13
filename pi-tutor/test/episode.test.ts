@@ -228,6 +228,16 @@ describe("M6c: episodes against a real Neovim", () => {
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
     expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
   }, 20000);
+  it("a run that started without an episode does not judge one opened mid-reply (M6c M6)", async () => {
+    const b = await linked(); // beginner: error threshold 0
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "[tutor] a proactive nudge", systemPromptOptions: opts }, b.ctx); // no episode
+    expect(episodes(b.entries)).toHaveLength(0);
+    await setError("boom"); // an editor episode opens mid-reply
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
+    await b.events["turn_end"]({ type: "turn_end", message: judged("wrong") }, b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
+  }, 20000);
   it("display-only filetypes are not languages for /tutor-docs and memory (M5 #38, M6b #57)", async () => {
     const b = await linked();
     writeFileSync(join(h!.root, "notes.md"), "# notes\n");

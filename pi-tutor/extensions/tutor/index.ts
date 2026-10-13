@@ -130,7 +130,8 @@ export default function (pi: ExtensionAPI): void {
    * whether a judgment was already applied. One judgment per run: a model that "calls" tutor-judgment
    * and then writes the fence must not move the rung twice.
    */
-  let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string } | null = null;
+  /** `episodeId`: the episode a ladder-role run answers, `null` when it started without one (M6c M6). */
+  let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string | null } | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
   let pendingSteers = 0;
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
@@ -337,7 +338,7 @@ export default function (pi: ExtensionAPI): void {
     // A learner's chat message opens an episode; our own [tutor] nudges and non-ladder roles do not.
     if (role.ladder && !episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
-    run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder && episode ? episode.id : undefined };
+    run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -367,14 +368,15 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Apply one accepted judgment to the episode and the profile (spec §5). */
-  function applyTurnJudgment(j: Judgment, episodeId?: string) {
+  function applyTurnJudgment(j: Judgment, episodeId?: string | null) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
     const ladder = roleNamed(activeRole).ladder;
     const inRecipe = workflow !== null && ladder;
     if (ladder) advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
-    // M3 #17: the reply answered an episode an editor trigger has since replaced.
+    // M3 #17: the reply answered an episode an editor trigger has since replaced (or, M6c M6, none:
+    // the run started without one and an editor episode opened mid-reply).
     if (!ladder || !episode || (episodeId !== undefined && episode.id !== episodeId)) return;
     if (episode.turns === 0 && project && profile) {
       let known = new Map<string, number>();
