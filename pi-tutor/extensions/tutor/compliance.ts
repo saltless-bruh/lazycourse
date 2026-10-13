@@ -28,7 +28,9 @@ export function guardJudgment(j: Judgment, prompt: string): Judgment {
 }
 
 const FENCES = /```([^\n`]*)\r?\n([\s\S]*?)```/g;
-const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|\[episode\]|\brung \d)/i;
+const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done|\[episode\]|\[workflow\]|\[tutor-check\]|\brung \d)/i;
+/** Fences quoting a document (spec/tasks.md, README): wrapping prose is harmless and it is not code. */
+const QUOTES = new Set(["markdown", "md"]);
 
 function codeAllowed(o: { band: Band; rung: number | null; noCode: boolean }, lines: number): boolean {
   if (o.noCode) return false;
@@ -43,7 +45,7 @@ export function checkReply(text: string, o: { band: Band; rung: number | null; j
   for (const m of text.matchAll(FENCES)) {
     const tag = m[1].trim().toLowerCase();
     const body = m[2].replace(/\r?\n$/, "").split(/\r?\n/);
-    if (tag === "tutor-judgment" || m[2].includes('"judgment"')) continue;
+    if (tag === "tutor-judgment" || m[2].includes('"judgment"') || QUOTES.has(tag)) continue;
     if (tag === "" || tag === "text") {
       if (body.some((l) => Array.from(l).length > DIAGRAM_COLS)) issues.add("wide-diagram");
       continue;
@@ -64,6 +66,12 @@ const FIX: Record<Issue, string> = {
   "internals": "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
   "no-summary": "a long reply had no **In short** line",
 };
+
+/**
+ * Last line of every turn's hidden context. Golden round 1 (nemotron): 3 of 5 replies dropped the
+ * judgment block that the system prompt asks for; a reminder next to the learner's message is read last.
+ */
+export const REPLY_REMINDER = "[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the ```tutor-judgment block.";
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
 export function formatCheck(issues: Issue[]): string {

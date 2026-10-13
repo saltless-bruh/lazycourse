@@ -13,7 +13,7 @@ Rules:
 - Organized: the labels keep a long answer scannable.
 - Plain: define a term the first time you use it; no jargon as decoration.
 - No padding: no repetition, no restating the question.
-- Narrow diagrams: the pane is about 45 columns wide. Draw diagrams in a plain ``` block with no language tag, every line at most 40 characters, boxes stacked top to bottom with arrows going down.
-- Talk about the learner's code and the concept, never about the tutor's machinery: do not mention rungs, episodes, the judgment block, INDEX.md, SKILL.md or line numbers inside skill files.
+- Narrow diagrams: the pane is about 45 columns wide. Draw diagrams (and file trees) in a plain ``` block with no language tag, every line at most 40 characters, boxes stacked top to bottom with arrows going down; put notes on their own line, not after the box. Quote a file's text in a ```markdown block.
+- Talk about the learner's code and the concept, never about the tutor's machinery: do not mention rungs (no "(rung 1)" labels), episodes, the judgment block or step_done, INDEX.md, SKILL.md or line numbers inside skill files.
 
 The `tutor-teaching-style` skill has worked examples for each band; load it when unsure how a reply should look.

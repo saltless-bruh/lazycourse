@@ -601,3 +601,17 @@ describe("/tutor-plan", () => {
     expect(r.widgets["tutor"]?.[0]).toContain("plan 4/6");
   });
 });
+
+describe("per-turn reply reminder (golden round 1: 3 of 5 replies dropped the judgment)", () => {
+  it("every turn's hidden context ends with the reminder, even with nothing else to say", async () => {
+    const { REPLY_REMINDER } = await import("../extensions/tutor/compliance.js");
+    const b = await boot();
+    await b.commands["tutor-architect"].handler("", b.ctx); // no episode context for the architect
+    const opts = await turn(b.events, b.ctx, "how should I split modules?", judged("none"));
+    expect(opts.message?.content).toBe(REPLY_REMINDER);
+    await b.commands["tutor-architect"].handler("off", b.ctx);
+    const tutor = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(tutor.message?.content.startsWith("[episode]")).toBe(true);
+    expect(tutor.message?.content.endsWith(REPLY_REMINDER)).toBe(true);
+  });
+});

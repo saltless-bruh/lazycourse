@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS } from "../extensions/tutor/compliance.js";
+import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, REPLY_REMINDER } from "../extensions/tutor/compliance.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ judgment, concept_tags: ["t"], task_done_ids: [], episode_closed: false, step_done });
@@ -65,11 +65,33 @@ describe("checkReply", () => {
   });
 });
 
+describe("checkReply after golden round 1 (nemotron, 2026-10-13)", () => {
+  it("a markdown fence is a quote of a file, neither a diagram nor code", () => {
+    const quote = fence("markdown", ["- [ ] P1.T1 Parse the command line into a Command"]) + JUDGED;
+    expect(checkReply(quote, { ...ok, rung: 2 })).toEqual([]);
+    expect(checkReply(fence("md", ["x".repeat(60)]) + JUDGED, { ...ok, noCode: true })).toEqual([]);
+  });
+  it("step_done and the [workflow] / [tutor-check] lines are internals", () => {
+    for (const t of ["When you finish, I'll set `step_done: true`.", "The [workflow] says step 2.", "Per [tutor-check], fixed."]) {
+      expect(checkReply(t + "\n" + JUDGED, ok)).toContain("internals");
+    }
+  });
+});
+
 describe("formatCheck", () => {
   it("is a [tutor-check] block naming each break", () => {
     const t = formatCheck(["wide-diagram", "missing-judgment"]);
     expect(t.startsWith("[tutor-check]")).toBe(true);
     expect(t).toMatch(/40 characters/);
     expect(t).toMatch(/tutor-judgment/);
+  });
+});
+
+describe("REPLY_REMINDER", () => {
+  it("is one short line naming the structure and the judgment block", () => {
+    expect(REPLY_REMINDER.startsWith("[tutor-reply]")).toBe(true);
+    expect(REPLY_REMINDER).not.toContain("\n");
+    expect(REPLY_REMINDER).toContain("In short");
+    expect(REPLY_REMINDER).toContain("tutor-judgment");
   });
 });
