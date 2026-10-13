@@ -17,6 +17,10 @@ const VALUES: readonly JudgmentValue[] = ["correct", "partial", "wrong", "none"]
 // closed by a bare fence line of the same kind (or longer).
 const TAGGED = /^ {0,3}(`{3,}|~{3,})tutor-judgment[ \t]*\r?\n([\s\S]*?)^ {0,3}\1[`~]*[ \t]*$/gm;
 const LOOSE = /^ {0,3}(`{3,}|~{3,})(?:json)?[ \t]*\r?\n([\s\S]*?)^ {0,3}\1[`~]*[ \t]*$/gm;
+// Pre-M6c lenient forms, tried after the strict ones (final review I3): a fence opened mid-line or
+// closed on the JSON line is still a judgment; for extracting it, leniency costs nothing.
+const TAGGED_LENIENT = /(`{3,}|~{3,})tutor-judgment[ \t]*\r?\n([\s\S]*?)\1/g;
+const LOOSE_LENIENT = /(`{3,}|~{3,})(?:json)?[ \t]*\r?\n([\s\S]*?)\1/g;
 const BARE = /\{[^{}]*"judgment"[^{}]*\}\s*$/;
 
 function strings(v: unknown): string[] {
@@ -47,10 +51,10 @@ function lastOf(text: string, re: RegExp, accept: (body: string) => boolean = ()
 }
 
 export function parseJudgment(text: string): Judgment | null {
-  const tagged = lastOf(text, TAGGED);
-  if (tagged !== null) return fromJson(tagged);
-  const loose = lastOf(text, LOOSE, (b) => b.includes('"judgment"'));
-  if (loose !== null) return fromJson(loose);
+  const hasJudgment = (b: string) => b.includes('"judgment"');
+  const body = lastOf(text, TAGGED) ?? lastOf(text, TAGGED_LENIENT)
+    ?? lastOf(text, LOOSE, hasJudgment) ?? lastOf(text, LOOSE_LENIENT, hasJudgment);
+  if (body !== null) return fromJson(body);
   const bare = BARE.exec(text);
   return bare ? fromJson(bare[0]) : null;
 }

@@ -62,4 +62,13 @@ describe("M6c: judgment fence parity", () => {
     expect(parseJudgment('x\n~~~tutor-judgment\n{"judgment":"wrong"}\n~~~\n')?.judgment).toBe("wrong");
     expect(parseJudgment('1. x\n   ```tutor-judgment\n   {"judgment":"partial"}\n   ```\n')?.judgment).toBe("partial");
   });
+  it("still reads the sloppy forms weak models emit (M6c I3 regression)", () => {
+    expect(parseJudgment('ok\n```tutor-judgment\n{"judgment":"none"}```')?.judgment).toBe("none"); // closing fence on the JSON line
+    expect(parseJudgment('ok ```tutor-judgment\n{"judgment":"partial"}\n```')?.judgment).toBe("partial"); // fence opened mid-line
+    expect(parseJudgment('ok ```json\n{"judgment":"wrong"}```')?.judgment).toBe("wrong"); // untagged, both sloppy
+  });
+  it("prefers a well-formed tagged fence over a sloppy one", () => {
+    const t = 'a ```tutor-judgment\n{"judgment":"wrong"}```\n```tutor-judgment\n{"judgment":"correct"}\n```\n';
+    expect(parseJudgment(t)?.judgment).toBe("correct");
+  });
 });
