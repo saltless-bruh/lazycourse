@@ -1,4 +1,5 @@
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
@@ -9,6 +10,7 @@ import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judg
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
+import { TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -52,6 +54,15 @@ function restoreRole(ctx: ExtensionContext): string {
     }
   }
   return role;
+}
+
+/** Last `tutor_workflow` entry on the active branch, if it is unfinished (spec 2026-10-13 §4). */
+function restoreWorkflow(ctx: ExtensionContext): Workflow | null {
+  let w: Workflow | undefined;
+  for (const e of ctx.sessionManager.getBranch()) {
+    if (e.type === "custom" && e.customType === "tutor_workflow") w = e.data as Workflow;
+  }
+  return w && typeof w.step === "number" && typeof w.task === "string" && w.done === undefined ? w : null;
 }
 
 /** Last `tutor_episode` entry on the active branch, if it is still open. */
@@ -120,6 +131,8 @@ export default function (pi: ExtensionAPI): void {
   let lastIssues: Issue[] = [];
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
   let activeRole = DEFAULT_ROLE;
+  /** Design-recipe workflow in progress (spec 2026-10-13 §4), persisted as `tutor_workflow` entries. */
+  let workflow: Workflow | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -130,6 +143,7 @@ export default function (pi: ExtensionAPI): void {
     const r = roleNamed(activeRole);
     state.role = r.name === DEFAULT_ROLE ? undefined : r.name;
     if (!r.ladder) state.rung = undefined;
+    state.task = workflow ? workflowLabel(workflow) : undefined;
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));
@@ -236,6 +250,7 @@ export default function (pi: ExtensionAPI): void {
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
+    workflow = restoreWorkflow(ctx);
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       link = await NvimLink.connect({
@@ -280,6 +295,7 @@ export default function (pi: ExtensionAPI): void {
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
     const parts: string[] = [];
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
+    if (workflow) parts.push(formatWorkflowContext(workflow, band));
     if (lastIssues.length) parts.push(formatCheck(lastIssues));
     if (snap) parts.push(formatEditorContext(snap));
     if (parts.length === 0) return;
@@ -290,6 +306,14 @@ export default function (pi: ExtensionAPI): void {
   function applyTurnJudgment(j: Judgment) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
+    if (workflow) {
+      const next = advance(workflow, j.step_done, Date.now());
+      if (next !== workflow) {
+        pi.appendEntry("tutor_workflow", next);
+        if (next.done !== undefined) ui?.notify(`design recipe for ${next.task} finished`, "info");
+        workflow = next.done === undefined ? next : null;
+      }
+    }
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     if (!roleNamed(activeRole).ladder || !episode) return;
     if (episode.turns === 0 && project && profile) {
@@ -349,6 +373,29 @@ export default function (pi: ExtensionAPI): void {
       // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
       if (q && ctx.hasUI) pi.sendUserMessage(q);
       else ctx.ui.notify("architecture professor: ask about components, data flow or trade-offs", "info");
+    },
+  });
+
+  pi.registerCommand("tutor-plan", {
+    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1)",
+    handler: async (args, ctx) => {
+      const id = args.trim();
+      if (!TASK_ID.test(id)) { ctx.ui.notify("usage: /tutor-plan <task id>, e.g. /tutor-plan P1.T1", "warning"); return; }
+      let tasks: string;
+      try { tasks = readFileSync(join(ctx.cwd, "spec", "tasks.md"), "utf8"); } catch {
+        ctx.ui.notify("no spec/tasks.md in this project; /tutor-start scaffolds one", "warning");
+        return;
+      }
+      const line = findTask(tasks, id);
+      if (!line) { ctx.ui.notify(`${id} is not in spec/tasks.md`, "warning"); return; }
+      setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
+      workflow = startWorkflow(id, Date.now());
+      pi.appendEntry("tutor_workflow", workflow);
+      paint();
+      const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
+      // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
+      if (ctx.hasUI) pi.sendUserMessage(kickoff);
+      else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
     },
   });
 

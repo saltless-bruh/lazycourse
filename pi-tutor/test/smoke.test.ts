@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { fakePi, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
 import extension from "../extensions/tutor/index.js";
+import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile } from "node:fs";
+import { tmpdir as tmp } from "node:os";
+import { join as pjoin } from "node:path";
 
 describe("extension wiring", () => {
   it("registers lifecycle handlers and commands", () => {
@@ -534,5 +537,67 @@ describe("roles in the turn loop", () => {
     const b = await boot({ branch: [{ type: "custom", customType: "tutor_role", data: { role: "architect" } }] });
     const opts = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(opts.sections["tutor"]).toContain("# Role: architecture professor");
+  });
+});
+
+describe("/tutor-plan", () => {
+  const project = () => {
+    const dir = mkd(pjoin(tmp(), "plan-"));
+    mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Parse argv into a Command\n");
+    return dir;
+  };
+  it("starts the workflow, shows plan 1/6, kicks off with a [tutor] message, and carries [workflow] context", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    expect(b.entries.find((e) => e.type === "tutor_workflow")?.data).toMatchObject({ task: "P1.T1", step: 1 });
+    expect(b.widgets["tutor"]?.[0]).toContain("plan 1/6");
+    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\.$/);
+    const opts = await turn(b.events, b.ctx, "[tutor] design recipe started for P1.T1", judged("none"));
+    expect(opts.message?.content).toMatch(/\[workflow\] design recipe for P1\.T1: step 1\/6 Find/);
+  });
+  it("without a UI it starts the workflow but sends no turn", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", { ...b.ctx, hasUI: false });
+    expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(true);
+    expect(b.sent).toHaveLength(0);
+  });
+  it("step_done from the learner advances; from a [tutor] nudge it does not", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    const done = assistant('ok\n```tutor-judgment\n{"judgment":"none","step_done":true}\n```');
+    await turn(b.events, b.ctx, "[tutor] design recipe started for P1.T1", done);
+    expect(b.widgets["tutor"]?.[0]).toContain("plan 1/6");
+    await turn(b.events, b.ctx, "the task is P1.T1 and it feeds main", done);
+    expect(b.widgets["tutor"]?.[0]).toContain("plan 2/6");
+    expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ step: 2 });
+  });
+  it("finishing Build ends the workflow and clears the widget label", async () => {
+    const b = await boot({ cwd: project(), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 6, started: 1 } }] });
+    await turn(b.events, b.ctx, "it runs and matches all three examples", assistant('ok\n```tutor-judgment\n{"judgment":"none","step_done":true}\n```'));
+    expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ step: 6, done: expect.any(Number) });
+    expect(b.widgets["tutor"]?.[0]).not.toContain("plan");
+    expect(b.notes.join("\n")).toMatch(/design recipe for P1\.T1 finished/);
+  });
+  it("warns and does nothing for a bad id, an unknown id, or no spec/tasks.md", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("", b.ctx);
+    await b.commands["tutor-plan"].handler("P1.T9", b.ctx);
+    const empty = await boot({ cwd: mkd(pjoin(tmp(), "plan-")) });
+    await empty.commands["tutor-plan"].handler("P1.T1", empty.ctx);
+    expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(false);
+    expect(empty.entries.some((e) => e.type === "tutor_workflow")).toBe(false);
+    expect(b.sent).toHaveLength(0);
+    expect(b.notes.join("\n")).toMatch(/usage: \/tutor-plan/);
+    expect(b.notes.join("\n")).toMatch(/P1\.T9 is not in spec\/tasks\.md/);
+    expect(empty.notes.join("\n")).toMatch(/no spec\/tasks\.md/);
+  });
+  it("switches back from the architect, and restores an unfinished workflow on resume", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    expect(b.entries.filter((e) => e.type === "tutor_role").at(-1)?.data).toEqual({ role: "coding-tutor" });
+    const r = await boot({ branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 4, started: 1 } }] });
+    expect(r.widgets["tutor"]?.[0]).toContain("plan 4/6");
   });
 });
