@@ -30,6 +30,22 @@ describe("tutor.init", function()
     assert.is_true(has("/reload"))
   end)
 
+  it(":TutorPlan and :TutorArchitect type their slash commands into pi", function()
+    local tutor = require("tutor")
+    vim.cmd("Tutor")
+    vim.cmd("TutorPlan P1.T1")
+    vim.cmd("TutorArchitect off")
+    local buf = tutor.state.term:bufnr()
+    local has = function(s) return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), s) end
+    vim.wait(1000, function() return has("/tutor-plan P1.T1") and has("/tutor-architect off") end)
+    assert.is_true(has("/tutor-plan P1.T1"))
+    assert.is_true(has("/tutor-architect off"))
+  end)
+
+  it(":TutorPlan needs a task id", function()
+    assert.has_error(function() vim.cmd("TutorPlan") end)
+  end)
+
   it("switch cds into the project, opens the file and restarts pi there", function()
     local tutor = require("tutor")
     local dir = vim.fn.tempname()

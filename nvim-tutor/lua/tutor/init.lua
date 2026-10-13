@@ -120,6 +120,8 @@ function M.setup(user_opts)
   cmd("TutorLevel", slash("/tutor-level"), { nargs = "?" })
   cmd("TutorLearn", slash("/tutor-learn"), {})
   cmd("TutorDocs", slash("/tutor-docs"), { nargs = "?" })
+  cmd("TutorPlan", slash("/tutor-plan"), { nargs = 1 })
+  cmd("TutorArchitect", slash("/tutor-architect"), { nargs = "?" })
   cmd("TutorReload", slash("/reload"), {})
 end
 
