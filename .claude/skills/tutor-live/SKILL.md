@@ -19,7 +19,7 @@ sleep 1; pgrep -fa 'pi --tools' | grep -v pgrep | grep -v snapshot || echo "no s
 ```
 
 Expected:
-- `WIDGET present=true detached=false chan=<n>`
+- `WIDGET present=true offlink=false chan=<n>` (offlink = the widget says "outside nvim" or "nvim closed")
 - `LEVEL lvl40=true`
 - `DIAG widget=true`
 - `EPISODE widget=true nudge=true` (level 10 = beginner, error threshold 0)

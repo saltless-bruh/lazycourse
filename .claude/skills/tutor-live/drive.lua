@@ -5,11 +5,13 @@ local function termlines()
   return vim.api.nvim_buf_get_lines(t:bufnr(), 0, -1, false)
 end
 local function has(pat) for _, l in ipairs(termlines()) do if l:find(pat, 1, true) then return true end end return false end
+-- Off-link widget wording (ui.ts): "outside nvim" before any link, "nvim closed" after one is lost.
+local function offlink() return has("outside nvim") or has("nvim closed") end
 vim.defer_fn(function()
   local ok, err = pcall(function()
     vim.cmd("Tutor")
-    local ok1 = vim.wait(30000, function() return has("tutor") and (has("idle") or has("detached")) end, 200)
-    out("WIDGET present=" .. tostring(ok1) .. " detached=" .. tostring(has("detached")) .. " chan=" .. tostring(vim.g.tutor_chan))
+    local ok1 = vim.wait(30000, function() return has("tutor") and (has("idle") or offlink()) end, 200)
+    out("WIDGET present=" .. tostring(ok1) .. " offlink=" .. tostring(offlink()) .. " chan=" .. tostring(vim.g.tutor_chan))
     vim.cmd("TutorLevel 40")
     out("LEVEL lvl40=" .. tostring(vim.wait(15000, function() return has("lvl 40") end, 200)))
     vim.cmd("wincmd h")
@@ -24,7 +26,7 @@ vim.defer_fn(function()
     local nudge = vim.wait(15000, function() return has("[tutor] stuck signal") end, 200)
     out("EPISODE widget=" .. tostring(ep) .. " nudge=" .. tostring(nudge))
     vim.cmd("TutorRun")
-    out("RUN done")
+    out("\nRUN done") -- :TutorRun's notify ends without a newline in headless mode
     for _, l in ipairs(termlines()) do
       if l:find("tutor", 1, true) or l:find("boom", 1, true) then out("LINE " .. l) end
     end
