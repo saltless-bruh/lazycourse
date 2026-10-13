@@ -829,11 +829,27 @@ describe("M6c: turn and episode bookkeeping", () => {
   it("a steered message resets the run: judged against the new text, and judgeable (M6a #56)", async () => {
     const b = await boot();
     const opts = { sections: {} as Record<string, string> };
+    // Pi's real order (agent-loop.js:114-118, 180-186): input fires while reply 1 streams, reply 1's
+    // turn_end comes next, and only then is the steered text delivered as a user message_start.
+    const user = (text: string) => ({ type: "message_start", message: { role: "user", content: [{ type: "text", text }], timestamp: 1 } });
     await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "what does this do?", systemPromptOptions: opts }, b.ctx);
-    await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
+    await b.events["message_start"](user("what does this do?"), b.ctx);
     await b.events["input"]({ type: "input", text: REASONED, source: "interactive", streamingBehavior: "steer" }, b.ctx);
-    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx); // reply 1: guarded against the first prompt
+    await b.events["message_start"](user(REASONED), b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx); // reply 2: the steered message's own reply
     expect(b.entries.filter((e) => e.type === "tutor_judgment").map((e) => (e.data as { judgment: string }).judgment)).toEqual(["none", "correct"]);
+  });
+  it("a followUp resets the run only when delivered, with the delivered (expanded) text", async () => {
+    const b = await boot();
+    const user = (text: string) => ({ type: "message_start", message: { role: "user", content: [{ type: "text", text }], timestamp: 1 } });
+    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
+    await b.events["message_start"](user(REASONED), b.ctx);
+    await b.events["input"]({ type: "input", text: "/skill:x", source: "interactive", streamingBehavior: "followUp" }, b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
+    await b.events["message_start"](user("explain closures?"), b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
+    expect(b.entries.filter((e) => e.type === "tutor_judgment").map((e) => (e.data as { judgment: string }).judgment)).toEqual(["correct", "none"]);
   });
   it("an idle input does not touch the run (before_agent_start follows)", async () => {
     const b = await boot();

@@ -131,6 +131,8 @@ export default function (pi: ExtensionAPI): void {
    * and then writes the fence must not move the rung twice.
    */
   let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string } | null = null;
+  /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
+  let pendingSteers = 0;
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
   let lastIssues: Issue[] = [];
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
@@ -331,6 +333,7 @@ export default function (pi: ExtensionAPI): void {
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
     // A learner's chat message opens an episode; our own [tutor] nudges and non-ladder roles do not.
     if (role.ladder && !episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
+    pendingSteers = 0;
     run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder && episode ? episode.id : undefined };
     let snap: EditorSnapshot | null = null;
     if (link) {
@@ -386,10 +389,20 @@ export default function (pi: ExtensionAPI): void {
   }
 
   // M6a #56: Pi delivers a message typed mid-reply into the running loop without a new
-  // before_agent_start (agent-session.js:1550-1560), so the run must follow it.
+  // before_agent_start (agent-session.js:1550-1560). `input` fires while the current reply still
+  // streams; that reply's turn_end comes first, and the queued text reaches the model later as a
+  // user message_start (pi-agent-core agent-loop.js:114-118, 180-186). The run follows the message
+  // when it is delivered, using the delivered text (skill and template expansion may change it).
   pi.on("input", (event) => {
-    if (event.streamingBehavior && run) run = { ...run, prompt: event.text, judged: false };
+    if (event.streamingBehavior) pendingSteers++;
     return undefined;
+  });
+  pi.on("message_start", (event) => {
+    const m = event.message;
+    if (m.role !== "user" || !run || pendingSteers === 0) return;
+    pendingSteers--;
+    const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+    run = { ...run, prompt: text, judged: false };
   });
 
   // Spec §5: take the judgment (fence, fallback, or invented tool call) and apply it once per run.
