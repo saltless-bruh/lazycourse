@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -135,8 +135,17 @@ describe("M6c: offline and atomic install (M5-finish #43, #44)", () => {
     process.env.PI_TUTOR_DEVDOCS = "http://127.0.0.1:9"; // refused
     const r = await fetchReference("python", deps(dir));
     expect(r.status).toBe("cached");
+    expect(r.offline).toBe(true);
     expect(r.meta.slug).toBe("python~3.14");
     await expect(fetchReference("python", deps(dir, { force: true }))).rejects.toThrow();
+  });
+  it("installSkillDir: a failed swap puts the old skill back and removes the temp folder (M6c M5)", () => {
+    const dir = root();
+    mkdirSync(join(dir, "tutor-x-ref")); writeFileSync(join(dir, "tutor-x-ref", "SKILL.md"), "old");
+    // The temp folder vanishing makes renameSync(tmp, dir) fail after the old folder moved aside.
+    expect(() => installSkillDir(dir, "tutor-x-ref", (d) => rmSync(d, { recursive: true, force: true }))).toThrow(/ENOENT/);
+    expect(readFileSync(join(dir, "tutor-x-ref", "SKILL.md"), "utf8")).toBe("old");
+    expect(readdirSync(dir)).toEqual(["tutor-x-ref"]);
   });
   it("installSkillDir: a failed write leaves the old skill and no temp folder; success swaps it in", () => {
     const dir = root();

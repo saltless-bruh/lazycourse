@@ -571,7 +571,9 @@ export default function (pi: ExtensionAPI): void {
       const r = await withProgress(ctx, `tutor: fetching ${language} docs (DevDocs)…`, (signal) =>
         fetchReference(language, { fetch, root: skillsRoot(), installed, devdocsType: spec.devdocsType, override: overrideFor(language), force, signal }), "docs download");
       const note = r.meta.note ? ` — ${r.meta.note}` : "";
-      ctx.ui.notify(r.status === "cached"
+      ctx.ui.notify(r.offline
+        ? `${language} docs: DevDocs unreachable (offline?); using the docs on disk unchecked (${r.name}, ${r.meta.release})`
+        : r.status === "cached"
         ? `${language} docs already current (${r.name}, ${r.meta.release})`
         : r.status === "refreshed"
           ? `${language} docs updated for installed ${installed ?? "unknown"} (${r.name}, ${r.meta.release})${note}`

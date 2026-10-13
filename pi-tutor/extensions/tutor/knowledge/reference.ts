@@ -14,7 +14,11 @@ export const SKILL_FORMAT = 2;
 export interface RefMeta { slug: string; release: string; mtime: number; installed: string | null; note: string; format?: number }
 export interface RefDeps { fetch: typeof fetch; root: string; installed: string | null; devdocsType: string; override?: string; force?: boolean; signal?: AbortSignal; timeoutMs?: number }
 /** `refreshed`: same bundle, but the installed version changed, so only SKILL.md and the meta were rewritten. */
-export interface RefResult { status: "fetched" | "cached" | "refreshed"; name: string; meta: RefMeta; entries: number }
+export interface RefResult {
+  status: "fetched" | "cached" | "refreshed"; name: string; meta: RefMeta; entries: number;
+  /** DevDocs could not be reached: the docs on disk are used unchecked (M6c M4). */
+  offline?: boolean;
+}
 
 export function skillsRoot(): string {
   return join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "skills");
@@ -51,7 +55,7 @@ export async function fetchReference(language: string, d: RefDeps): Promise<RefR
     // M5-finish #43: offline with docs on disk keeps using them; a forced refresh still fails loudly.
     const prev = referenceInfo(d.root, language);
     if (e instanceof Cancelled || d.force || !prev) throw e;
-    return { status: "cached", name: `tutor-${language}-ref`, meta: prev, entries: 0 };
+    return { status: "cached", name: `tutor-${language}-ref`, meta: prev, entries: 0, offline: true };
   }
   const choice = chooseBundle(catalog, d.devdocsType, d.installed, d.override);
   if (!choice) throw new Error(`DevDocs has no ${language} documentation`);
@@ -100,6 +104,11 @@ export function installSkillDir(root: string, name: string, write: (dir: string)
   try { write(tmp); } catch (e) { rmSync(tmp, { recursive: true, force: true }); throw e; }
   rmSync(old, { recursive: true, force: true });
   if (existsSync(dir)) renameSync(dir, old);
-  renameSync(tmp, dir);
+  try { renameSync(tmp, dir); } catch (e) {
+    // M6c M5: a failed swap puts the old skill back rather than leaving it in a dot folder Pi skips.
+    if (existsSync(old)) renameSync(old, dir);
+    rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
   rmSync(old, { recursive: true, force: true });
 }

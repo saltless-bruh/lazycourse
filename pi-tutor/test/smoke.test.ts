@@ -436,6 +436,30 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
     } finally { process.env.PI_TUTOR_DEVDOCS = saved; server.close(); }
   });
 
+  it("/tutor-start offline with docs on disk says it could not check, not 'already current' (M6c M4)", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { server, base } = await mirror();
+    const saved = process.env.PI_TUTOR_DEVDOCS;
+    process.env.PI_TUTOR_DEVDOCS = base;
+    try {
+      const root = mkdtempSync(join(tmpdir(), "pitutor-offdocs-"));
+      const b = await boot({ cwd: root });
+      b.execOut["python3"] = { stdout: "Python 3.14.8\n", stderr: "", code: 0 };
+      await b.commands["tutor-docs"].handler("python", b.ctx); // docs on disk
+      process.env.PI_TUTOR_DEVDOCS = "http://127.0.0.1:9"; // refused: offline
+      b.replies.push(
+        JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
+        JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.py", run_cmd: "python3 src/main.py" }),
+      );
+      b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
+      await b.commands["tutor-start"].handler("python", b.ctx);
+      const docs = b.notes.filter((n) => /^python docs/.test(n));
+      expect(docs.at(-1)).toMatch(/offline.*docs on disk/);
+      expect(b.notes.some((n) => /already current/.test(n))).toBe(false);
+    } finally { process.env.PI_TUTOR_DEVDOCS = saved; server.close(); }
+  });
   it("/tutor-docs for a language without DevDocs support says the tutor relies on model knowledge", async () => {
     const b = await boot();
     await b.commands["tutor-docs"].handler("cobol", b.ctx);
