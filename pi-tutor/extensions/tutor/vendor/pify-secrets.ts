@@ -1,5 +1,6 @@
 // Vendored from @pify/memory 0.13.1 src/secrets.ts (MIT, © 2026 pifydev; see LICENSE-pify-memory).
-// lazycourse changes: SecretMatch inlined; NVIDIA `nvapi-` keys added (spec 2026-10-13 §7.1).
+// lazycourse changes: SecretMatch inlined; NVIDIA `nvapi-` keys added (spec 2026-10-13 §7.1);
+// every match of a pattern is checked (upstream checks the first only, so a placeholder hid a real key).
 export interface SecretMatch {
   label: string;
   /** Redacted preview of what matched, safe to show. */
@@ -150,11 +151,12 @@ function previewOf(raw: string): string {
 export function scanForSecrets(text: string, literals: readonly string[] = envLiterals()): SecretMatch[] {
   const matches: SecretMatch[] = [];
   for (const { label, re, valueGroup } of PATTERNS) {
-    const m = re.exec(text);
-    if (!m) continue;
-    const value = valueGroup ? (m[valueGroup] ?? m[0]) : m[0];
-    if (isPlaceholderValue(value)) continue; // a doc example / template, not a secret
-    matches.push({ label, preview: previewOf(m[0]) });
+    for (const m of text.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`))) {
+      const value = valueGroup ? (m[valueGroup] ?? m[0]) : m[0];
+      if (isPlaceholderValue(value)) continue; // a doc example / template, not a secret
+      matches.push({ label, preview: previewOf(m[0]) });
+      break;
+    }
   }
   // A value the environment holds is a credential by definition, shape or no shape.
   for (const literal of literals) {

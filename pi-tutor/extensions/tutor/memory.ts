@@ -33,7 +33,8 @@ export function rememberTool(s: MemoryScope) {
     async execute(_id, params) {
       const type = String(params.type) as MemoryType;
       if (!MEMORY_TYPES.includes(type)) throw new Error(`type must be one of ${MEMORY_TYPES.join(", ")}`);
-      const text = String(params.text ?? "").trim();
+      // M6b #58: one line, and no section tags, so a saved fact cannot reshape the next prompt.
+      const text = String(params.text ?? "").replace(/<\/?tutor_memory>/gi, "").replace(/\s*\n\s*/g, " ").trim();
       if (!text) throw new Error("the memory text is empty");
       if (text.length > MAX_MEMORY_CHARS) throw new Error(`a memory is at most ${MAX_MEMORY_CHARS} characters; save one fact`);
       assertNoSecrets(text);

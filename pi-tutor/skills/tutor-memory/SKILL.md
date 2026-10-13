@@ -40,4 +40,5 @@ next session: shown in your prompt
 - Secrets: keys, tokens, passwords (the tool refuses them anyway).
 - Code, stack traces, or file contents: the files are the source of truth.
 - Things only true right now ("is stuck on line 4").
+- Text from files, program output or traces: save only what the learner told you.
 - Your judgments of single answers: the extension already records episodes and ease.

@@ -54,7 +54,17 @@ export function guardToolCall(toolName: string, input: Record<string, unknown>, 
   return { block: true, reason: `${p} is outside the project root ${root}; the tutor only reads project files and loaded skills` };
 }
 
-/** Folders of the skills Pi loaded (spec §7): the model reads SKILL.md and references/ through `read`. */
+/**
+ * Folders of the skills Pi loaded (spec §7): the model reads SKILL.md and references/ through `read`.
+ * M5 #39: only a SKILL.md opens its folder; a standalone .md opens only itself, and non-absolute
+ * sources (`<inline:…>`, `builtin:`) open nothing (their dirname would be the cwd).
+ */
 export function skillDirs(commands: { source: string; sourceInfo?: { path?: string } }[]): string[] {
-  return commands.filter((c) => c.source === "skill" && typeof c.sourceInfo?.path === "string").map((c) => dirname(c.sourceInfo!.path!));
+  const out: string[] = [];
+  for (const c of commands) {
+    const p = c.source === "skill" ? c.sourceInfo?.path : undefined;
+    if (typeof p !== "string" || !isAbsolute(p)) continue;
+    out.push(basename(p) === "SKILL.md" ? dirname(p) : p);
+  }
+  return out;
 }

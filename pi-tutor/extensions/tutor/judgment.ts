@@ -13,8 +13,10 @@ export interface Judgment {
 }
 
 const VALUES: readonly JudgmentValue[] = ["correct", "partial", "wrong", "none"];
-const TAGGED = /```tutor-judgment[ \t]*\r?\n([\s\S]*?)```/g;
-const LOOSE = /```(?:json)?[ \t]*\r?\n([\s\S]*?)```/g;
+// Same fence forms as compliance.checkReply (M6c parity): ``` or ~~~, indented up to 3 spaces,
+// closed by a bare fence line of the same kind (or longer).
+const TAGGED = /^ {0,3}(`{3,}|~{3,})tutor-judgment[ \t]*\r?\n([\s\S]*?)^ {0,3}\1[`~]*[ \t]*$/gm;
+const LOOSE = /^ {0,3}(`{3,}|~{3,})(?:json)?[ \t]*\r?\n([\s\S]*?)^ {0,3}\1[`~]*[ \t]*$/gm;
 const BARE = /\{[^{}]*"judgment"[^{}]*\}\s*$/;
 
 function strings(v: unknown): string[] {
@@ -35,12 +37,12 @@ export function toJudgment(raw: unknown): Judgment | null {
 }
 
 function fromJson(body: string): Judgment | null {
-  try { return toJudgment(JSON.parse(body.trim())); } catch { return null; }
+  try { return toJudgment(JSON.parse(body.replace(/^ {0,3}/gm, "").trim())); } catch { return null; }
 }
 
 function lastOf(text: string, re: RegExp, accept: (body: string) => boolean = () => true): string | null {
   let body: string | null = null;
-  for (const m of text.matchAll(re)) if (accept(m[1])) body = m[1];
+  for (const m of text.matchAll(re)) if (accept(m[2])) body = m[2];
   return body;
 }
 

@@ -56,3 +56,10 @@ describe("judgment fallbacks (live findings: nemotron)", () => {
     expect(toJudgment({ judgment: "great" })).toBeNull();
   });
 });
+
+describe("M6c: judgment fence parity", () => {
+  it("reads a ~~~ or indented tutor-judgment fence like compliance does", () => {
+    expect(parseJudgment('x\n~~~tutor-judgment\n{"judgment":"wrong"}\n~~~\n')?.judgment).toBe("wrong");
+    expect(parseJudgment('1. x\n   ```tutor-judgment\n   {"judgment":"partial"}\n   ```\n')?.judgment).toBe("partial");
+  });
+});

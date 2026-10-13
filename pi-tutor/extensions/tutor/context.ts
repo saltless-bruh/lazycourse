@@ -32,7 +32,9 @@ export function formatEpisodeContext(ep: Episode): string {
   ];
   if (ep.concept_tags.length) out.push(`concepts: ${ep.concept_tags.join(", ")}`);
   if (ep.trigger.kind === "run") {
-    out.push("trace (last lines of the output):", "```text", ep.trigger.trace, "```",
+    // M6b #58: a fence longer than any backtick run in the trace, so program output cannot close it.
+    const fence = "`".repeat(Math.max(3, ...[...ep.trigger.trace.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+    out.push("trace (last lines of the output):", `${fence}text`, ep.trigger.trace, fence,
       "Read it with the learner: find the error message and the learner's own frame (where depends on the language); the tutor-stack-traces skill has the method.");
   }
   return out.join("\n");

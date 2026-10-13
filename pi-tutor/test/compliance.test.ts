@@ -147,3 +147,9 @@ describe("M6a minors: fence forms", () => {
     expect(checkReply(["~~~", "x".repeat(DIAGRAM_COLS + 1), "~~~", JUDGED].join("\n"), ok)).toContain("wide-diagram");
   });
 });
+
+describe("M6c: closing fence length (M6b #61)", () => {
+  it("a longer closing fence closes the block", () => {
+    expect(checkReply(["```", "a", "`````", "See INDEX.md.", JUDGED].join("\n"), ok)).toEqual(["internals"]); // prose after the fence is still checked
+  });
+});

@@ -39,7 +39,7 @@ export function guardJudgment(j: Judgment, prompt: string): Judgment {
  * close on a bare fence line; an inline ``` in a sentence is not one, and an unclosed fence (a
  * truncated reply) runs to the end of the text.
  */
-const FENCES = /^ {0,3}(`{3,}|~{3,})([^\n`~]*)\r?\n([\s\S]*?)(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
+const FENCES = /^ {0,3}(`{3,}|~{3,})([^\n`~]*)\r?\n([\s\S]*?)(?:^ {0,3}\1[`~]*[ \t]*$|(?![\s\S]))/gm; // M6b #61: a longer closing fence closes too
 const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done|\[episode\]|\[workflow\]|\[tutor-check\]|\brung \d)/i;
 /**
  * Fences quoting a document (spec/tasks.md, README) are not code and may be wide; their content is

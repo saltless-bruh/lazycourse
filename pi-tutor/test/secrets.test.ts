@@ -22,3 +22,9 @@ describe("secret scanner (vendored @pify/memory 0.13.1 + nvapi)", () => {
     expect(msg).not.toContain(NV);
   });
 });
+
+describe("M6c: every match (M6b #59)", () => {
+  it("checks every match of a pattern, not just the first", () => {
+    expect(scanForSecrets("token = changeme_placeholder and later token = Qw7Rt2Yp9LkZx8Vb3Nm", []).map((m) => m.label)).toContain("assigned credential");
+  });
+});

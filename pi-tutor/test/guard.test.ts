@@ -109,3 +109,14 @@ describe("memory tools (spec 2026-10-13 §7.1)", () => {
     expect(guardToolCall("memory_write", { text: "x" }, "/tmp")?.block).toBe(true);
   });
 });
+
+describe("M6c: skill paths (M5 #39)", () => {
+  it("a SKILL.md opens its folder; a standalone .md or a non-absolute source opens only itself", () => {
+    expect(skillDirs([
+      { source: "skill", sourceInfo: { path: "/s/tutor-x/SKILL.md" } },
+      { source: "skill", sourceInfo: { path: "/notes/tip.md" } },
+      { source: "skill", sourceInfo: { path: "<inline:abc>" } },
+      { source: "skill", sourceInfo: { path: "builtin:foo" } },
+    ])).toEqual(["/s/tutor-x", "/notes/tip.md"]);
+  });
+});
