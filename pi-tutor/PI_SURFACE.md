@@ -11,6 +11,11 @@ Re-verify every line when bumping versions.
   read-only shell filter). Observed 2026-10-11: with bash allowed the model wrote a file via `echo > x.txt`.
 - nvim-tutor starts Pi with `PI_TUTOR=1` (`jobstart` `env`, merged into the inherited env).
   Without it the extension's default export returns before registering anything.
+- Golden check (M6a, `npm run golden`): `pi -p --no-session --mode json -ne -e <ext> --skill <dir> --tools …
+  [--model …] <messages…>`. `-ne` keeps the installed pi-tutor package out (verified 2026-10-13: without
+  it the package's `/tutor-status` handles the message; with it the text reaches the model). Print mode
+  runs extension commands passed as messages (`session.prompt` → `_tryExecuteExtensionCommand`,
+  agent-session.js:1527). JSON events used: `message_end` (assistant `content[].text`) and `agent_end`.
 
 ## Pi extension API (src/core/extensions/types.ts)
 - `export default function (pi: ExtensionAPI)`
@@ -40,7 +45,17 @@ Re-verify every line when bumping versions.
   `description` (≤ 1024); malformed or description-less skills are not loaded. Global root
   `$PI_CODING_AGENT_DIR/skills` (default `~/.pi/agent/skills`).
 - `BeforeAgentStartEvent.prompt` (types.d.ts:711): `[tutor]`-prefixed prompts do not open a chat episode.
-- `AssistantMessage.stopReason` (`pi-ai` types.d.ts:313): only `"stop"` turns are judged.
+- `AssistantMessage.stopReason` (`pi-ai` types.d.ts:313): `"stop"` turns are judged from their text;
+  `"aborted"`, `"error"` and `"length"` turns are ignored.
+- A tool the model invents never reaches `tool_call` (`pi-agent-core` agent-loop.js:486 answers
+  "Tool X not found"). It still appears in `turn_end` as `{ type: "toolCall", id, name, arguments }`
+  (`pi-ai` `ToolCall`); a `tutor-judgment`/`tutor_judgment` call's arguments are taken as the judgment,
+  at most one judgment per agent run.
+- `ExtensionCommandContext.hasUI`: `/tutor-plan` and `/tutor-architect <q>` start a turn only when true.
+  `pi.sendUserMessage` is fire-and-forget (agent-session.js:2712); in print mode the caller's next
+  prompt would throw "Agent is already processing" (agent-session.js:1552).
+- `parseFrontmatter(text)` → `{ frontmatter, body }` (`dist/utils/frontmatter.d.ts`, exported from the
+  package index): role files `agents/*.md` and learned skills.
 - `ctx.modelRegistry.complete(ctx.model, { systemPrompt, messages: [UserMessage] })` → `AssistantMessage`
   (model-registry.d.ts:40; pattern from examples/extensions/qna.ts). Used by `/tutor-start` for the
   suggester and the scaffold; non-`"stop"` `stopReason` is an error (`errorMessage` shown).
@@ -66,6 +81,7 @@ Re-verify every line when bumping versions.
   conversation before each LLM call (types.d.ts:666, 1058, 1176); used to keep only the newest
   `tutor_editor` custom message. `CustomMessage` is `{ role: "custom", customType, content, display }`.
 - Custom entry types we write: `tutor_signal`, `tutor_level { level }`, `tutor_judgment` (Judgment),
+  `tutor_role { role }`, `tutor_workflow { task, step, started, done? }`, `tutor_check { issues }`,
   `tutor_episode` (Episode, written on open / judgment / reband / close; the last open one is restored).
 - System prompt section key: `tutor`. `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.

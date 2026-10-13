@@ -1,7 +1,7 @@
 # nvim-tutor: an AI that teaches you to code, inside LazyVim
 
 **Date:** 2026-10-07
-**Status:** living document (rev 8, 2026-10-13: M5-finish DevDocs references at installed
+**Status:** living document (rev 9, 2026-10-13: M6a roles & rules per `2026-10-13-tutor-roles-packs-exams-design.md` §2-§4, plan `plans/2026-10-13-m6a-roles-rules.md`; rev 8, 2026-10-13: M5-finish DevDocs references at installed
 versions replace fixed source lists; rev 7, 2026-10-12: M5 skill reads in the guard, JSON source
 overrides, learned skills global, ease applied at first judgment; rev 6, 2026-10-12: M4 interview choices, switch into the
 project after scaffold, ease formula; rev 5, 2026-10-12: M3 stuck rules, chat episodes,

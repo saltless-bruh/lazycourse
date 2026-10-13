@@ -56,7 +56,17 @@ skill from it in Pi's editor — edit and submit to keep, Esc to discard. Concep
 you know start one hint rung lower. Pin a docs version: `~/.config/nvim-tutor/sources.json` (`{ "python": "python~3.12" }`). See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
-- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start, M5 knowledge/learn)
+- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start, M5 knowledge/learn, M6a roles & rules)
+
+Milestone 6a (2026-10-13): every tutor reply follows one structure: **What's happening**
+(a narrow diagram), **Why**, **Example**, **What to try**, **In short**. The extension checks
+each reply (code above the hint rung, diagrams wider than 40 columns, missing judgment) and
+tells the model what to fix on the next turn; a `correct` judgment needs your reasoning.
+
+- `:TutorPlan <task id>` walks a task from `spec/tasks.md` through the six-step design recipe
+  (Find, Shape, Examples, Steps, Map, Build); the widget shows `plan k/6`.
+- `:TutorArchitect [question|off]` switches to the architecture professor (components, data
+  flow, trade-offs, no code) until `off` or `:TutorPlan`.
 
 ## How it works
 
@@ -84,6 +94,9 @@ you know start one hint rung lower. Pin a docs version: `~/.config/nvim-tutor/so
 ## Tests
 
 - `cd pi-tutor && npm test` (unit + a real headless Neovim for the link tests)
+- `cd pi-tutor && npm run golden`: golden transcripts through the real `pi -p` and your configured
+  model (network; `GOLDEN_MODEL=provider/id` to try another). Evidence of how well a model follows
+  the style, ladder and judgment rules; not part of `npm test`.
 - `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
 
 ## Setup
@@ -98,7 +111,8 @@ return {
   {
     dir = "<repo>/nvim-tutor",
     name = "nvim-tutor",
-    cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn" },
+    cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn",
+            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect" },
     keys = {
       { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
       { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },
