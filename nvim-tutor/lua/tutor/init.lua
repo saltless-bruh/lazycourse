@@ -123,6 +123,8 @@ function M.setup(user_opts)
   cmd("TutorDocs", slash("/tutor-docs"), { nargs = "?" })
   cmd("TutorPlan", slash("/tutor-plan"), { nargs = 1 })
   cmd("TutorArchitect", slash("/tutor-architect"), { nargs = "?" })
+  cmd("TutorFeedback", slash("/tutor-feedback"), { nargs = 1,
+    complete = function() return { "too-long", "too-vague", "too-much-help", "good" } end })
   cmd("TutorReload", slash("/reload"), {})
 end
 

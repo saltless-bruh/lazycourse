@@ -13,9 +13,10 @@ import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { rememberTool, recallTool, memorySnapshot } from "./memory.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, rungCap, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
-import { Profile, type ProjectRow } from "./profile.js";
+import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
+import { FEEDBACK_KINDS, activeFeedback, feedbackRung, formatFeedback } from "./feedback.js";
 import { runStart } from "./start.js";
 import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
@@ -143,6 +144,8 @@ export default function (pi: ExtensionAPI): void {
   pi.registerTool(recallTool(memoryScope));
   /** Frozen at session start (spec §7.1): a stable prompt within a session; new memories show next session. */
   let memoryNote: string | null = null;
+  /** The learner's feedback history (spec §7 #7): the profile's per language in a project, else this session's. */
+  let feedbackHistory: FeedbackKind[] = [];
 
   function paint() {
     state.rung = episode ? episode.rung : startRung(bandFor(level()));
@@ -259,6 +262,11 @@ export default function (pi: ExtensionAPI): void {
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
     memoryNote = null;
     if (profile) { const p = profile; profileWrite(() => { memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); }); }
+    feedbackHistory = [];
+    if (project && profile) { const p = profile, lang = project.language; profileWrite(() => { feedbackHistory = p.feedback(lang).map((f) => f.kind); }); }
+    else for (const e of ctx.sessionManager.getBranch()) {
+      if (e.type === "custom" && e.customType === "tutor_feedback") feedbackHistory.push((e.data as { kind: FeedbackKind }).kind);
+    }
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
@@ -309,6 +317,8 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     if (workflow) parts.push(formatWorkflowContext(workflow, band));
     if (lastIssues.length) parts.push(formatCheck(lastIssues));
+    const fb = formatFeedback(activeFeedback(feedbackHistory));
+    if (fb) parts.push(fb);
     parts.push(replyReminder(run.rung, workflow !== null));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
@@ -456,6 +466,24 @@ export default function (pi: ExtensionAPI): void {
       let gone = false;
       profileWrite(() => { gone = p.forget(id); });
       ctx.ui.notify(gone ? `forgot memory #${id}` : `memory #${id} was already gone`, "info");
+    },
+  });
+
+  pi.registerCommand("tutor-feedback", {
+    description: "Tell the tutor how it is teaching: too-long | too-vague | too-much-help | good",
+    handler: async (args, ctx) => {
+      const kind = args.trim() as FeedbackKind;
+      if (!FEEDBACK_KINDS.includes(kind)) { ctx.ui.notify("usage: /tutor-feedback too-long|too-vague|too-much-help|good", "warning"); return; }
+      const rung = episode ? episode.rung : null;
+      if (episode && roleNamed(activeRole).ladder) {
+        const next = feedbackRung(kind, episode.rung, rungCap(episode.band));
+        if (next !== episode.rung) { episode = { ...episode, rung: next }; pi.appendEntry("tutor_episode", episode); }
+      }
+      feedbackHistory.push(kind);
+      pi.appendEntry("tutor_feedback", { kind, rung });
+      if (project && profile) { const p = profile, proj = project; profileWrite(() => p.recordFeedback({ kind, language: proj.language, project: proj.path, rung }, Date.now())); }
+      paint();
+      ctx.ui.notify(kind === "good" ? "thanks — the tutor keeps going like this" : `noted: ${kind}; the tutor adjusts from the next reply`, "info");
     },
   });
 

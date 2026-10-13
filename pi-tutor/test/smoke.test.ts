@@ -723,3 +723,47 @@ describe("tutor memory in the extension (spec 2026-10-13 §7.1)", () => {
     expect(left.content[0].text).toBe("#2 [project] uses pytest");
   });
 });
+
+describe("/tutor-feedback in the extension", () => {
+  it("logs to the profile in a project, adjusts the open episode's rung, and notes the style next turn", async () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-fb-"));
+    const file = pjoin(dir, "profile.sqlite");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const seed = Profile.open(file); seed.saveLanguage("python", 50, {}, 1); seed.addProject("python", dir, "p", 1); seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ cwd: dir });
+      await turn(b.events, b.ctx, REASONED, judged("correct")); // chat episode, rung 2 → 3
+      await b.commands["tutor-feedback"].handler("too-much-help", b.ctx);
+      expect(episodes(b.entries).at(-1)).toMatchObject({ rung: 2 });
+      await b.commands["tutor-feedback"].handler("too-long", b.ctx);
+      const next = await turn(b.events, b.ctx, "hi", judged("none"));
+      expect(next.message?.content).toMatch(/\[tutor-feedback\][\s\S]*too long/);
+      await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+      const check = Profile.open(file);
+      expect(check.feedback("python").map((f) => [f.kind, f.rung])).toEqual([["too-much-help", 3], ["too-long", 2]]);
+      check.close();
+      const again = await boot({ cwd: dir }); // a new session in the same project keeps the note
+      const t = await turn(again.events, again.ctx, "hi", judged("none"));
+      expect(t.message?.content).toMatch(/too long/);
+      await again.commands["tutor-feedback"].handler("good", again.ctx);
+      const cleared = await turn(again.events, again.ctx, "hi", judged("none"));
+      expect(cleared.message?.content ?? "").not.toContain("[tutor-feedback]");
+      await again.events["session_shutdown"]({ type: "session_shutdown" }, again.ctx);
+    } finally {
+      if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
+    }
+  });
+  it("/tutor-feedback edge cases: bad kind warns; no episode or architect role logs without a rung change", async () => {
+    const b = await boot();
+    await b.commands["tutor-feedback"].handler("meh", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/usage: \/tutor-feedback too-long\|too-vague\|too-much-help\|good/);
+    await b.commands["tutor-feedback"].handler("too-vague", b.ctx); // no episode open
+    expect(b.entries.filter((e) => e.type === "tutor_feedback").at(-1)?.data).toMatchObject({ kind: "too-vague" });
+    await turn(b.events, b.ctx, REASONED, judged("none"));
+    const before = episodes(b.entries).length;
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    await b.commands["tutor-feedback"].handler("too-much-help", b.ctx);
+    expect(episodes(b.entries).length).toBe(before);
+  });
+});
