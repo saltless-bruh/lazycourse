@@ -256,6 +256,36 @@ describe("M6c: link hardening", () => {
     expect(await link.openLocation(join(h.root, "e.py"), 2)).toBe(true);
     expect(await link.cursorLine()).toBe(2);
   }, 20000);
+  it("openLocation checks the realpath, not the spelling: ../ and an in-root symlink out are refused (M6c M1)", async () => {
+    const { link, h } = await setup();
+    const outside = join(h.root + "-out");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "x.py"), "secret\n");
+    symlinkSync(join(outside, "x.py"), join(h.root, "notes.py"));
+    try {
+      expect(await link.openLocation(`${h.root}/../../etc/hosts`, 1)).toBe(false);
+      expect(await link.openLocation(join(h.root, "notes.py"), 1)).toBe(false);
+      expect(await link.raw.call("nvim_buf_get_name", [0])).not.toMatch(/notes\.py|hosts/);
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  }, 20000);
+  it("a buffer reached through an in-root symlink to a file outside is not pushed or pulled (M6c pane #1)", async () => {
+    const { payloads, link, h } = await setup();
+    const outside = join(h.root + "-out2");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "x.py"), "secret = 1\n");
+    symlinkSync(join(outside, "x.py"), join(h.root, "notes.py"));
+    try {
+      await link.raw.command(`edit ${join(h.root, "notes.py")}`);
+      await link.raw.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 1, message = "boom" }})`);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(payloads.filter((p) => p.kind === "diagnostics")).toHaveLength(0);
+      expect(await link.currentFile()).toBeNull();
+      expect(await link.bufferText()).toBeNull();
+      expect(await link.snapshot("full")).toBeNull();
+      const r = (await link.raw.lua(SNAPSHOT_LUA, ["full", 20, link.root])) as { lines?: string[] };
+      expect(r.lines).toBeUndefined();
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  }, 20000);
   it("cursorLine is null when the editor buffer is outside the root (M1b #5)", async () => {
     const { link } = await setup();
     await link.raw.command("edit /etc/hosts");

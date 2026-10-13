@@ -12,8 +12,8 @@ local root_prefix = opts.root .. "/"
 local function in_root(buf)
   local p = path_of(buf)
   if p == "" then return false end
-  local r = vim.fn.resolve(p)
-  return vim.startswith(r, root_prefix) or vim.startswith(p, root_prefix)
+  -- Resolved path only: an in-root symlink to a file outside is outside (M6c pane #1).
+  return vim.startswith(vim.fn.resolve(p), root_prefix)
 end
 local function notify(payload)
   local ok = pcall(vim.rpcnotify, chan, "tutor", payload)

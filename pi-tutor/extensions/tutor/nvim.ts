@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import type { NeovimClient } from "neovim";
@@ -16,6 +16,13 @@ if (!process.env.NVIM_NODE_LOG_FILE) {
   try { mkdirSync(dirname(p), { recursive: true }); process.env.NVIM_NODE_LOG_FILE = p; } catch {
     process.env.NVIM_NODE_LOG_FILE = join(tmpdir(), `pi-tutor-nvim-${process.getuid?.() ?? "u"}.log`);
   }
+}
+
+/** realpath of `p`; for a file not on disk yet, its directory's realpath plus the name. */
+function realPath(p: string): string {
+  const abs = resolve(p);
+  try { return realpathSync(abs); } catch { /* missing file */ }
+  try { return join(realpathSync(dirname(abs)), basename(abs)); } catch { return abs; }
 }
 
 export type TutorPayload =
@@ -67,7 +74,7 @@ local w = __editor_win()
 local b = vim.api.nvim_win_get_buf(w)
 local path = vim.api.nvim_buf_get_name(b)
 local prefix = root .. "/"
-local inside = path ~= "" and (vim.startswith(path, prefix) or vim.startswith(vim.fn.resolve(path), prefix))
+local inside = path ~= "" and vim.startswith(vim.fn.resolve(path), prefix) -- realpath only (M6c pane #1)
 if not inside then return { path = path } end
 local cur = vim.api.nvim_win_get_cursor(w)[1]
 local from, to = 1, -1
@@ -124,11 +131,10 @@ export class NvimLink {
     }
   }
 
+  /** Inside the root after realpath (CLAUDE.md): `root/../x` and an in-root symlink pointing out are not. */
   private isInRoot(name: string): boolean {
     if (!name) return false;
-    const prefix = this.root + "/";
-    if (name.startsWith(prefix)) return true;
-    try { return realpathSync(name).startsWith(prefix); } catch { return false; }
+    return realPath(name).startsWith(this.root + "/");
   }
 
   private async currentBufIfInRoot(): Promise<number | null> {
