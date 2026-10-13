@@ -813,3 +813,34 @@ describe("final review I3: forgetting takes effect at once", () => {
     }
   });
 });
+
+describe("M6c: turn and episode bookkeeping", () => {
+  it("restoreLevel ignores levels outside 0..100 or not integers (M2 #13)", async () => {
+    const lv = (level: unknown) => ({ type: "custom", customType: "tutor_level", data: { level } });
+    const b = await boot({ branch: [lv(30), lv(-5), lv(250), lv(42.5), lv(Number.NaN)] });
+    expect(b.widgets["tutor"]?.[0]).toContain("lvl 30");
+  });
+  it("a new session without a project keeps the current level (M2 #14)", async () => {
+    const b = await boot();
+    await b.commands["tutor-level"].handler("80", b.ctx);
+    await b.events["session_start"]({ type: "session_start", reason: "new" }, { ...b.ctx, sessionManager: { getBranch: () => [] } });
+    expect(b.widgets["tutor"]?.[0]).toContain("lvl 80");
+  });
+  it("a steered message resets the run: judged against the new text, and judgeable (M6a #56)", async () => {
+    const b = await boot();
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "what does this do?", systemPromptOptions: opts }, b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
+    await b.events["input"]({ type: "input", text: REASONED, source: "interactive", streamingBehavior: "steer" }, b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
+    expect(b.entries.filter((e) => e.type === "tutor_judgment").map((e) => (e.data as { judgment: string }).judgment)).toEqual(["none", "correct"]);
+  });
+  it("an idle input does not touch the run (before_agent_start follows)", async () => {
+    const b = await boot();
+    expect(await b.events["input"]({ type: "input", text: "hi", source: "interactive" }, b.ctx)).toBeUndefined();
+  });
+  it("/tutor-memory shows each memory's language (M6b #62)", async () => {
+    const { memoryLine } = await import("../extensions/tutor/memory.js");
+    expect(memoryLine({ id: 3, type: "learner", text: "knows Go", language: "python", project: null, created: 1, updated: 1 })).toBe("#3 [learner] knows Go (python)");
+  });
+});

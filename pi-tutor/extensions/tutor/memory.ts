@@ -57,12 +57,13 @@ export function recallTool(s: MemoryScope) {
       const query = String(params.query ?? "");
       const rows = profileOf(s).recall(query, limit);
       if (rows.length === 0) return result(`no saved memories match "${query}"`);
-      return result(rows.map(line).join("\n"), { ids: rows.map((r) => r.id) });
+      return result(rows.map(memoryLine).join("\n"), { ids: rows.map((r) => r.id) });
     },
   });
 }
 
-function line(r: MemoryRow): string {
+/** `#id [type] text (language)`: tutor_recall results and the /tutor-memory list. */
+export function memoryLine(r: MemoryRow): string {
   return `#${r.id} [${r.type}] ${r.text}${r.language ? ` (${r.language})` : ""}`;
 }
 

@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
-import { boot, episodes, turn, judged, REASONED } from "./fake-pi.js";
+import { boot, episodes, turn, judged, assistant, REASONED } from "./fake-pi.js";
 
 let h: Headless | undefined;
 let nvim: NeovimClient | undefined;
@@ -195,5 +196,54 @@ describe("widget when the editor link ends (M1b #2, M3 #19)", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(seen.filter((l) => /outside nvim|nvim closed|detached/.test(l))).toEqual([]);
     shutdown = undefined;
+  }, 20000);
+});
+
+const h0 = () => mkdtempSync(join(tmpdir(), "pitutor-ease-"));
+
+describe("M6c: episodes against a real Neovim", () => {
+  it("a judgment for a replaced episode leaves the new one alone (M3 #17)", async () => {
+    const b = await linked(); // beginner: error threshold 0
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: opts }, b.ctx); // chat episode
+    await setError("boom"); // replaces it mid-reply
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
+    await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
+  }, 20000);
+  it("display-only filetypes are not languages for /tutor-docs and memory (M5 #38, M6b #57)", async () => {
+    const b = await linked();
+    writeFileSync(join(h!.root, "notes.md"), "# notes\n");
+    await nvim!.command(`edit ${join(h!.root, "notes.md")}`);
+    await turn(b.events, b.ctx, "hi", judged("none")); // snapshot sets state.language = markdown
+    await b.commands["tutor-docs"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/usage: \/tutor-docs <language>/);
+    await nvim!.command(`edit ${join(h!.root, "a.py")}`);
+    await turn(b.events, b.ctx, "hi", judged("none")); // python
+    await b.tools["tutor_remember"].execute("1", { type: "learner", text: "likes short loops" });
+    const saved = await b.tools["tutor_recall"].execute("2", { query: "loops" }) as { content: { text: string }[] };
+    expect(saved.content[0].text).toBe("#1 [learner] likes short loops (python)");
+  }, 20000);
+  it("an eased episode records at least one rung used (M5 #40)", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const file = join(h0(), "profile.sqlite");
+    const seed = Profile.open(file);
+    seed.saveLanguage("python", 10, {}, 1);
+    seed.recordEpisode({ language: "python", project: null, concept_tags: ["dicts"], rungs_used: 1, turns: 1, opened: 1, closed: 2 }, 1);
+    seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = file;
+    try {
+      h = await startHeadlessNvim();
+      const p = Profile.open(file); p.addProject("python", h.root, "x", 1); p.close();
+      const b = await boot({ nvim: h.socket, cwd: h.root });
+      shutdown = () => b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+      await turn(b.events, b.ctx, REASONED, assistant('ok\n```tutor-judgment\n{"judgment":"none","concept_tags":["dicts"],"episode_closed":true}\n```'));
+      await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx); shutdown = undefined;
+      const check = Profile.open(file);
+      expect(check.episodes("python").at(-1)?.rungs_used).toBe(1);
+      check.close();
+    } finally {
+      if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
+    }
   }, 20000);
 });

@@ -10,7 +10,7 @@ import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judg
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, replyReminder, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
-import { rememberTool, recallTool, memorySnapshot } from "./memory.js";
+import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, rungCap, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -40,7 +40,7 @@ function restoreLevel(ctx: ExtensionContext): number | undefined {
   for (const e of ctx.sessionManager.getBranch()) {
     if (e.type === "custom" && e.customType === "tutor_level") {
       const l = (e.data as { level?: unknown } | undefined)?.level;
-      if (typeof l === "number") level = l;
+      if (typeof l === "number" && Number.isInteger(l) && l >= 0 && l <= 100) level = l; // M2 #13
     }
   }
   return level;
@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI): void {
    * whether a judgment was already applied. One judgment per run: a model that "calls" tutor-judgment
    * and then writes the fence must not move the rung twice.
    */
-  let run: { prompt: string; rung: number | null; judged: boolean } | null = null;
+  let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string } | null = null;
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
   let lastIssues: Issue[] = [];
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
@@ -141,7 +141,9 @@ export default function (pi: ExtensionAPI): void {
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
   // Spec 2026-10-13 §7.1: the model's two memory tools, scoped to this session's project.
-  const memoryScope = { profile: () => profile, language: () => project?.language ?? null, project: () => project?.path ?? null, now: Date.now };
+  /** The language to use outside a recorded project: the buffer's filetype, if it is a pack language (M5 #38). */
+  const editorLanguage = () => (state.language && LANGS[state.language] ? state.language : null);
+  const memoryScope = { profile: () => profile, language: () => project?.language ?? editorLanguage(), project: () => project?.path ?? null, now: Date.now };
   pi.registerTool(rememberTool(memoryScope));
   pi.registerTool(recallTool(memoryScope));
   /** Frozen at session start (spec §7.1): a stable prompt within a session; new memories show next session. */
@@ -232,7 +234,7 @@ export default function (pi: ExtensionAPI): void {
       language: proj.language,
       project: proj.path,
       concept_tags: closed.concept_tags,
-      rungs_used: closed.rung - startRung(closed.band) + 1,
+      rungs_used: Math.max(1, closed.rung - startRung(closed.band) + 1), // M5 #40: an eased start can sit below the band's
       turns: closed.turns, opened: closed.opened, closed: closedAt,
     }, score));
   }
@@ -278,7 +280,8 @@ export default function (pi: ExtensionAPI): void {
     const proj = profile?.projectAt(realCwd(ctx.cwd));
     project = proj ?? null;
     if (proj) state.language = proj.language;
-    state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? DEFAULT_LEVEL;
+    // M2 #14: a new session (/new) without a project keeps the level this Pi already has.
+    state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? state.level ?? DEFAULT_LEVEL;
     memoryNote = null;
     if (profile) { const p = profile; profileWrite(() => { memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); }); }
     feedbackHistory = [];
@@ -328,7 +331,7 @@ export default function (pi: ExtensionAPI): void {
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
     // A learner's chat message opens an episode; our own [tutor] nudges and non-ladder roles do not.
     if (role.ladder && !episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
-    run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false };
+    run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder && episode ? episode.id : undefined };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -358,14 +361,15 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Apply one accepted judgment to the episode and the profile (spec §5). */
-  function applyTurnJudgment(j: Judgment) {
+  function applyTurnJudgment(j: Judgment, episodeId?: string) {
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
     const ladder = roleNamed(activeRole).ladder;
     const inRecipe = workflow !== null && ladder;
     if (ladder) advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
-    if (!ladder || !episode) return;
+    // M3 #17: the reply answered an episode an editor trigger has since replaced.
+    if (!ladder || !episode || (episodeId !== undefined && episode.id !== episodeId)) return;
     if (episode.turns === 0 && project && profile) {
       let known = new Map<string, number>();
       const p = profile, lang = project.language;
@@ -381,6 +385,13 @@ export default function (pi: ExtensionAPI): void {
     if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
   }
 
+  // M6a #56: Pi delivers a message typed mid-reply into the running loop without a new
+  // before_agent_start (agent-session.js:1550-1560), so the run must follow it.
+  pi.on("input", (event) => {
+    if (event.streamingBehavior && run) run = { ...run, prompt: event.text, judged: false };
+    return undefined;
+  });
+
   // Spec §5: take the judgment (fence, fallback, or invented tool call) and apply it once per run.
   pi.on("turn_end", async (event) => {
     const m = event.message;
@@ -394,7 +405,7 @@ export default function (pi: ExtensionAPI): void {
     const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // A judgment may come in a tool-use turn's text too (live check); the first one in the run counts.
     const j = callArgs !== undefined ? toJudgment(callArgs) : parseJudgment(text);
-    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt)); }
+    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId); }
     if (final) {
       if (!cur.judged) state.last = "missing";
       lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder });
@@ -477,9 +488,9 @@ export default function (pi: ExtensionAPI): void {
     description: "List what the tutor remembers about you; pick one to forget it",
     handler: async (_args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
-      const rows = profile.memories({ language: null, limit: 50 });
+      const rows = profile.memories({ language: null, limit: 200 });
       if (rows.length === 0) { ctx.ui.notify("the tutor has not saved any memories yet", "info"); return; }
-      const lines = rows.map((r) => `#${r.id} [${r.type}] ${r.text}`);
+      const lines = rows.map(memoryLine); // M6b #62: with the language
       if (!ctx.hasUI) { ctx.ui.notify(lines.join("\n"), "info"); return; }
       const pick = await ctx.ui.select("Saved memories (Esc to close)", lines);
       if (!pick) return;
@@ -559,7 +570,7 @@ export default function (pi: ExtensionAPI): void {
   pi.registerCommand("tutor-docs", {
     description: "Fetch (or re-fetch) official docs for a language into tutor-<lang>-* skills",
     handler: async (args, ctx) => {
-      const language = (args.trim() || project?.language || state.language || "").toLowerCase();
+      const language = (args.trim() || project?.language || editorLanguage() || "").toLowerCase();
       if (!/^[a-z][a-z0-9+#.-]{0,30}$/.test(language)) { ctx.ui.notify("usage: /tutor-docs <language>", "warning"); return; }
       if ((await fetchDocs(ctx, language, true)) === "fetched") await ctx.reload();
     },
@@ -599,7 +610,7 @@ export default function (pi: ExtensionAPI): void {
       const ep = lastClosedEpisode(branch);
       if (!ep) { ctx.ui.notify("no finished stuck episode to learn from yet", "info"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
-      const language = project?.language ?? (state.language && /^[a-z0-9]+$/.test(state.language) ? state.language : "general");
+      const language = project?.language ?? editorLanguage() ?? "general";
       let draft: Learned;
       try {
         draft = await completeJson(modelComplete(ctx, () => "tutor: drafting a skill…"), systemText("learn"), learnPrompt(language, ep, transcript(branch)), checkLearned);
