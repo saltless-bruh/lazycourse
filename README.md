@@ -79,8 +79,11 @@ search them with `tutor_recall`. Everything lives in your profile (`profile.sqli
 - A failing `:TutorRun` opens a stuck episode carrying the end of the error output; the tutor
   teaches you to read the trace (`tutor-stack-traces` skill).
 - `:TutorFeedback too-long|too-vague|too-much-help|good` tells the tutor how it is doing; it
-  adjusts its style (and the hint level for `too-much-help` / `too-vague`) and keeps that per
-  language until you say `good`.
+  adjusts its style (and the hint level for `too-much-help` / `too-vague`). Inside a project it
+  keeps that per language until you say `good`; outside a project it lasts for the session.
+
+The widget's second line says `outside nvim` when Pi runs without Neovim and `nvim closed` when
+the editor exited; either way it still shows the tutor's state and last judgment.
 
 ## How it works
 

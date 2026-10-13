@@ -97,8 +97,8 @@ The extension, not the model, runs the language's version command once per sessi
 ### 5.2 Reference from DevDocs (replaces M5's fixed source lists)
 
 - Pick the bundle matching the detected version (`python~3.14`, `go`, `lua~5.5`, `typescript`, `node`, `rust`); if there is no exact match, take the nearest lower version, else the newest. The card warns about any mismatch (Rust: bundle 1.98 vs installed 1.90).
-- Download `https://documents.devdocs.io/<slug>/index.json` and `db.json` once per version, in the background with progress (gap #10). Convert HTML to text in chunks without blocking Pi. Write `~/.pi/agent/skills/tutor-<lang>-ref/` containing `SKILL.md` (version, how to look things up), `INDEX.md` (one line per entry → file) and `references/<type>.md` (one file per DevDocs type).
-- Keep the M5 pieces that still fit: the cancellable loader, atomic folder swap, `cachedSkills`, `/tutor-docs`. The fixed `SOURCES` lists are retired, and `sources.json` overrides become a DevDocs slug override.
+- Download `https://documents.devdocs.io/<slug>/index.json` and `db.json` once per version, in the background with progress (gap #10). Convert HTML to text in chunks without blocking Pi. Write `~/.pi/agent/skills/tutor-<lang>-ref/` containing `SKILL.md` (version, how to look things up), `INDEX.md` (one line per entry, ending in `file:line`) and `references/<page>[.n].md` (one file per DevDocs page, split at headings; pages no entry points to are skipped).
+- Keep the M5 pieces that still fit: the cancellable loader, atomic folder swap, `/tutor-docs`. Offline, an existing reference keeps working (M6c). The fixed `SOURCES` lists are retired, and `sources.json` overrides become a DevDocs slug override.
 - Later, frameworks use the same fetcher (Django, React, Flask…), loaded when dependency files mention them.
 
 ### 5.3 Adapted expert skills (option A)

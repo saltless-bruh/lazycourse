@@ -52,6 +52,14 @@ Re-verify every line when bumping versions.
   (`pi-ai` `ToolCall`); a `tutor-judgment`/`tutor_judgment` call's arguments are taken as the judgment,
   at most one judgment per agent run.
 - `ExtensionCommandContext.hasUI`: `/tutor-plan` and `/tutor-architect <q>` start a turn only when true.
+- `pi.on("input", (e: InputEvent) => …)` (types.d.ts:886-903, 1203): `e.text`, `e.streamingBehavior?:
+  "steer" | "followUp"` (undefined when idle). A message typed mid-reply is delivered into the running
+  loop without a new `before_agent_start` (agent-session.js:1550-1560), so the extension resets its
+  per-run state (prompt, judged) there (M6c #56).
+- `@earendil-works/pi-tui` `visibleWidth(str)` (dist/utils.d.ts:16; aliased by Pi's loader): the widget
+  clips by terminal columns. Not `truncateToWidth`: it inserts ANSI resets (probe 2026-10-13).
+- `NvimLink.snapshot` has a 2 s timeout (a busy Neovim leaves the turn without an editor snapshot); the
+  neovim client log is `$XDG_STATE_HOME/pi-tutor/nvim.log` (default `~/.local/state/…`), per user.
   `pi.sendUserMessage` is fire-and-forget (agent-session.js:2712); in print mode the caller's next
   prompt would throw "Agent is already processing" (agent-session.js:1552).
 - `parseFrontmatter(text)` → `{ frontmatter, body }` (`dist/utils/frontmatter.d.ts`, exported from the

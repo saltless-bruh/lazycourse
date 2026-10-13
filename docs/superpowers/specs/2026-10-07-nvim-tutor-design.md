@@ -187,9 +187,9 @@ Rules:
 - The system prompt asks the model to end every turn with a fenced
   `tutor-judgment` JSON block: `{judgment: correct|partial|wrong|none,
   concept_tags: [], task_done_ids: [], episode_closed: bool}`. The
-  `turn_end` hook parses it, strips it from what Neovim displays (Lua
-  hides the block), and applies: `correct` advances one rung, `partial`
-  and `wrong` hold.
+  `turn_end` hook parses it and applies it: `correct` advances one rung,
+  `partial` and `wrong` hold. Pi's TUI shows the block; the widget shows
+  the judgment word (M6c: wording aligned with §11).
 - Rung 5 is never reached from `wrong` or empty. Pro band caps at 4.
   No manual override.
 - Episode state lives in `pi.appendEntry("tutor_episode", ...)` so it
