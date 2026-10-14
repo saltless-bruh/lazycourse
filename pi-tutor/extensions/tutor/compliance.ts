@@ -5,8 +5,15 @@ import { RUNG_NAMES } from "./ladder.js";
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
 
-/** Spec §2 "Narrow diagrams": Pi's pane is ~45 columns. */
+/** Spec §2 "Narrow diagrams": what the prompts ask for, and the limit when the pane width is unknown. */
 export const DIAGRAM_COLS = 40;
+/** pi-tui indents code block lines by `codeBlockIndent` (default two spaces) inside the Markdown width. */
+const CODE_INDENT = 2;
+
+/** Widest diagram line that fits, from the Markdown width Pi renders replies at (probe: 70-col terminal → 68). */
+export function diagramCols(availableWidth: number | undefined): number {
+  return availableWidth === undefined ? DIAGRAM_COLS : Math.max(1, availableWidth - CODE_INDENT);
+}
 /** Replies longer than this many non-blank prose lines need an **In short** line. */
 const SUMMARY_AFTER = 6;
 const TUTOR_PREFIX = "[tutor]";
@@ -54,7 +61,8 @@ function codeAllowed(o: { band: Band; rung: number | null; noCode: boolean }, li
   return o.band === "beginner" && lines <= 3;
 }
 
-export function checkReply(text: string, o: { band: Band; rung: number | null; judged: boolean; noCode: boolean }): Issue[] {
+/** `cols`: the learner's real diagram width (diagramCols); prompts still ask for 40, the check allows what fits. */
+export function checkReply(text: string, o: { band: Band; rung: number | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
   const issues = new Set<Issue>();
   if (!o.judged) issues.add("missing-judgment");
   for (const m of text.matchAll(FENCES)) {
@@ -66,7 +74,7 @@ export function checkReply(text: string, o: { band: Band; rung: number | null; j
       continue;
     }
     if (tag === "" || tag === "text") {
-      if (body.some((l) => Array.from(l).length > DIAGRAM_COLS)) issues.add("wide-diagram");
+      if (body.some((l) => Array.from(l).length > (o.cols ?? DIAGRAM_COLS))) issues.add("wide-diagram");
       continue;
     }
     if (!codeAllowed(o, body.filter((l) => l.trim()).length)) issues.add("code-above-rung");
@@ -78,13 +86,51 @@ export function checkReply(text: string, o: { band: Band; rung: number | null; j
   return [...issues];
 }
 
-const FIX: Record<Issue, string> = {
-  "missing-judgment": "it did not end with the fenced tutor-judgment block (plain text, not a tool call)",
-  "code-above-rung": "it showed code the current rung does not allow; point and explain instead",
-  "wide-diagram": `a diagram line was wider than ${DIAGRAM_COLS} characters; stack it vertically`,
-  "internals": "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
-  "no-summary": "a long reply had no **In short** line",
+const FIX: Record<Issue, (cols: number) => string> = {
+  "missing-judgment": () => "it did not end with the fenced tutor-judgment block (plain text, not a tool call)",
+  "code-above-rung": () => "it showed code the current rung does not allow; point and explain instead",
+  "wide-diagram": (cols) => `a diagram line was wider than the learner's pane (${cols} characters); stack it vertically`,
+  "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
+  "no-summary": () => "a long reply had no **In short** line",
 };
+
+// Rewrites for the machinery checkReply calls "internals" (golden leaks 2026-10-13: "At rung 1, I'll
+// ask…", "(pointer, rung 3)", "line 4597 in INDEX.md"). Prose only: fences hold code, diagrams and
+// the judgment block, which turn_end still parses.
+const META_LINE = /tutor-judgment|step_done|\[tutor-(?:check|reply)\]/i;
+const DOCS = /(\bthe\s+)?`?(?:[\w./-]*\/)?(?:INDEX\.md|SKILL\.md|\.devdocs\.json)(?::\d+(?:-\d+)?)?`?(?:\s+file\b)?/gi;
+const RUNG_LEAD = /^(\s*(?:[-*+]\s+)?)(?:(?:at|on|we'?re (?:at|on)|i'?m (?:at|on)) rung \d\b\s*[,:]?|rung \d\s*[,:—–-])\s*(.?)/i;
+const SENTENCE_START = /^(?:\s*(?:[-*+]|\d+\.)\s+)?(?:\*\*|__)?$|[.!?]\s+$/;
+
+function scrubLine(line: string): string {
+  const l = line
+    .replace(DOCS, (_m, the: string | undefined, at: number, all: string) =>
+      (the?.startsWith("T") || (!the && SENTENCE_START.test(all.slice(0, at))) ? "The" : "the") + " language reference")
+    .replace(/\[episode\]\s*/gi, "")
+    .replace(/\[workflow\]/gi, "design recipe")
+    .replace(/\s*\(rung \d\)/gi, "")
+    .replace(/,\s*rung \d(?=\))/gi, "")
+    .replace(/\(rung \d,\s*/gi, "(")
+    .replace(RUNG_LEAD, (_m, lead: string, next: string) => lead + next.toUpperCase())
+    .replace(/\b(r)ung \d\b/gi, (_m, r: string) => (r === "R" ? "This" : "this") + " stage");
+  return l === line ? line : l.replace(/(\S) {2,}(?=\S)/g, "$1 ");
+}
+
+/** The reply with the tutor's machinery reworded for the learner; the same string when there is none. */
+export function scrubInternals(text: string): string {
+  const prose = (p: string) => p.split("\n").filter((l) => !META_LINE.test(l)).map(scrubLine).join("\n");
+  let out = "", last = 0;
+  for (const m of text.matchAll(FENCES)) {
+    out += prose(text.slice(last, m.index));
+    if (QUOTES.has(m[2].trim().toLowerCase())) {
+      const open = m[0].slice(0, m[0].indexOf("\n") + 1);
+      out += open + scrubInternals(m[3]) + m[0].slice(open.length + m[3].length);
+    } else out += m[0];
+    last = m.index + m[0].length;
+  }
+  out += prose(text.slice(last));
+  return out === text ? text : out;
+}
 
 /**
  * Last line of every turn's hidden context. Golden round 1 (nemotron): 3 of 5 replies dropped the
@@ -99,10 +145,10 @@ export function replyReminder(rung: number | null, recipe = false): string {
 }
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
-export function formatCheck(issues: Issue[]): string {
+export function formatCheck(issues: Issue[], cols = DIAGRAM_COLS): string {
   // Live check: worded as "your last reply", the model blamed the learner's diagram for its own.
   return [
     "[tutor-check] Your own previous reply (the tutor's, not the learner's) broke these rules. Follow them in this reply, and do not mention this note to the learner:",
-    ...issues.map((i) => `- ${FIX[i]}`),
+    ...issues.map((i) => `- ${FIX[i](cols)}`),
   ].join("\n");
 }

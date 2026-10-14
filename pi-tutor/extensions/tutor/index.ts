@@ -8,7 +8,7 @@ import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, replyReminder, type Issue } from "./compliance.js";
+import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
@@ -136,6 +136,8 @@ export default function (pi: ExtensionAPI): void {
   let pendingSteers = 0;
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
   let lastIssues: Issue[] = [];
+  /** Markdown width Pi last rendered a reply at; undefined until the TUI draws one (print mode never does). */
+  let paneWidth: number | undefined;
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
   let activeRole = DEFAULT_ROLE;
   /** Design-recipe workflow in progress (spec 2026-10-13 §4), persisted as `tutor_workflow` entries. */
@@ -348,7 +350,7 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
-    if (lastIssues.length) parts.push(formatCheck(lastIssues));
+    if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
     parts.push(replyReminder(run.rung, workflow !== null && role.ladder));
@@ -410,6 +412,28 @@ export default function (pi: ExtensionAPI): void {
     run = { ...run, prompt: text, judged: false };
   });
 
+  // Style guards (golden 2026-10-13: "At rung 1, …", "line 4597 in INDEX.md"). The screen shows the
+  // reworded text while it streams; message_end swaps it into the finished reply before turn_end,
+  // the saved session and the model's next context see it. Fences (the judgment block) are kept.
+  pi.registerMarkdownTransformer((md, c) => {
+    if (c.messageType !== "assistant") return md;
+    paneWidth = c.availableWidth;
+    return scrubInternals(md);
+  });
+  pi.on("message_end", (event) => {
+    const m = event.message;
+    if (m.role !== "assistant") return;
+    let changed = false;
+    const content = m.content.map((c) => {
+      if (c.type !== "text") return c;
+      const text = scrubInternals(c.text);
+      if (text === c.text) return c;
+      changed = true;
+      return { ...c, text };
+    });
+    return changed ? { message: { ...m, content } } : undefined;
+  });
+
   // Spec §5: take the judgment (fence, fallback, or invented tool call) and apply it once per run.
   pi.on("turn_end", async (event) => {
     const m = event.message;
@@ -426,7 +450,7 @@ export default function (pi: ExtensionAPI): void {
     if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId); }
     if (final) {
       if (!cur.judged) state.last = "missing";
-      lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder });
+      lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
       if (lastIssues.length) pi.appendEntry("tutor_check", { issues: lastIssues });
     }
     paint();

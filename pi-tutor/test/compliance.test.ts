@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder } from "../extensions/tutor/compliance.js";
+import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols } from "../extensions/tutor/compliance.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ judgment, concept_tags: ["t"], task_done_ids: [], episode_closed: false, step_done });
@@ -85,12 +85,67 @@ describe("checkReply after golden round 2", () => {
   });
 });
 
+describe("checkReply at the real pane width", () => {
+  it("a diagram that fits the learner's pane is not wide; one past it is", () => {
+    const line = "a".repeat(60);
+    expect(checkReply(fence("", [line]) + JUDGED, ok)).toContain("wide-diagram"); // no width known: 40
+    expect(checkReply(fence("", [line]) + JUDGED, { ...ok, cols: 66 })).not.toContain("wide-diagram");
+    expect(checkReply(fence("", ["a".repeat(67)]) + JUDGED, { ...ok, cols: 66 })).toContain("wide-diagram");
+  });
+  it("diagramCols: Pi indents code blocks by 2 inside the Markdown width; unknown width falls back to 40", () => {
+    expect(diagramCols(68)).toBe(66); // probe: a 70-column terminal gives availableWidth 68
+    expect(diagramCols(undefined)).toBe(DIAGRAM_COLS);
+    expect(diagramCols(2)).toBe(1);
+  });
+});
+
+describe("scrubInternals (golden leaks, 2026-10-13)", () => {
+  const cases: [string, string][] = [
+    ["At rung 1, I'll ask a question to help you identify the cause.", "I'll ask a question to help you identify the cause."],
+    ["**What to try** (pointer, rung 3): Look at your project files.", "**What to try** (pointer): Look at your project files."],
+    ["**Pointer** (rung 3): Look at `spec/tasks.md:1`.", "**Pointer**: Look at `spec/tasks.md:1`."],
+    ["Rung 2: think about the keys.", "Think about the keys."],
+    ["Since we're at rung 2, I won't show code.", "Since we're at this stage, I won't show code."],
+    ["Check `skills/tutor-python-ref/INDEX.md:12` for dict methods.", "Check the language reference for dict methods."],
+    ["The INDEX.md file lists them.", "The language reference lists them."],
+    ["SKILL.md says to use get.", "The language reference says to use get."],
+    ["See line 4597 in INDEX.md.", "See line 4597 in the language reference."],
+    ["Pinned in .devdocs.json, version 3.12.", "Pinned in the language reference, version 3.12."],
+    ["[episode] You seem stuck on line 3.", "You seem stuck on line 3."],
+    ["The [workflow] says step 2.", "The design recipe says step 2."],
+  ];
+  it.each(cases)("%s", (input, want) => {
+    expect(scrubInternals(input)).toBe(want);
+    expect(checkReply(scrubInternals(input) + JUDGED, ok)).not.toContain("internals");
+  });
+  it("drops lines that talk about the judgment block or the tutor's notes", () => {
+    const t = ["Good thinking.", "When you finish, I'll set `step_done: true`.", "I'll add the tutor-judgment block below.", "Per [tutor-check], fixed.", "Try it."].join("\n");
+    expect(scrubInternals(t)).toBe("Good thinking.\nTry it.");
+  });
+  it("leaves fences alone (code, diagrams, the judgment block) but cleans a markdown quote", () => {
+    const code = fence("python", ["# rung 3 INDEX.md", "x = 1"]);
+    const diagram = fence("", ["rung 3 ──▶ INDEX.md"]);
+    expect(scrubInternals(code + "\n" + diagram + JUDGED)).toBe(code + "\n" + diagram + JUDGED);
+    expect(scrubInternals(fence("markdown", ["At rung 2, read INDEX.md."]))).toBe(fence("markdown", ["Read the language reference."]));
+  });
+  it("returns clean text unchanged (the same string)", () => {
+    const t = "**What's happening**: the index of a list starts at 0.\n**In short**: count from 0." + JUDGED;
+    expect(scrubInternals(t)).toBe(t);
+  });
+  it("cleans a reply still streaming (an unclosed fence runs to the end)", () => {
+    expect(scrubInternals("At rung 1, look here:\n```\nrung 1")).toBe("Look here:\n```\nrung 1");
+  });
+});
+
 describe("formatCheck", () => {
   it("is a [tutor-check] block naming each break", () => {
     const t = formatCheck(["wide-diagram", "missing-judgment"]);
     expect(t.startsWith("[tutor-check]")).toBe(true);
     expect(t).toMatch(/40 characters/);
     expect(t).toMatch(/tutor-judgment/);
+  });
+  it("names the learner's real pane width when it is known", () => {
+    expect(formatCheck(["wide-diagram"], 66)).toMatch(/66 characters/);
   });
   it("says the breaks are the tutor's own and must not reach the learner (live: model blamed the learner)", () => {
     const t = formatCheck(["wide-diagram"]);

@@ -510,13 +510,53 @@ describe("compliance in the turn loop", () => {
   });
   it("records rule breaks and quotes them to the model on the next turn", async () => {
     const b = await boot();
-    await turn(b.events, b.ctx, "hi", assistant("See INDEX.md line 40.\n```\n" + "x".repeat(60) + "\n```"));
+    await turn(b.events, b.ctx, "hi", assistant("Some prose.\n```\n" + "x".repeat(60) + "\n```"));
     const check = b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data as { issues: string[] };
-    expect(check.issues).toEqual(expect.arrayContaining(["missing-judgment", "wide-diagram", "internals"]));
+    expect(check.issues).toEqual(expect.arrayContaining(["missing-judgment", "wide-diagram"]));
     const next = await turn(b.events, b.ctx, "ok", judged("none"));
     expect(next.message?.content).toContain("[tutor-check]");
     const after = await turn(b.events, b.ctx, "ok", judged("none"));
     expect(after.message?.content).not.toContain("[tutor-check]"); // a clean reply clears it
+  });
+});
+
+describe("style guards: internals reworded, diagrams checked at the real pane width", () => {
+  const reply = "At rung 1, see `skills/tutor-python-ref/INDEX.md:12`.\n```tutor-judgment\n{\"judgment\":\"none\"}\n```";
+  it("message_end rewrites the tutor's machinery in the reply that is saved, judged and checked", async () => {
+    const b = await boot();
+    const m = assistant(reply);
+    await turn(b.events, b.ctx, "what is a dict?", m);
+    expect((m.content[0] as { text: string }).text).toBe("See the language reference.\n```tutor-judgment\n{\"judgment\":\"none\"}\n```");
+    expect(b.entries.filter((e) => e.type === "tutor_judgment").at(-1)?.data).toMatchObject({ judgment: "none" }); // the fence survives
+    expect(b.entries.some((e) => e.type === "tutor_check")).toBe(false);
+  });
+  it("message_end leaves clean replies, tool calls and other roles alone", async () => {
+    const b = await boot();
+    const end = (message: unknown) => b.events["message_end"]({ type: "message_end", message }, b.ctx);
+    expect(await end(assistant("The index of a list starts at 0."))).toBeUndefined();
+    expect(await end({ role: "user", content: "At rung 1 INDEX.md" })).toBeUndefined();
+    const call = { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Reading INDEX.md now." }, { type: "toolCall", id: "1", name: "read", arguments: { path: "INDEX.md" } }] };
+    const r = (await end(call)) as { message: typeof call };
+    expect(r.message.content).toEqual([{ type: "text", text: "Reading the language reference now." }, call.content[1]]);
+    expect(r.message.role).toBe("assistant");
+  });
+  it("the screen shows the reworded reply while it streams; learner text is untouched", async () => {
+    const b = await boot();
+    const [t] = b.transformers;
+    expect(t("At rung 2, read INDEX.md", { messageType: "assistant", isStreaming: true, availableWidth: 68 })).toBe("Read the language reference");
+    expect(t("rung 2 INDEX.md", { messageType: "user", isStreaming: false, availableWidth: 68 })).toBe("rung 2 INDEX.md");
+  });
+  it("a diagram that fits the rendered pane is not a break; the note names the pane width", async () => {
+    const b = await boot();
+    const [t] = b.transformers;
+    const diagram = (n: number) => judged("none").content[0].text + "\n```\n" + "x".repeat(n) + "\n```";
+    t("hi", { messageType: "assistant", isStreaming: false, availableWidth: 68 });
+    await turn(b.events, b.ctx, "hi", assistant(diagram(60)));
+    expect(b.entries.some((e) => e.type === "tutor_check")).toBe(false);
+    await turn(b.events, b.ctx, "hi", assistant(diagram(67)));
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toEqual({ issues: ["wide-diagram"] });
+    const next = await turn(b.events, b.ctx, "ok", judged("none"));
+    expect(next.message?.content).toContain("(66 characters)");
   });
 });
 

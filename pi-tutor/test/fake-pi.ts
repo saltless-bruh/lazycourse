@@ -25,7 +25,9 @@ export function fakePi() {
   const execOut: Record<string, { stdout: string; stderr: string; code: number }> = {};
   const skills: { path: string }[] = [];
   const tools: Record<string, { execute: (...a: unknown[]) => Promise<unknown> }> = {};
+  const transformers: ((md: string, c: { messageType: string; isStreaming: boolean; availableWidth: number }) => string)[] = [];
   const pi = {
+    registerMarkdownTransformer: (t: (typeof transformers)[number]) => { transformers.push(t); },
     registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) => { tools[t.name] = t; },
     on: (name: string, h: Handler) => { events[name] = h; return () => {}; },
     registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
@@ -34,7 +36,7 @@ export function fakePi() {
     exec: async (command: string) => ({ ...(execOut[command] ?? { stdout: "", stderr: `${command}: not found`, code: 127 }), killed: false }),
     getCommands: () => skills.map((s) => ({ name: "skill:x", source: "skill", sourceInfo: { path: s.path } })),
   };
-  return { pi, events, commands, entries, sent, skills, execOut, tools };
+  return { pi, events, commands, entries, sent, skills, execOut, tools, transformers };
 }
 
 export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
@@ -99,6 +101,11 @@ export const REASONED = "I think the loop stops early because range excludes the
 export async function turn(events: Record<string, Handler>, ctx: unknown, prompt: string, ...messages: unknown[]) {
   const opts = { sections: {} as Record<string, string> };
   const r = (await events["before_agent_start"]({ type: "before_agent_start", prompt, systemPromptOptions: opts }, ctx)) as { message?: { content: string } } | undefined;
-  for (const message of messages) await events["turn_end"]({ type: "turn_end", message }, ctx);
+  for (const message of messages) {
+    // Pi swaps a message_end replacement into the same object before turn_end (agent-session.js _replaceMessageInPlace).
+    const r = (await events["message_end"]?.({ type: "message_end", message }, ctx)) as { message?: object } | undefined;
+    if (r?.message) { for (const k of Object.keys(message as object)) delete (message as Record<string, unknown>)[k]; Object.assign(message as object, r.message); }
+    await events["turn_end"]({ type: "turn_end", message }, ctx);
+  }
   return Object.assign(opts, { message: r?.message }); // sections + the hidden per-turn context
 }

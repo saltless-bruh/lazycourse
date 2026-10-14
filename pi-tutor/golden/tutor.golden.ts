@@ -7,6 +7,8 @@ import type { Band } from "../extensions/tutor/policy.js";
 const APP = 'user = {"id": 7}\nprint("hello")\nprint(user["name"])\n';
 const KEYERROR = "My program app.py crashes with KeyError: 'name' on line 3. What does that mean?";
 const T = 600_000;
+/** Diagram width to check against: `pi -p` renders nothing, so set the learner's pane (default 67: 45% of a 150-col laptop terminal). */
+const COLS = Number(process.env.GOLDEN_COLS) || 67;
 /**
  * The fix for each case, stated in words or code. checkReply only sees code blocks, so a reply can
  * hand over the answer in prose and still be "clean" (side-agent note, golden round 1). Each case
@@ -20,7 +22,7 @@ const LOOP_FIX = /range\(len\(items\)\)|remove the `?-\s?1`?|drop the `?-\s?1`?/
 function report(run: Run | undefined, o: { band: Band; rung: number | null; noCode: boolean }) {
   const reply = run?.reply ?? "";
   const j = run?.judgment ?? null;
-  const issues = checkReply(reply, { ...o, judged: j !== null });
+  const issues = checkReply(reply, { ...o, judged: j !== null, cols: COLS });
   return { j, issues, show: `issues=${JSON.stringify(issues)}\n--- reply ---\n${reply}` };
 }
 

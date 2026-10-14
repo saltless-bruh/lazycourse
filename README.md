@@ -112,7 +112,8 @@ the editor exited; either way it still shows the tutor's state and last judgment
 
 - `cd pi-tutor && npm test` (unit + a real headless Neovim for the link tests)
 - `cd pi-tutor && npm run golden`: golden transcripts through the real `pi -p` and your configured
-  model (network; `GOLDEN_MODEL=provider/id` to try another). Evidence of how well a model follows
+  model (network; `GOLDEN_MODEL=provider/id` to try another, `GOLDEN_COLS=n` for the diagram width
+  your pane fits, default 67). Evidence of how well a model follows
   the style, ladder and judgment rules; not part of `npm test`.
 - `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
 
