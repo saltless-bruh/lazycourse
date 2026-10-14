@@ -107,8 +107,9 @@ Re-verify every line when bumping versions.
   `--mode json` output (probe 2026-10-14, Pi 1.1.0: `turn_end` and the JSON `message_end` both had the
   replaced text). Used to reword internals in assistant replies (compliance.scrubInternals).
 - `pi.registerMarkdownTransformer((markdown, { messageType, isStreaming, availableWidth }) => string)`
-  (types.d.ts:1128-1141, 1228): interactive TUI only, display only, called on every render including
-  while streaming. `availableWidth` is the Markdown content width (terminal minus `paddingX` 1 each
+  (types.d.ts:1128-1141, 1228): interactive TUI only, display only; pi-tui caches the result by text
+  and width (markdown.js:185), so it reruns on each streaming update and on resize. Only
+  `AssistantMessageComponent` passes `"assistant"` (thinking is `"assistant-thinking"`). `availableWidth` is the Markdown content width (terminal minus `paddingX` 1 each
   side; probe: 70-col tmux → 68); code block lines are indented by `codeBlockIndent` (default 2, pi-tui
   markdown.js:393). Used for the screen rewording and the real diagram width.
 - `ctx.sessionManager.getBranch()` (ReadonlySessionManager): custom entries are

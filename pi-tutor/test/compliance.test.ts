@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols } from "../extensions/tutor/compliance.js";
-import type { Judgment } from "../extensions/tutor/judgment.js";
+import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ judgment, concept_tags: ["t"], task_done_ids: [], episode_closed: false, step_done });
 const fence = (tag: string, lines: string[]) => "```" + tag + "\n" + lines.join("\n") + "\n```";
@@ -121,6 +121,50 @@ describe("scrubInternals (golden leaks, 2026-10-13)", () => {
   it("drops lines that talk about the judgment block or the tutor's notes", () => {
     const t = ["Good thinking.", "When you finish, I'll set `step_done: true`.", "I'll add the tutor-judgment block below.", "Per [tutor-check], fixed.", "Try it."].join("\n");
     expect(scrubInternals(t)).toBe("Good thinking.\nTry it.");
+  });
+});
+
+describe("scrubInternals never costs a judgment or touches the learner's things (review 4dbf4f4)", () => {
+  const J = '{"judgment":"correct","concept_tags":["loops"],"episode_closed":false,"step_done":true}';
+  it.each([
+    ["bare trailing object", `Good work.\n\n${J}`],
+    ["fence opened mid-line", "Good. ```tutor-judgment\n" + J + "\n```"],
+    ["json fence opened mid-line", "Judgment: ```json\n" + J + "\n```"],
+    ["fence indented 4 spaces", "Good.\n\n    ```tutor-judgment\n    " + J + "\n    ```"],
+    ["pretty-printed bare object", 'Good.\n\n{\n  "judgment": "correct",\n  "step_done": true\n}'],
+    ["pretty-printed, step_done in the middle", 'Good.\n\n{\n  "judgment": "correct",\n  "step_done": true,\n  "concept_tags": []\n}'],
+    ["prose mention", 'Here is my tutor-judgment: {"judgment":"partial"}'],
+  ])("%s: parseJudgment reads the same judgment after the scrub", (_name, text) => {
+    expect(parseJudgment(scrubInternals(text))).toEqual(parseJudgment(text));
+    expect(parseJudgment(text)).not.toBeNull();
+  });
+  it("keeps the judgment even when the same reply also leaks a rung", () => {
+    const text = `At rung 2, try again.\n${J}`;
+    expect(parseJudgment(scrubInternals(text))).toEqual(parseJudgment(text));
+  });
+  it("leaves code in a fence indented 4 spaces (inside a list item)", () => {
+    const t = '- Steps:\n  - Read the file:\n\n    ```python\n    path = "skills/tutor-python-ref/INDEX.md"\n    step_done = False\n    ```';
+    expect(scrubInternals(t)).toBe(t);
+  });
+  it.each([
+    "Edit content/_index.md for the home page.",
+    "Compare reindex.md and myskill.md.",
+    "Open `docs/INDEX.md` and add a link.",
+    "The index.md of a website is its home page.",
+    "Write your own SKILL.md for the plugin.",
+    "See https://example.com/docs/INDEX.md for more.",
+    "Read [the docs](docs/INDEX.md).",
+    "Rename index.md file to README.",
+    "Set `step_done = True` when the loop finishes.",
+    "The top rung 2 output energizes the coil.",
+    "The rung 1-2 transition is slow.",
+  ])("leaves the learner's names and prose alone: %s", (t) => {
+    expect(scrubInternals(t)).toBe(t);
+  });
+  it("stays fast on a long unbroken token while a reply streams", () => {
+    const t0 = performance.now();
+    scrubInternals("x".repeat(30000) + " " + "a/".repeat(30000));
+    expect(performance.now() - t0).toBeLessThan(200);
   });
   it("leaves fences alone (code, diagrams, the judgment block) but cleans a markdown quote", () => {
     const code = fence("python", ["# rung 3 INDEX.md", "x = 1"]);

@@ -1,5 +1,5 @@
 import type { Band } from "./policy.js";
-import type { Judgment } from "./judgment.js";
+import { parseJudgment, type Judgment } from "./judgment.js";
 import { RUNG_NAMES } from "./ladder.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
@@ -96,29 +96,45 @@ const FIX: Record<Issue, (cols: number) => string> = {
 
 // Rewrites for the machinery checkReply calls "internals" (golden leaks 2026-10-13: "At rung 1, I'll
 // ask…", "(pointer, rung 3)", "line 4597 in INDEX.md"). Prose only: fences hold code, diagrams and
-// the judgment block, which turn_end still parses.
-const META_LINE = /tutor-judgment|step_done|\[tutor-(?:check|reply)\]/i;
-const DOCS = /(\bthe\s+)?`?(?:[\w./-]*\/)?(?:INDEX\.md|SKILL\.md|\.devdocs\.json)(?::\d+(?:-\d+)?)?`?(?:\s+file\b)?/gi;
-const RUNG_LEAD = /^(\s*(?:[-*+]\s+)?)(?:(?:at|on|we'?re (?:at|on)|i'?m (?:at|on)) rung \d\b\s*[,:]?|rung \d\s*[,:—–-])\s*(.?)/i;
+// the judgment block, which turn_end still parses. Only the observed forms are reworded; anything
+// else stays and the next turn's [tutor-check] names it (review 4dbf4f4: learner paths, PLC "rung").
+const META_LINE = /tutor-judgment|`?step_done`?\s*:\s*(?:true|false)|\[tutor-(?:check|reply)\]/i;
+/** Lines the judgment fallbacks read (mid-line or indented fences, bare JSON) and indented code. */
+const KEEP_LINE = /^(?: {4,}|\t)|`{3}|~{3}|"judgment"|"step_done"/;
+/**
+ * The tutor's own files, spelled as the extension writes them: bare, or under a tutor-* skill or
+ * .pi folder. Starts only after a space or bracket, so URLs, docs/INDEX.md and "your own SKILL.md"
+ * stay; the prefix has no nested ambiguity, so a long token cannot backtrack quadratically.
+ */
+const DOCS = /(?<![\w./~:-]|\b(?:your|my|own|a|an|this|that|their)\s)((?:the|The)\s+)?(`?)((?:[\w.~-]+\/)*)(?:INDEX\.md|SKILL\.md|\.devdocs\.json)(?::\d+(?:-\d+)?)?\2(?:\s+file\b)?/g;
+const RUNG_LEAD = /^(\s*(?:[-*+]\s+)?)(?:(?:at|on|we'?re (?:at|on)|i'?m (?:at|on)) rung \d\b\s*[,:]?|rung \d\s*[,:—–])\s*(.?)/i;
 const SENTENCE_START = /^(?:\s*(?:[-*+]|\d+\.)\s+)?(?:\*\*|__)?$|[.!?]\s+$/;
 
 function scrubLine(line: string): string {
   const l = line
-    .replace(DOCS, (_m, the: string | undefined, at: number, all: string) =>
-      (the?.startsWith("T") || (!the && SENTENCE_START.test(all.slice(0, at))) ? "The" : "the") + " language reference")
+    .replace(DOCS, (m, the: string | undefined, _tick: string, prefix: string, at: number, all: string) => {
+      if (prefix && !/(?:^|\/)(?:tutor-[\w-]*|\.pi)\//.test(prefix)) return m; // the learner's own docs/INDEX.md
+      return (the?.startsWith("T") || (!the && SENTENCE_START.test(all.slice(0, at))) ? "The" : "the") + " language reference";
+    })
     .replace(/\[episode\]\s*/gi, "")
     .replace(/\[workflow\]/gi, "design recipe")
     .replace(/\s*\(rung \d\)/gi, "")
     .replace(/,\s*rung \d(?=\))/gi, "")
     .replace(/\(rung \d,\s*/gi, "(")
     .replace(RUNG_LEAD, (_m, lead: string, next: string) => lead + next.toUpperCase())
-    .replace(/\b(r)ung \d\b/gi, (_m, r: string) => (r === "R" ? "This" : "this") + " stage");
+    .replace(/\b(at|on|to|from) rung \d\b(?![-\d])/gi, (_m, p: string) => `${p} this stage`);
   return l === line ? line : l.replace(/(\S) {2,}(?=\S)/g, "$1 ");
 }
 
-/** The reply with the tutor's machinery reworded for the learner; the same string when there is none. */
+/**
+ * The reply with the tutor's machinery reworded for the learner; the same string when there is none.
+ * It must never cost a judgment: when parseJudgment would read the result differently, the original
+ * text is kept and the [tutor-check] path reports the leak instead.
+ */
 export function scrubInternals(text: string): string {
-  const prose = (p: string) => p.split("\n").filter((l) => !META_LINE.test(l)).map(scrubLine).join("\n");
+  const prose = (p: string) => p.split("\n")
+    .filter((l) => KEEP_LINE.test(l) || !META_LINE.test(l))
+    .map((l) => (KEEP_LINE.test(l) ? l : scrubLine(l))).join("\n");
   let out = "", last = 0;
   for (const m of text.matchAll(FENCES)) {
     out += prose(text.slice(last, m.index));
@@ -129,7 +145,8 @@ export function scrubInternals(text: string): string {
     last = m.index + m[0].length;
   }
   out += prose(text.slice(last));
-  return out === text ? text : out;
+  if (out === text || JSON.stringify(parseJudgment(out)) !== JSON.stringify(parseJudgment(text))) return text;
+  return out;
 }
 
 /**
