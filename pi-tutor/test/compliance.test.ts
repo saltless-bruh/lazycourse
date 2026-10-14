@@ -111,6 +111,8 @@ describe("scrubInternals (golden leaks, 2026-10-13)", () => {
     ["SKILL.md says to use get.", "The language reference says to use get."],
     ["See line 4597 in INDEX.md.", "See line 4597 in the language reference."],
     ["Pinned in .devdocs.json, version 3.12.", "Pinned in the language reference, version 3.12."],
+    ["Look at /home/u/.pi/skills/tutor-py/INDEX.md for it.", "Look at the language reference for it."],
+    ["Look at ~/.pi/agent/skills/tutor-py/SKILL.md first.", "Look at the language reference first."],
     ["[episode] You seem stuck on line 3.", "You seem stuck on line 3."],
     ["The [workflow] says step 2.", "The design recipe says step 2."],
   ];
@@ -158,6 +160,10 @@ describe("scrubInternals never costs a judgment or touches the learner's things 
     "Set `step_done = True` when the loop finishes.",
     "The top rung 2 output energizes the coil.",
     "The rung 1-2 transition is slow.",
+    "Your SKILL.md needs a name field.",
+    "Put our INDEX.md at the root.",
+    "Create SKILL.md in the skill folder.",
+    "We moved from rung 1 to rung 2.",
   ])("leaves the learner's names and prose alone: %s", (t) => {
     expect(scrubInternals(t)).toBe(t);
   });

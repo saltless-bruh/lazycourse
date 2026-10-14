@@ -106,7 +106,7 @@ const KEEP_LINE = /^(?: {4,}|\t)|`{3}|~{3}|"judgment"|"step_done"/;
  * .pi folder. Starts only after a space or bracket, so URLs, docs/INDEX.md and "your own SKILL.md"
  * stay; the prefix has no nested ambiguity, so a long token cannot backtrack quadratically.
  */
-const DOCS = /(?<![\w./~:-]|\b(?:your|my|own|a|an|this|that|their)\s)((?:the|The)\s+)?(`?)((?:[\w.~-]+\/)*)(?:INDEX\.md|SKILL\.md|\.devdocs\.json)(?::\d+(?:-\d+)?)?\2(?:\s+file\b)?/g;
+const DOCS = /(?<![\w./~:-]|\b(?:[Yy]our|[Mm]y|[Oo]ur|[Oo]wn|[Aa]n?|[Tt]his|[Tt]hat|[Tt]heir|[Cc]reate|[Ww]rite|[Ee]dit|[Nn]ew)\s)((?:the|The)\s+)?(`?)(\/?(?:[\w.~-]+\/)*)(?:INDEX\.md|SKILL\.md|\.devdocs\.json)(?::\d+(?:-\d+)?)?\2(?:\s+file\b)?/g;
 const RUNG_LEAD = /^(\s*(?:[-*+]\s+)?)(?:(?:at|on|we'?re (?:at|on)|i'?m (?:at|on)) rung \d\b\s*[,:]?|rung \d\s*[,:—–])\s*(.?)/i;
 const SENTENCE_START = /^(?:\s*(?:[-*+]|\d+\.)\s+)?(?:\*\*|__)?$|[.!?]\s+$/;
 
@@ -122,7 +122,7 @@ function scrubLine(line: string): string {
     .replace(/,\s*rung \d(?=\))/gi, "")
     .replace(/\(rung \d,\s*/gi, "(")
     .replace(RUNG_LEAD, (_m, lead: string, next: string) => lead + next.toUpperCase())
-    .replace(/\b(at|on|to|from) rung \d\b(?![-\d])/gi, (_m, p: string) => `${p} this stage`);
+    .replace(/\b(at|on) rung \d\b(?![-\d])/gi, (_m, p: string) => `${p} this stage`);
   return l === line ? line : l.replace(/(\S) {2,}(?=\S)/g, "$1 ");
 }
 
