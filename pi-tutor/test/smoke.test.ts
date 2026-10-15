@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { fakePi, fakeCtx, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
+import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import extension from "../extensions/tutor/index.js";
-import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile } from "node:fs";
+import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
+import { PY_EXAM } from "./exam-fixtures.js";
 import { tmpdir as tmp } from "node:os";
 import { join as pjoin } from "node:path";
 
@@ -1059,5 +1060,33 @@ describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
     const b = await boot({ cwd: await projectDir("c") });
     await turn(b.events, b.ctx, REASONED, tagged(["Pointer Arithmetic"]));
     expect(lastJudgment(b)).toMatchObject({ concept_tags: ["pointer-arithmetic"] });
+  });
+});
+
+describe("/tutor-exam (spec 2026-10-13 §6)", () => {
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "exam-")), "p.sqlite"); });
+  afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
+  it("small: one model call, files in exam/<id>/, a tutor_exam entry", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    expect(existsSync(pjoin(cwd, "exam", "01-word-frequency", "brief.md"))).toBe(true);
+    const e = b.entries.filter((x) => x.type === "tutor_exam").at(-1)?.data;
+    expect(e).toMatchObject({ id: "01-word-frequency", dir: "exam/01-word-frequency", language: "python", size: "small", limit: 20, concepts: ["dicts", "strings"] });
+    expect(b.notes.at(-1)).toMatch(/exam 01-word-frequency: 20 minutes/);
+  }, 30_000);
+  it("refuses outside a recorded project, for a language with no exams, and while one runs", async () => {
+    const out = await boot();
+    await out.commands["tutor-exam"].handler("", out.ctx);
+    expect(out.notes.at(-1)).toMatch(/exams run inside a project/);
+    const c = await boot({ cwd: await projectDir("c") });
+    await c.commands["tutor-exam"].handler("", c.ctx);
+    expect(c.notes.at(-1)).toMatch(/no exams for c yet/);
+    const b = await boot({ cwd: await projectDir("python"), branch: [{ type: "custom", customType: "tutor_exam", data: { id: "01-x", dir: "exam/01-x", language: "python", topic: null, size: "small", started: Date.now(), limit: 20, concepts: [] } }] });
+    await b.commands["tutor-exam"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/exam 01-x is running/);
   });
 });

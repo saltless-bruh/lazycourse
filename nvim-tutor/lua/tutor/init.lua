@@ -182,6 +182,8 @@ function M.setup(user_opts)
     complete = function() return { "too-long", "too-vague", "too-much-help", "good" } end })
   cmd("TutorThinking", slash("/tutor-thinking"), { nargs = "?",
     complete = function() return { "auto", "show", "hide" } end })
+  cmd("TutorExam", slash("/tutor-exam"), { nargs = "*",
+    complete = function() return { "small", "medium", "check", "off" } end })
   cmd("TutorReload", slash("/reload"), {})
 end
 

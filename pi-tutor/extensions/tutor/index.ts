@@ -26,7 +26,10 @@ import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
-import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, type IndexEntry } from "./packs.js";
+import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakConcepts, type IndexEntry } from "./packs.js";
+import { layout } from "./exam/layout.js";
+import { parseExamArgs, examPrompt, makeExam, LIMIT_MIN } from "./exam/make.js";
+import { restoreExam, type ExamState } from "./exam/state.js";
 import { renderCard, renderEditorCard, renderIndex, indexWanted } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
 import { LANGS, detectVersion, toolchainCache, languageOfFiletype } from "./knowledge/versions.js";
@@ -172,6 +175,8 @@ export default function (pi: ExtensionAPI): void {
   let activeRole = DEFAULT_ROLE;
   /** Design-recipe workflow in progress (spec 2026-10-13 §4), persisted as `tutor_workflow` entries. */
   let workflow: Workflow | null = null;
+  /** The exam in progress (spec 2026-10-13 §6), persisted as `tutor_exam` entries. */
+  let exam: ExamState | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
@@ -346,6 +351,7 @@ export default function (pi: ExtensionAPI): void {
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
+    exam = restoreExam(ctx.sessionManager.getBranch());
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       // Pane review #5: an old link's disconnect can land after /new or /resume connected a new one;
@@ -380,6 +386,15 @@ export default function (pi: ExtensionAPI): void {
     state.connected = false;
   });
 
+  /** The language card for `lang` at `root` (spec §5), shared by every turn and the exam-maker. */
+  async function languageCard(lang: string, root: string): Promise<string | null> {
+    const pack = loadPack(lang);
+    if (!pack) return null;
+    let knows: string[] = [];
+    if (profile) { const p = profile; profileWrite(() => { knows = p.languages(); }); }
+    return renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang), skillsDir: SKILLS_DIR });
+  }
+
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
     const band = bandFor(level());
@@ -401,12 +416,8 @@ export default function (pi: ExtensionAPI): void {
     const pack = lang ? loadPack(lang) : null;
     const editorPack = loadPack("editor");
     const cards: string[] = [];
-    if (lang && pack) {
-      const root = project?.path ?? session?.cwd ?? process.cwd();
-      let knows: string[] = [];
-      if (profile) { const p = profile; profileWrite(() => { knows = p.languages(); }); }
-      cards.push(renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang), skillsDir: SKILLS_DIR }));
-    }
+    const card = lang ? await languageCard(lang, project?.path ?? session?.cwd ?? process.cwd()) : null;
+    if (card) cards.push(card);
     if (editorPack) cards.push(renderEditorCard(editorPack));
     if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");
     const parts: string[] = [];
@@ -605,6 +616,42 @@ export default function (pi: ExtensionAPI): void {
       // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
       if (ctx.hasUI) pi.sendUserMessage(kickoff);
       else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
+    },
+  });
+
+  pi.registerCommand("tutor-exam", {
+    description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons",
+    handler: async (args, ctx) => {
+      const a = parseExamArgs(args);
+      if (a.kind !== "start") { ctx.ui.notify("not yet", "info"); return; } // Task 6
+      if (exam) { ctx.ui.notify(`exam ${exam.id} is running: /tutor-submit, or /tutor-exam off to abandon it`, "warning"); return; }
+      if (!profile || !project) { ctx.ui.notify("exams run inside a project: /tutor-start makes one", "warning"); return; }
+      const proj = project, lang = proj.language, lay = layout(lang);
+      if (!lay) { ctx.ui.notify(`no exams for ${lang} yet`, "warning"); return; }
+      if (workflow) { ctx.ui.notify("finish or stop the design recipe first (/tutor-plan off)", "warning"); return; }
+      if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
+      const vocab = vocabOf(loadPack(lang), loadPack("editor"));
+      let weak: string[] = [];
+      const p = profile;
+      profileWrite(() => { weak = weakConcepts(p.concepts(lang), vocab); });
+      const lvl = level();
+      try {
+        const made = await makeExam({
+          complete: modelComplete(ctx, () => "tutor: writing your exam…"),
+          exec: (c, a2, o) => pi.exec(c, a2, o),
+          system: `${rolePrompt(roleNamed("exam-maker"))}\n\n${systemText("exam-make")}`,
+          prompt: examPrompt({ language: lang, level: lvl, band: bandFor(lvl), size: a.size, topic: a.topic, weak, card: (await languageCard(lang, proj.path)) ?? "", naming: lay.naming }),
+          language: lang, root: proj.path, vocab, size: a.size, topic: a.topic,
+        });
+        setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
+        exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts };
+        pi.appendEntry("tutor_exam", exam);
+        paint();
+        ctx.ui.notify(`exam ${made.id}: ${exam.limit} minutes. Brief: ${made.dir}/brief.md · write ${made.dir}/${lay.stub} · :TutorExam check · :TutorSubmit`, "info");
+        try { await link?.openInEditor(join(proj.path, made.dir, "brief.md")); } catch { /* the notice names the file */ }
+      } catch (e) {
+        ctx.ui.notify(e instanceof Cancelled ? "exam cancelled" : `exam failed: ${e instanceof Error ? e.message : String(e)}`, e instanceof Cancelled ? "info" : "error");
+      }
     },
   });
 

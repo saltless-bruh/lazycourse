@@ -13,7 +13,7 @@ describe("roles", () => {
     expect(() => parseRole("no frontmatter")).toThrow(/name/);
   });
   it("ships the coding tutor (ladder) and the architect (no ladder, no code)", () => {
-    expect([...roles().keys()].sort()).toEqual(["architect", "coding-tutor"]);
+    expect([...roles().keys()].sort()).toEqual(["architect", "coding-tutor", "exam-maker"]);
     expect(roleNamed(DEFAULT_ROLE).ladder).toBe(true);
     const a = roleNamed("architect");
     expect(a.ladder).toBe(false);
