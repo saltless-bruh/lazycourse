@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parseSkillHeader } from "../extensions/tutor/learn.js";
@@ -36,7 +36,8 @@ describe("bundled skills", () => {
 });
 
 /** M7 pack skills: same header rules; a diagram is optional, but any diagram line stays ≤ 40 columns. */
-const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook", "tutor-editor-cookbook"];
+const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook", "tutor-editor-cookbook",
+  "tutor-python-expert", "tutor-rust-expert", "tutor-go-expert", "tutor-typescript-expert", "tutor-lua-expert"];
 describe("pack skills load in Pi", () => {
   it.each(PACK_SKILLS)("%s: name matches folder, description says when to use it, narrow diagrams", (name) => {
     const h = parseSkillHeader(read(name));
@@ -71,6 +72,27 @@ describe("cards (spec §5)", () => {
     const p = loadPack(lang)!;
     for (const k of ["**Format:**", "**Names:**", "**Errors:**", "**Layout:**", "**Test:**", "**Pitfalls:**"]) expect(p.body, k).toContain(k);
     expect(p.tags.length).toBeGreaterThanOrEqual(12);
+  });
+});
+
+describe("expert skills (spec §5.3)", () => {
+  const ADAPTED: Record<string, string> = { python: "python-pro", rust: "rust-engineer", go: "golang-pro", typescript: "typescript-pro" };
+  it.each(Object.entries(ADAPTED))("tutor-%s-expert credits %s, carries its LICENSE and records upstream", (lang, up) => {
+    const dir = join(SKILLS, `tutor-${lang}-expert`);
+    const text = readFileSync(join(dir, "SKILL.md"), "utf8");
+    // Agent Skills front matter allows extra data only under `metadata` (skill-creator quick_validate).
+    expect(text).toMatch(new RegExp(`^metadata:\\n  upstream: "fullstack-dev-skills/${up}@\\d+\\.\\d+\\.\\d+ \\(skill [\\d.]+, commit [0-9a-f]{7}\\)"$`, "m"));
+    expect(text).toMatch(/^license: MIT$/m);
+    expect(text).toContain(`Adapted from ${up}`);
+    expect(readFileSync(join(dir, "LICENSE"), "utf8")).toMatch(/^MIT License/);
+    expect(readdirSync(join(dir, "references")).length).toBeGreaterThan(0);
+    expect(text).toMatch(/never write their line/);
+  });
+  it("tutor-lua-expert exists and is ours", () => {
+    const text = read("tutor-lua-expert");
+    expect(text).not.toMatch(/upstream:/);
+    expect(text).toMatch(/never write their line/);
+    expect(readdirSync(join(SKILLS, "tutor-lua-expert", "references")).length).toBeGreaterThanOrEqual(4);
   });
 });
 
