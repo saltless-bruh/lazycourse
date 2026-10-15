@@ -35,7 +35,9 @@ Re-verify every line when bumping versions.
   `guard.ts` mirrors it. Re-check on every Pi bump.
 - `pi.exec(command, args, { timeout })` → `{ stdout, stderr, code, killed }` (types.d.ts:1256, exec.d.ts): the
   extension (never the model) runs `python3 --version`, `rustc --version`, `go version`, `tsc --version`,
-  `lua -v` to pick the DevDocs bundle.
+  `lua -v` to pick the DevDocs bundle. M7: the same commands (plus `node --version` when `tsc` is
+  missing) run once per language and project root on the first turn that needs the language card,
+  cached for the life of the Pi, with a 6 s ceiling of our own on top of `timeout`.
 - `pi.getCommands()` → `SlashCommandInfo[]`; skills appear as `{ source: "skill", sourceInfo: { path: <SKILL.md> } }`
   regardless of `enableSkillCommands` (agent-session.js:2694). `guard.ts` allows `read/grep/find/ls` inside
   `dirname(path)` of each, because skills load through the `read` tool.
@@ -125,7 +127,8 @@ Re-verify every line when bumping versions.
   `tutor_role { role }`, `tutor_workflow { task, step, started, done? }`, `tutor_check { issues }`,
   `tutor_feedback { kind, rung }`, `tutor_episode` with a `run` trigger `{ cmd, code, trace }` (M6b),
   `tutor_episode` (Episode, written on open / judgment / reband / close; the last open one is restored).
-- System prompt section key: `tutor`. `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
+- System prompt section keys: `tutor`, `tutor_memory`, and `tutor_lang` (M7: the language card and the
+  editor card, set every turn in `before_agent_start`). `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.
 
 ## Neovim (via `neovim` npm client over `$NVIM`)

@@ -41,6 +41,8 @@ export function formatWorkflowContext(w: Workflow, band: Band): string {
   return [
     `[workflow] design recipe for ${w.task}: step ${w.step}/${STEPS.length} ${STEPS[w.step - 1]}`,
     `artifact: ${ARTIFACT[w.step - 1]}`,
+    // M7: the language card names the cookbook skill; its recipes are indexed by these plain steps.
+    ...(STEPS[w.step - 1] === "Map" ? ["Open the cookbook skill the language card lists and match each of the learner's steps to a recipe; show the recipe's example, not their code."] : []),
     MODE[band],
     "The learner produces the artifact; set step_done true in the judgment only when they finished it. The tutor-design-recipe skill has the method.",
   ].join("\n");

@@ -94,6 +94,16 @@ the editor exited; either way it still shows the tutor's state and last judgment
 - **Hint ladder.** When you're stuck, the tutor starts with a question. Each reply where you reason correctly unlocks a more concrete rung: concept, pointer to docs, pseudocode, and finally the line itself. Pro never reaches the last rung.
 - **Project suggestion.** A short interview per language builds a profile. The tutor proposes three projects targeting your weak or unknown concepts and scaffolds `spec/design.md`, `spec/tasks.md`, `spec/requirements.md` with stable task ids.
 - **Knowledge base.** Instructions, skills, and workflows map onto Pi's `AGENTS.md`, `SKILL.md`, and prompt templates. Official docs are fetched into skills per language; you can edit them, and `/tutor-learn` drafts a new skill from a finished stuck episode.
+- **Language packs** (Python, Rust, Go, TypeScript, Lua, plus the editor). Every turn carries a short
+  language card: the version installed here and the project's constraint (`pyproject.toml`,
+  `Cargo.toml`, `go.mod`, `package.json`, rockspec), formatter, naming, error style, layout, test
+  command, pitfalls, and the concept tags the tutor may record. An editor card covers the LazyVim
+  keys you need. Skills per language: `tutor-<lang>-cookbook` (a plain step such as "count how often
+  each item appears" → the idiom, on an unrelated example, with bridge lines from the other
+  languages), `tutor-<lang>-expert` (patterns and review checklists; Python, Rust, Go and TypeScript
+  are adapted from [fullstack-dev-skills](https://github.com/Jeffallan/claude-skills) by Jeffallan,
+  MIT, licence kept in each folder) and `tutor-<lang>-ref` (`:TutorDocs`). The design recipe's Map
+  step uses the cookbook.
 
 ## Layout
 
@@ -118,6 +128,15 @@ the editor exited; either way it still shows the tutor's state and last judgment
   model (network; `GOLDEN_MODEL=provider/id` to try another, `GOLDEN_COLS=n` for the diagram width
   your pane fits, default 67). Evidence of how well a model follows
   the style, ladder and judgment rules; not part of `npm test`.
+- `cd pi-tutor && npm run cookbooks`: runs every cookbook example with the toolchains installed here
+  (TypeScript examples are also type-checked, Lua ones also run on LuaJIT); a missing toolchain is
+  skipped.
+- `cd pi-tutor && npm run upstream-diff`: compares the adapted expert skills with a
+  fullstack-dev-skills checkout (default `~/.claude/plugins/marketplaces/fullstack-dev-skills`).
+- `cd pi-tutor && SKILL_EVAL_WORKSPACE=<dir>/iteration-N SKILL_EVAL_BASELINE=<checkout without the
+  packs> npm run skill-evals`: skill-creator test runs, each request with and without the pack
+  skills through the real `pi -p`, written in skill-creator's layout for its benchmark and review
+  page.
 - `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
 
 ## Setup

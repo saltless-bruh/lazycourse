@@ -20,6 +20,9 @@ describe("roles", () => {
     expect(a.command).toBe("tutor-architect");
     expect(a.prompt).toMatch(/never write code/i);
   });
+  it("the coding tutor points at the language card's skills (M7)", () => {
+    expect(roleNamed("coding-tutor").prompt).toMatch(/language card/);
+  });
   it("falls back to the coding tutor for an unknown name", () => {
     expect(roleNamed("nope").name).toBe(DEFAULT_ROLE);
   });

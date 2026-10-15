@@ -27,6 +27,11 @@ describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
     expect(b).toContain("step_done");
     expect(b).toContain("tutor-design-recipe");
   });
+  it("at Map the step points at the language card's cookbook skill (M7)", () => {
+    const atMap = { task: "P1.T1", step: 5, started: 1 };
+    expect(formatWorkflowContext(atMap, "intermediate")).toMatch(/cookbook/);
+    expect(formatWorkflowContext({ ...atMap, step: 3 }, "intermediate")).not.toMatch(/cookbook/);
+  });
   it("accepts task ids like P1.T1 and P2.T3.S1, rejects others", () => {
     for (const id of ["P1", "P1.T1", "P12.T3.S4"]) expect(TASK_ID.test(id)).toBe(true);
     for (const id of ["", "T1", "P1.", "p1.t1", "P1.T1; rm"]) expect(TASK_ID.test(id)).toBe(false);

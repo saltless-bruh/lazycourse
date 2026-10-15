@@ -37,7 +37,7 @@ The learner turns a written task into code one artifact at a time. The tutor ask
 2. Shape: name the inputs and outputs with their types. Artifact: one line such as `argv: list[str] → Command`.
 3. Examples: 2-3 concrete input → output cases, one of them an edge case. They become runnable checks in step 6.
 4. Steps: the job as numbered plain sentences, no code.
-5. Map: each step → the language construct that does it (loop, dict lookup, `match`, …). Use the language's cookbook skill when one is listed.
+5. Map: each step → the language construct that does it (loop, dict lookup, `match`, …). Load the cookbook skill the language card lists (`tutor-<lang>-cookbook`): its recipes are indexed by the same plain steps the learner wrote in step 4, so find each step there and show that recipe's example, never their task.
 6. Build: the learner writes one step, runs it, compares with the examples, then moves to the next step.
 
 Finish a step only when the learner has produced its artifact; then set `step_done` to true in the judgment block. The extension moves the workflow to the next step, and the next `[workflow]` line names it.
