@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseVersion, detectVersion, LANGS, type Exec } from "../extensions/tutor/knowledge/versions.js";
+import { describe, it, expect, vi } from "vitest";
+import { parseVersion, detectVersion, toolchain, LANGS, type Exec } from "../extensions/tutor/knowledge/versions.js";
 import { LANGUAGES } from "../extensions/tutor/start.js";
 
 describe("parseVersion", () => {
@@ -34,7 +34,31 @@ describe("detectVersion", () => {
   });
   it("covers every /tutor-start language with a DevDocs type", () => {
     expect(Object.keys(LANGS).sort()).toEqual([...LANGUAGES].sort());
-    expect(LANGS.typescript).toEqual({ devdocsType: "typescript", command: "tsc", args: ["--version"] });
+    expect(LANGS.typescript).toEqual({ devdocsType: "typescript", command: "tsc", args: ["--version"], runtime: { command: "node", args: ["--version"], name: "node" } });
+  });
+});
+
+describe("toolchain (spec §5.1)", () => {
+  const ok = (out: string) => async () => ({ stdout: out, stderr: "", code: 0 });
+  it("typescript falls back to the node runtime when tsc is missing", async () => {
+    const exec = async (cmd: string) => cmd === "node" ? { stdout: "v26.11.1\n", stderr: "", code: 0 } : Promise.reject(new Error("ENOENT"));
+    expect(await toolchain("typescript", "/nonexistent", exec)).toEqual({ installed: null, runtime: "node 26.11.1", constraint: null });
+  });
+  it("a language with no runtime entry reports only its own version", async () => {
+    expect(await toolchain("python", "/nonexistent", ok("Python 3.14.8"))).toEqual({ installed: "3.14.8", runtime: null, constraint: null });
+  });
+  it("a version command that never answers gives up after 6 s instead of holding the turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const p = toolchain("python", "/nonexistent", () => new Promise(() => {}));
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(await p).toEqual({ installed: null, runtime: null, constraint: null });
+    } finally { vi.useRealTimers(); }
+  });
+  it("an unknown language is all null and runs nothing", async () => {
+    const exec = vi.fn(ok(""));
+    expect(await toolchain("cobol", "/nonexistent", exec)).toEqual({ installed: null, runtime: null, constraint: null });
+    expect(exec).not.toHaveBeenCalled();
   });
 });
 
