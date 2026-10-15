@@ -1174,3 +1174,24 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     expect(b.notes.at(-1)).toMatch(/after the exam/);
   });
 });
+
+describe("/tutor-progress (gap #8)", () => {
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "prog-")), "p.sqlite"); });
+  afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
+  it("posts the report as a display-only message without starting a turn; only the newest stays in context", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    await b.commands["tutor-progress"].handler("", b.ctx);
+    expect(b.messages.at(-1)).toMatchObject({ message: { customType: "tutor_progress", display: true, content: expect.stringContaining("**python**") }, options: { triggerTurn: false } });
+    const msg = (t: string) => ({ role: "custom", customType: "tutor_progress", content: t, display: true, timestamp: 1 });
+    const r = b.events["context"]({ type: "context", messages: [msg("old"), { role: "user", content: "hi", timestamp: 2 }, msg("new")] }) as { messages: { content: string }[] };
+    expect(r.messages.map((m) => m.content)).toEqual(["hi", "new"]);
+  });
+  it("with no argument and no project, one section per profile language; unknown words are refused", async () => {
+    const b = await boot();
+    await b.commands["tutor-progress"].handler("", b.ctx);
+    expect(b.messages.at(-1)?.message).toMatchObject({ content: expect.stringMatching(/no progress yet/) });
+    await b.commands["tutor-progress"].handler("../../x", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/usage: \/tutor-progress \[language\]/);
+  });
+});

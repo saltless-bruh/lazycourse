@@ -14,6 +14,7 @@ import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
 import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
 import { writeInRoot } from "./files.js";
+import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
@@ -570,13 +571,14 @@ export default function (pi: ExtensionAPI): void {
   pi.on("tool_call", (event, ctx) => guardToolCall(event.toolName, event.input as Record<string, unknown>, ctx.cwd, skillDirs(pi.getCommands())));
 
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
-  // the newest so stale snapshots do not pile up in the model's context.
+  // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
+  const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
-    let last = -1;
-    msgs.forEach((m, i) => { if (m.role === "custom" && m.customType === "tutor_editor") last = i; });
-    if (last < 0) return;
-    const pruned = msgs.filter((m, i) => !(m.role === "custom" && m.customType === "tutor_editor" && i !== last));
+    const last = new Map<string, number>();
+    msgs.forEach((m, i) => { if (m.role === "custom" && NEWEST_ONLY.has(m.customType)) last.set(m.customType, i); });
+    if (!last.size) return;
+    const pruned = msgs.filter((m, i) => !(m.role === "custom" && NEWEST_ONLY.has(m.customType) && last.get(m.customType) !== i));
     return pruned.length === msgs.length ? undefined : { messages: pruned };
   });
 
@@ -724,6 +726,23 @@ export default function (pi: ExtensionAPI): void {
         ...grade.requirements.map((r) => `- ${r.met ? "✔" : "✘"} ${r.id}`), "", "Next:", ...grade.next_fixes.map((f, n) => `${n + 1}. ${f}`), "", `Full grade: \`${e.dir}/grade.md\``].join("\n");
       pi.sendMessage({ customType: "tutor_grade", content: summary, display: true, details: { exam: e.id, score: s } }, { triggerTurn: false });
       try { await link?.openInEditor(gradePath); } catch { /* the summary names the file */ }
+    },
+  });
+
+  pi.registerCommand("tutor-progress", {
+    description: "Your progress: hint use over time, exams, concept map (/tutor-progress [language])",
+    handler: async (args, ctx) => {
+      if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
+      const arg = args.trim().toLowerCase();
+      if (arg && !/^[a-z][a-z0-9+#.-]{0,30}$/.test(arg)) { ctx.ui.notify("usage: /tutor-progress [language]", "warning"); return; }
+      const p = profile;
+      const editorLang = editorLanguage();
+      let body = "";
+      profileWrite(() => {
+        const langs = arg ? [arg] : project ? [project.language] : editorLang ? [editorLang] : p.languages();
+        body = langs.map((l) => progressReport({ language: l, level: p.language(l)?.level ?? null, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) })).join("\n\n");
+      });
+      pi.sendMessage({ customType: "tutor_progress", content: body || "no progress yet: /tutor-start begins a project", display: true }, { triggerTurn: false });
     },
   });
 
