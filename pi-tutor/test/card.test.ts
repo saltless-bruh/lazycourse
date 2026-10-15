@@ -46,7 +46,7 @@ describe("renderCard", () => {
   });
 });
 
-describe.skip("pack budget (gap #2)", () => {
+describe("pack budget (gap #2)", () => {
   it.each([...LANGUAGES])("%s card renders ≤ 600 tokens with a full header", (lang) => {
     const p = loadPack(lang);
     expect(p, `packs/${lang}/card.md`).not.toBeNull();

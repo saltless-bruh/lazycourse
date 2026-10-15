@@ -36,7 +36,7 @@ describe("bundled skills", () => {
 });
 
 /** M7 pack skills: same header rules; a diagram is optional, but any diagram line stays ≤ 40 columns. */
-const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook"];
+const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook", "tutor-editor-cookbook"];
 describe("pack skills load in Pi", () => {
   it.each(PACK_SKILLS)("%s: name matches folder, description says when to use it, narrow diagrams", (name) => {
     const h = parseSkillHeader(read(name));
@@ -70,6 +70,20 @@ describe("cards (spec §5)", () => {
   it.each(["python", "rust", "go", "typescript", "lua"])("%s card names the essentials and has ≥ 12 concept tags", (lang) => {
     const p = loadPack(lang)!;
     for (const k of ["**Format:**", "**Names:**", "**Errors:**", "**Layout:**", "**Test:**", "**Pitfalls:**"]) expect(p.body, k).toContain(k);
+    expect(p.tags.length).toBeGreaterThanOrEqual(12);
+  });
+});
+
+describe("editor pack", () => {
+  const EDITOR = ["open-file", "search-project", "jump-definition", "see-errors", "fix-suggestion", "rename-symbol", "split-windows", "undo-redo", "run-project", "talk-to-tutor"];
+  it("the editor cookbook covers its catalog with keys and an Ex equivalent", () => {
+    const sections = read("tutor-editor-cookbook").split(/^## /m).slice(1);
+    expect(sections.map((s) => s.split(":")[0].trim())).toEqual(EDITOR);
+    for (const s of sections) { expect(s).toMatch(/^since: \S+/m); expect(s).toMatch(/^1\. /m); expect(s).toMatch(/^Also: /m); }
+  });
+  it("the editor card names the leader and the tutor keys and has ≥ 12 tags", () => {
+    const p = loadPack("editor")!;
+    for (const k of ["Space", "<leader>tt", "<leader>tr", "gd", "]d"]) expect(p.body).toContain(k);
     expect(p.tags.length).toBeGreaterThanOrEqual(12);
   });
 });
