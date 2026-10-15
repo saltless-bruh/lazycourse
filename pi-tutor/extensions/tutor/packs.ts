@@ -40,7 +40,7 @@ export function loadPack(language: string): Pack | null {
 
 export interface IndexEntry { step: string; idiom: string }
 
-/** Each cookbook recipe's step id and its one-line `index:` idiom (the card's always-on index). */
+/** Each cookbook recipe's step id and its one-line `index:` idiom (the idiom index, sent when indexWanted says so). */
 export function cookbookIndex(text: string): IndexEntry[] {
   const out: IndexEntry[] = [];
   for (const sec of text.split(/^## /m).slice(1)) {

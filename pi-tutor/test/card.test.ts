@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parsePack, loadPack, cookbookIndex } from "../extensions/tutor/packs.js";
-import { renderCard, renderEditorCard, renderIndex } from "../extensions/tutor/card.js";
+import { renderCard, renderEditorCard, renderIndex, indexWanted } from "../extensions/tutor/card.js";
 import { estimateTokens } from "../extensions/tutor/prompts.js";
 import { LANGUAGES } from "../extensions/tutor/start.js";
 import type { RefMeta } from "../extensions/tutor/knowledge/reference.js";
@@ -76,6 +76,31 @@ describe("card index (Option A: a short always-on index pointing at the skill fi
     expect(renderIndex({ language: lang, dir: "/d", entries, expertRefs: null })).not.toContain("read-trace"); // tutor-stack-traces is listed by Pi already
     const t = renderIndex({ language: lang, dir: "/home/ple/Documents/personal_Project/AI-Driven_Teaching_Coding_Project/pi-tutor/skills", entries, expertRefs: readdirSync(join(dir, `tutor-${lang}-expert`, "references")) });
     expect(estimateTokens(t)).toBeLessThanOrEqual(250);
+  });
+});
+
+describe("indexWanted (Option 2: the index only where it pays off)", () => {
+  it.each([
+    "How do I count words in Python?",
+    "how can I read a file line by line",
+    "how to sort these by age?",
+    "What's the idiomatic way to group items?",
+    "is there a function that splits a string?",
+    "which method gives a default for a missing key",
+  ])("a how-do-I question gets it: %s", (prompt) => {
+    expect(indexWanted({ prompt, mapStep: false })).toBe(true);
+  });
+  it.each([
+    "why does my loop stop one item early?",
+    "I think the bug is that range excludes the end",
+    "what does KeyError mean?",
+    "hi",
+    "[tutor] stuck signal: error \"boom\" at a.py:1 — how do I fix it",
+  ])("other turns do not: %s", (prompt) => {
+    expect(indexWanted({ prompt, mapStep: false })).toBe(false);
+  });
+  it("the design recipe's Map step always gets it", () => {
+    expect(indexWanted({ prompt: "done with steps", mapStep: true })).toBe(true);
   });
 });
 

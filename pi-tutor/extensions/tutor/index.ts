@@ -25,14 +25,14 @@ import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progre
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
 import { loadPack, normalizeTags, vocabOf, cookbookIndex, type IndexEntry } from "./packs.js";
-import { renderCard, renderEditorCard, renderIndex } from "./card.js";
+import { renderCard, renderEditorCard, renderIndex, indexWanted } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
 import { LANGS, detectVersion, toolchain, type Toolchain } from "./knowledge/versions.js";
 
 /** Bundled pack skills (cookbook, expert) that exist for a language; the card names them (spec §5.4). */
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
 const packSkills = (lang: string) => ["cookbook", "expert"].map((k) => `tutor-${lang}-${k}`).filter((s) => existsSync(join(SKILLS_DIR, s, "SKILL.md")));
-/** The card's always-on index (Option A), built once per language from the bundled skill files. */
+/** The idiom index, built once per language from the bundled skill files; sent only when indexWanted (Option 2). */
 const indexCache = new Map<string, string>();
 function packIndex(lang: string): string {
   if (!indexCache.has(lang)) {
@@ -387,8 +387,6 @@ export default function (pi: ExtensionAPI): void {
       let knows: string[] = [];
       if (profile) { const p = profile; profileWrite(() => { knows = p.languages(); }); }
       cards.push(renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang), skillsDir: SKILLS_DIR }));
-      const index = packIndex(lang);
-      if (index) cards.push(index);
     }
     if (editorPack) cards.push(renderEditorCard(editorPack));
     if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");
@@ -396,6 +394,12 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
+    // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
+    const mapStep = workflow !== null && role.ladder && STEPS[workflow.step - 1] === "Map";
+    if (lang && pack && role.ladder && indexWanted({ prompt: event.prompt, mapStep })) {
+      const index = packIndex(lang);
+      if (index) parts.push(index);
+    }
     if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);

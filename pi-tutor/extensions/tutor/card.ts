@@ -43,7 +43,7 @@ export function renderCard(pack: Pack, info: CardInfo): string {
 }
 
 /**
- * The always-on index (skill-eval iterations 1-2: the model opened a pack skill 3/28 times; Vercel's
+ * The idiom index (skill-eval iterations 1-2: the model opened a pack skill 3/28 times; Vercel's
  * evals: a compressed index in always-on context beat on-demand skills). One line of recipes pointing
  * at the cookbook, one line pointing at the expert. Own allowance: ≤ 250 tokens.
  * `expertRefs`: the expert's references/ file names, or null when there is no expert skill.
@@ -62,6 +62,20 @@ export function renderIndex(o: { language: string; dir: string; entries: IndexEn
     lines.push(`Review or a concept: ${where} (checklist${refs.length ? `; references/: ${refs.join(", ")}` : ""}).`);
   }
   return lines.join("\n");
+}
+
+/** "How do I … / how to … / the idiomatic way / is there a function …": the learner wants an idiom. */
+const HOW_TO = /\bhow (?:do|can|would|should|could) (?:i|you|we)\b|\bhow to\b|\bidiomatic\b|\bwhat(?:'s| is) the (?:\w+ )?way\b|\bis there an? (?:function|method|builtin|way)\b|\bwhich (?:function|method|builtin|module|package|crate)\b/i;
+
+/**
+ * Option 2 (skill-eval iteration 3): an always-on index doubled cookbook reads but lost 4/20 judgment
+ * blocks, so it rides only where it pays off: the design recipe's Map step and how-do-I questions.
+ * Our own [tutor] nudges never get it.
+ */
+export function indexWanted(o: { prompt: string; mapStep: boolean }): boolean {
+  if (o.mapStep) return true;
+  const p = o.prompt.trim();
+  return !p.startsWith("[tutor]") && HOW_TO.test(p);
 }
 
 export function renderEditorCard(pack: Pack): string {

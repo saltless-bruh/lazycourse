@@ -981,8 +981,22 @@ describe("language card in the system prompt (spec §5.4)", () => {
     const t = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(t.sections["tutor_lang"]).toMatch(/^\[language card: python\]\nInstalled: Python 3\.14\.8/);
     expect(t.sections["tutor_lang"]).toContain("[editor card: LazyVim]");
-    // Option A: the index follows the language card, before the editor card.
-    expect(t.sections["tutor_lang"]).toMatch(/\[index: python\][\s\S]*count-items `Counter\(xs\)`[\s\S]*tutor-python-expert\/SKILL\.md[\s\S]*\[editor card: LazyVim\]/);
+    // Option 2 (skill-eval iteration 3): the index is not always-on; a plain turn carries none.
+    expect(t.sections["tutor_lang"]).not.toContain("[index:");
+    expect(t.message?.content).not.toContain("[index:");
+  });
+  it("a how-do-I question gets the index in that turn's hidden context, not the system prompt", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    const t = await turn(b.events, b.ctx, "How do I count words in Python?", judged("none"));
+    expect(t.sections["tutor_lang"]).not.toContain("[index:");
+    expect(t.message?.content).toMatch(/\[index: python\][\s\S]*count-items `Counter\(xs\)`[\s\S]*tutor-python-expert\/SKILL\.md/);
+    const next = await turn(b.events, b.ctx, "ok, I tried it", judged("none"));
+    expect(next.message?.content).not.toContain("[index:");
+  });
+  it("the design recipe's Map step gets the index on every turn of that step", async () => {
+    const b = await boot({ cwd: await projectDir("python"), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 5, started: 1 } }] });
+    const t = await turn(b.events, b.ctx, "done", judged("none"));
+    expect(t.message?.content).toContain("[index: python]");
   });
   it("no language known: only the editor card; a language with no pack: only the editor card", async () => {
     const b = await boot();
