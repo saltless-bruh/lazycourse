@@ -110,9 +110,9 @@ describe("busy profile (final review I4)", () => {
   });
 });
 
-describe("profile v3: settings", () => {
+describe("profile v3+: settings", () => {
   it("is schema v3 and keeps a setting across reopen", () => {
-    expect(SCHEMA_VERSION).toBe(3);
+    expect(SCHEMA_VERSION).toBe(4);
     const path = join(mkdtempSync(join(tmpdir(), "prof-")), "p.sqlite");
     const a = Profile.open(path);
     expect(a.setting("thinking")).toBeNull();
@@ -226,7 +226,7 @@ describe("M7 minors: profile", () => {
       INSERT INTO feedback (kind, language, project, rung, created) VALUES ('too-easy', 'python', NULL, 2, 1);`);
     v2.close();
     const q = Profile.open(file);
-    expect(q.version).toBe(3);
+    expect(q.version).toBe(SCHEMA_VERSION);
     expect(q.language("python")?.level).toBe(30);
     expect(q.recall("loops", 5).map((m) => m.text)).toEqual(["prefers while loops"]);
     expect(q.feedback("python").map((f) => f.kind)).toEqual(["too-easy"]);
@@ -234,5 +234,32 @@ describe("M7 minors: profile", () => {
     q.setSetting("thinking", "hide");
     q.close();
     expect(Profile.open(file).setting("thinking")).toBe("hide");
+  });
+});
+
+describe("profile v4: exams (spec 2026-10-13 §6, M8 D7)", () => {
+  it("records an exam, lists them per language, and folds score/100 into each concept's ease", () => {
+    const q = Profile.open(":memory:");
+    q.recordEpisode({ language: "python", project: null, concept_tags: ["dicts"], rungs_used: 1, turns: 1, opened: 1, closed: 2 }, 1);
+    q.recordExam({ exam: "01-word-freq", project: "/p", language: "python", topic: "dicts", score: 50, minutes: 22.5, late: true, concepts: ["dicts", "loops"], created: 3 });
+    expect(q.exams("python")).toEqual([{ exam: "01-word-freq", project: "/p", language: "python", topic: "dicts", score: 50, minutes: 22.5, late: true, concepts: ["dicts", "loops"], created: 3 }]);
+    expect(q.exams("rust")).toEqual([]);
+    expect(q.concepts("python")).toEqual([
+      { language: "python", tag: "loops", ease: 0.5, episodes: 1 },
+      { language: "python", tag: "dicts", ease: 0.75, episodes: 2 },
+    ]);
+  });
+  it("upgrades a real v3 file in place", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "pitutor-v3-")), "profile.sqlite");
+    const raw = new DatabaseSync(file);
+    raw.exec(`CREATE TABLE schema_version (v INTEGER NOT NULL); INSERT INTO schema_version (v) VALUES (3);`);
+    for (const m of MIGRATIONS.slice(0, 3)) raw.exec(m);
+    raw.exec(`INSERT INTO settings VALUES ('thinking', 'hide');`);
+    raw.close();
+    const q = Profile.open(file);
+    expect(q.version).toBe(4);
+    expect(q.setting("thinking")).toBe("hide");
+    expect(q.exams("python")).toEqual([]);
+    q.close();
   });
 });

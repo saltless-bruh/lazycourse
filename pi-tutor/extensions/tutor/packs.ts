@@ -88,3 +88,8 @@ export function remapConcepts<T extends ConceptEase>(rows: T[], vocab: Vocab | n
   }
   return [...out.values()];
 }
+
+/** Weak concepts (ease < 0.5), weakest first, under the vocabulary's tags (M8: exam-maker, /tutor-start). */
+export function weakConcepts<T extends ConceptEase>(rows: T[], vocab: Vocab | null, n = 8): string[] {
+  return remapConcepts(rows, vocab).filter((c) => c.ease < 0.5).sort((a, b) => a.ease - b.ease).slice(0, n).map((c) => c.tag);
+}

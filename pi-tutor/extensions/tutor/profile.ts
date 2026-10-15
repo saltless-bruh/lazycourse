@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 export interface LanguageRow { name: string; level: number; interview: Record<string, string>; created: number }
 export interface ConceptRow { language: string; tag: string; ease: number; episodes: number }
 export interface ProjectRow { id: number; language: string; path: string; title: string; status: string; created: number }
+export interface ExamRecord { exam: string; project: string | null; language: string; topic: string | null; score: number; minutes: number; late: boolean; concepts: string[]; created: number }
 export interface EpisodeRecord { language: string; project: string | null; concept_tags: string[]; rungs_used: number; turns: number; opened: number; closed: number }
 
 export const MIGRATIONS: string[] = [
@@ -26,6 +27,9 @@ export const MIGRATIONS: string[] = [
      created INTEGER NOT NULL);`,
   // v3 (M7): learner settings that outlast sessions (thinking visibility).
   `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v4 (M8): exams, each folding score/100 into its concepts' ease (spec 2026-10-13 §6).
+  `CREATE TABLE exams (id INTEGER PRIMARY KEY AUTOINCREMENT, exam TEXT NOT NULL, project TEXT, language TEXT NOT NULL, topic TEXT,
+     score INTEGER NOT NULL, minutes REAL NOT NULL, late INTEGER NOT NULL, concepts TEXT NOT NULL, created INTEGER NOT NULL);`,
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -125,10 +129,27 @@ export class Profile {
   recordEpisode(e: EpisodeRecord, score: number | null): void {
     this.db.prepare(`INSERT INTO episodes (language, project, concept_tags, rungs_used, turns, opened, closed) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(e.language, e.project, JSON.stringify(e.concept_tags), e.rungs_used, e.turns, e.opened, e.closed);
-    if (score === null) return;
+    if (score !== null) this.foldEase(e.language, e.concept_tags, score);
+  }
+
+  /** One ease sample per tag, folded as a running mean (episodes and exams). */
+  private foldEase(language: string, tags: string[], score: number): void {
     const up = this.db.prepare(`INSERT INTO concepts (language, tag, ease, episodes) VALUES (?, ?, ?, 1)
       ON CONFLICT(language, tag) DO UPDATE SET ease = (ease * episodes + excluded.ease) / (episodes + 1), episodes = episodes + 1`);
-    for (const tag of e.concept_tags) up.run(e.language, tag, score);
+    for (const tag of tags) up.run(language, tag, score);
+  }
+
+  recordExam(e: ExamRecord): void {
+    this.db.prepare(`INSERT INTO exams (exam, project, language, topic, score, minutes, late, concepts, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(e.exam, e.project, e.language, e.topic, e.score, e.minutes, e.late ? 1 : 0, JSON.stringify(e.concepts), e.created);
+    this.foldEase(e.language, e.concepts, e.score / 100);
+  }
+
+  exams(language: string): ExamRecord[] {
+    return (this.db.prepare("SELECT * FROM exams WHERE language = ? ORDER BY id").all(language) as Row[]).map((r) => ({
+      exam: String(r.exam), project: str(r.project), language: String(r.language), topic: str(r.topic), score: Number(r.score),
+      minutes: Number(r.minutes), late: Number(r.late) === 1, concepts: JSON.parse(String(r.concepts)), created: Number(r.created),
+    }));
   }
 
   episodes(language: string): EpisodeRecord[] {

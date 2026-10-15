@@ -6,7 +6,7 @@ import { runInterview, initialLevel, type Ask, type InterviewAnswers } from "./i
 import { completeJson, type Complete } from "./llm.js";
 import { Cancelled } from "./progress.js";
 import { systemText } from "./prompts.js";
-import { loadPack, vocabOf, remapConcepts } from "./packs.js";
+import { loadPack, vocabOf, weakConcepts } from "./packs.js";
 import { suggestPrompt, checkSuggestions, suggestionLabel } from "./suggest.js";
 import { scaffoldPrompt, checkScaffold, writeScaffold, slugify, isEmptyOrMissing } from "./scaffold.js";
 
@@ -61,8 +61,7 @@ export async function runStart(arg: string, d: StartDeps): Promise<StartResult |
     const suggestions = await completeJson(d.complete, systemText("suggest"), suggestPrompt({
       language, level, band, interview,
       // M7 minor: old free-form rows read under the pack vocabulary's tag.
-      weakConcepts: remapConcepts(d.profile.concepts(language), vocabOf(loadPack(language), loadPack("editor")))
-        .filter((c) => c.ease < 0.5).sort((a, b) => a.ease - b.ease).slice(0, 8).map((c) => c.tag),
+      weakConcepts: weakConcepts(d.profile.concepts(language), vocabOf(loadPack(language), loadPack("editor"))),
       done: d.profile.projects(language).map((p) => p.title),
     }), checkSuggestions);
     d.ui.working();

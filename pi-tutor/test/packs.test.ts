@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePack, loadPack, vocabOf, normalizeTag, normalizeTags, remapConcepts } from "../extensions/tutor/packs.js";
+import { parsePack, loadPack, vocabOf, normalizeTag, normalizeTags, remapConcepts, weakConcepts } from "../extensions/tutor/packs.js";
 
 const CARD = [
   "# Python card", "", "- **Format:** ruff format", "",
@@ -73,5 +73,17 @@ describe("remapConcepts (M7 minor: rows saved before the vocabulary)", () => {
     const rows = [{ language: "c", tag: "pointer-arithmetic", ease: 0.3, episodes: 1 }];
     expect(remapConcepts(rows, vocab)).toEqual(rows);
     expect(remapConcepts(rows, null)).toEqual(rows);
+  });
+});
+
+describe("weakConcepts (M8: exam-maker and /tutor-start share it)", () => {
+  it("remaps, keeps ease < 0.5, weakest first, at most n", () => {
+    const rows = [
+      { language: "python", tag: "keyerror", ease: 0.2, episodes: 1 },
+      { language: "python", tag: "loops", ease: 0.4, episodes: 1 },
+      { language: "python", tag: "strings", ease: 0.9, episodes: 1 },
+    ];
+    expect(weakConcepts(rows, vocabOf(loadPack("python")))).toEqual(["dicts", "loops"]);
+    expect(weakConcepts(rows, vocabOf(loadPack("python")), 1)).toEqual(["dicts"]);
   });
 });
