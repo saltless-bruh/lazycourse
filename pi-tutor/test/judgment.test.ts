@@ -15,9 +15,9 @@ describe("parseJudgment", () => {
     expect(parseJudgment("just prose")).toBeNull();
     expect(parseJudgment("```python\n{\"judgment\":\"correct\"}\n```")).toBeNull(); // a code block is not a judgment (json/untagged fences are: fallbacks)
   });
-  it("returns null on malformed JSON or an unknown judgment value", () => {
+  it("returns null on malformed JSON; an unknown judgment value reads as none (iteration 4)", () => {
     expect(parseJudgment(block("{judgment: correct}"))).toBeNull();
-    expect(parseJudgment(block('{"judgment":"excellent"}'))).toBeNull();
+    expect(parseJudgment(block('{"judgment":"excellent"}'))?.judgment).toBe("none");
     expect(parseJudgment(block('"a string"'))).toBeNull();
   });
   it("uses the last block when there are several", () => {
@@ -53,7 +53,22 @@ describe("judgment fallbacks (live findings: nemotron)", () => {
     expect(isJudgmentTool("tutor_judgment")).toBe(true);
     expect(isJudgmentTool("read")).toBe(false);
     expect(toJudgment({ judgment: "partial", concept_tags: ["x"] })).toEqual({ judgment: "partial", concept_tags: ["x"], task_done_ids: [], episode_closed: false, step_done: false });
-    expect(toJudgment({ judgment: "great" })).toBeNull();
+  });
+});
+
+describe("an invented judgment value reads as none (skill-eval iteration 4, user 2026-10-15)", () => {
+  it("keeps the block's tags and flags instead of dropping it", () => {
+    expect(toJudgment({ judgment: "concept", concept_tags: ["borrowing"], episode_closed: true })).toEqual({ judgment: "none", concept_tags: ["borrowing"], task_done_ids: [], episode_closed: true, step_done: false });
+    expect(toJudgment({ judgment: "great" })?.judgment).toBe("none");
+  });
+  it("parses the real iteration-4 block", () => {
+    const text = 'In short: an immutable borrow blocks a later mutable one.\n\n```tutor-judgment\n{"judgment":"concept","concept_tags":["borrowing","lifetimes"],"task_done_ids":[],"episode_closed":false,"step_done":false}\n```';
+    expect(parseJudgment(text)).toMatchObject({ judgment: "none", concept_tags: ["borrowing", "lifetimes"] });
+  });
+  it("still rejects a block with no judgment string at all", () => {
+    expect(toJudgment({ concept_tags: ["x"] })).toBeNull();
+    expect(toJudgment({ judgment: 3 })).toBeNull();
+    expect(toJudgment(null)).toBeNull();
   });
 });
 

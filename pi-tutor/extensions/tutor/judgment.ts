@@ -30,9 +30,11 @@ function strings(v: unknown): string[] {
 export function toJudgment(raw: unknown): Judgment | null {
   if (typeof raw !== "object" || raw === null) return null;
   const o = raw as Record<string, unknown>;
-  if (!VALUES.includes(o.judgment as JudgmentValue)) return null;
+  if (typeof o.judgment !== "string") return null;
+  // Skill-eval iteration 4: on concept questions the model invents values ("concept"). Read any unknown
+  // value as `none` (never moves the ladder) so the block's tags and flags are kept, not dropped.
   return {
-    judgment: o.judgment as JudgmentValue,
+    judgment: VALUES.includes(o.judgment as JudgmentValue) ? (o.judgment as JudgmentValue) : "none",
     concept_tags: strings(o.concept_tags),
     task_done_ids: strings(o.task_done_ids),
     episode_closed: o.episode_closed === true,
