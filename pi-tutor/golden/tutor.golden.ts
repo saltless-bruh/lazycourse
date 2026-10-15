@@ -75,7 +75,7 @@ describe("golden transcripts (model: GOLDEN_MODEL or the configured default)", (
 
   it("python pack: a how-do-I question in the recipe gets a cookbook idiom and tags from the card", async () => {
     const files = { "spec/tasks.md": "- [ ] P1.T1 Count how often each word appears in a text file\n", "spec/blueprint.md": "main → count(path) → print\n" };
-    const r = await runTutor({ level: 50, language: "python", files, messages: ["/tutor-plan P1.T1", "I did Find, Shape, Examples and Steps. Step 1 is: read each line and count the words. How do I do that in Python?"] });
+    const r = await runTutor({ level: 50, language: "python", files, messages: ["/tutor-plan P1.T1", "I did Find, Shape, Examples and Steps. Step 1 is: count how often each word appears. How do I do that in Python?"] });
     const run = r.runs.at(-1);
     const show = `--- reply ---\n${run?.reply ?? ""}\n--- tags --- ${JSON.stringify(run?.judgment?.concept_tags)}`;
     expect(run?.reply ?? "", show).toMatch(/Counter|\.get\(|defaultdict/);
