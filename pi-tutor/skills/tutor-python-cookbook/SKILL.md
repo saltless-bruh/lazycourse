@@ -1,11 +1,11 @@
 ---
 name: tutor-python-cookbook
-description: "Plain-words step → Python idiom, each on a small unrelated example, with the minimum Python version and bridge lines from Rust, Go, TypeScript and Lua. Use when the design recipe reaches Map (step 5), when the learner knows what to do but not how in Python, or when a [workflow] line says Map."
+description: "Plain-words step → Python idiom, each shown on a small unrelated example, with the minimum Python version and bridge lines from Rust, Go, TypeScript and Lua. Use whenever the learner knows what they want to do but not how to say it in Python (how do I count words, read a file, sort by a field, handle a bad number…), when the design recipe reaches Map (step 5) or a [workflow] line says Map, even if nobody says 'cookbook'."
 ---
 
 # Python cookbook
 
-How to use: find the learner's plain step below, show the idiom on the example here (never on their task), and let them apply it. Below rung 5 never write their line.
+How to use: find the learner's plain step below and show the idiom on the example here, not on their task. Seeing the construct work somewhere neutral and then applying it to their own code is where the learning happens; writing their line takes that away. The hint ladder still decides how much to give, so below rung 5 name the idiom and point at it.
 
 ## read-args: read the command-line arguments
 since: 3.0
