@@ -86,6 +86,24 @@ search them with `tutor_recall`. Everything lives in your profile (`profile.sqli
   what is drawn: the model still thinks. While the tutor hides it, Pi's own click-to-expand on a
   thinking block does nothing; run `:TutorThinking show` to read it.
 
+Exams (Milestone 8):
+
+- `:TutorRun` runs the project's `run:` command and `:TutorRun test` its `test:` command, both
+  from the front matter at the top of `README.md` (`/tutor-start` writes them; older projects can
+  add a `test:` line). When the tutor saw you finish a task, the next passing run ticks it in
+  `spec/tasks.md` (never while the file has unsaved edits in Neovim).
+- `:TutorExam [small|medium] [topic]` writes a timed exam into `exam/<nn>-<name>/`: `brief.md`
+  (task, requirements R1…, examples, grading), a starter file and example tests. The tests are run
+  once before you see them, so a broken exam is replaced. The widget shows the time left
+  (`exam 01 18:55 left`); going over is recorded as late and still graded. Until you submit,
+  hints stay at a question or a concept, never code.
+- `:TutorExam check` runs the example tests; `:TutorExam off` abandons the exam.
+- `:TutorSubmit` runs the tests, has the model check each requirement against your code
+  (`file:line` evidence), and writes `grade.md`: score /100 (80 requirements, 20 idiomatic code),
+  the test output, three next fixes and an "In short". The score goes into your profile.
+- `:TutorProgress [language]` shows hints used per episode over time, recent exam scores and which
+  concepts are strong, shaky or weak.
+
 The widget's second line says `outside nvim` when Pi runs without Neovim and `nvim closed` when
 the editor exited; either way it still shows the tutor's state and last judgment.
 
@@ -154,7 +172,8 @@ return {
     dir = "<repo>/nvim-tutor",
     name = "nvim-tutor",
     cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn",
-            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback", "TutorThinking" },
+            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback", "TutorThinking",
+            "TutorExam", "TutorSubmit", "TutorProgress" },
     keys = {
       { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
       { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },
