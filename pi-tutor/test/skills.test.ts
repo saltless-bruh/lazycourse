@@ -36,7 +36,7 @@ describe("bundled skills", () => {
 });
 
 /** M7 pack skills: same header rules; a diagram is optional, but any diagram line stays ≤ 40 columns. */
-const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook"];
+const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook"];
 describe("pack skills load in Pi", () => {
   it.each(PACK_SKILLS)("%s: name matches folder, description says when to use it, narrow diagrams", (name) => {
     const h = parseSkillHeader(read(name));
@@ -63,11 +63,11 @@ function cookbookChecks(lang: string) {
 }
 
 describe("cookbooks (spec §5)", () => {
-  it.each(["python", "rust", "go"])("%s cookbook has every catalog step with since, an example and a bridge", (lang) => cookbookChecks(lang));
+  it.each(["python", "rust", "go", "typescript", "lua"])("%s cookbook has every catalog step with since, an example and a bridge", (lang) => cookbookChecks(lang));
 });
 
 describe("cards (spec §5)", () => {
-  it.each(["python", "rust", "go"])("%s card names the essentials and has ≥ 12 concept tags", (lang) => {
+  it.each(["python", "rust", "go", "typescript", "lua"])("%s card names the essentials and has ≥ 12 concept tags", (lang) => {
     const p = loadPack(lang)!;
     for (const k of ["**Format:**", "**Names:**", "**Errors:**", "**Layout:**", "**Test:**", "**Pitfalls:**"]) expect(p.body, k).toContain(k);
     expect(p.tags.length).toBeGreaterThanOrEqual(12);

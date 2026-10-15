@@ -7,12 +7,20 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SKILLS = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
+const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SKILLS = join(PKG, "skills");
 const has = (cmd, args) => spawnSync(cmd, args, { stdio: "ignore" }).status === 0;
 const RUN = {
   python: { tag: "python", ok: () => has("python3", ["--version"]), run: (d, src) => { const f = join(d, "x.py"); writeFileSync(f, src); return ["python3", [f], d]; } },
   lua: { tag: "lua", ok: () => has("lua", ["-v"]), run: (d, src) => { const f = join(d, "x.lua"); writeFileSync(f, src); return ["lua", [f], d]; } },
-  typescript: { tag: "ts", ok: () => has("node", ["--version"]), run: (d, src) => { const f = join(d, "x.ts"); writeFileSync(f, src); return ["node", [f], d]; } },
+  // The Lua cookbook promises 5.1 examples, so they also run under Neovim's LuaJIT.
+  luajit: { book: "lua", tag: "lua", ok: () => has("luajit", ["-v"]), run: (d, src) => { const f = join(d, "x.lua"); writeFileSync(f, src); return ["luajit", [f], d]; } },
+  // Node only strips types, so each example is also type-checked with this package's tsc, strict.
+  typescript: { tag: "ts", ok: () => has("node", ["--version"]), run: (d, src) => {
+    const f = join(d, "x.ts"); writeFileSync(f, src);
+    execFileSync(join(PKG, "node_modules", ".bin", "tsc"), ["--noEmit", "--strict", "--target", "es2024", "--lib", "es2024",
+      "--module", "nodenext", "--moduleResolution", "nodenext", "--types", "node", "--typeRoots", join(PKG, "node_modules", "@types"), f], { stdio: "pipe" });
+    return ["node", [f], d]; } },
   // The module sits in a subfolder: Go ignores a go.mod in the system temp root, and TMPDIR is `d`.
   go: { tag: "go", ok: () => has("go", ["version"]), run: (d, src) => {
     const m = join(d, "mod"); mkdirSync(m);
@@ -28,7 +36,7 @@ const RUN = {
 
 let failed = 0, ran = 0;
 for (const [lang, r] of Object.entries(RUN)) {
-  const file = join(SKILLS, `tutor-${lang}-cookbook`, "SKILL.md");
+  const file = join(SKILLS, `tutor-${r.book ?? lang}-cookbook`, "SKILL.md");
   if (!existsSync(file)) continue;
   if (!r.ok()) { process.stdout.write(`skip ${lang}: toolchain not installed\n`); continue; }
   for (const sec of readFileSync(file, "utf8").split(/^## /m).slice(1)) {
