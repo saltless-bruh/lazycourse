@@ -59,6 +59,9 @@ describe("turn protocol (live findings 2026-10-13)", () => {
   it("its example judgment is none, so a copied example never advances the rung", () => {
     expect(j()).toContain('{"judgment":"none"');
   });
+  it("judgment tags come from the card's list (spec §5.4)", () => {
+    expect(j()).toMatch(/`concept_tags`: .*Concept tags/);
+  });
   it("the ladder forbids writing the fix below rung 5", () => {
     expect(systemText("ladder")).toMatch(/below rung 5, never write the corrected line/i);
   });

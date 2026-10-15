@@ -24,7 +24,7 @@ import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
-import { loadPack } from "./packs.js";
+import { loadPack, normalizeTags, vocabOf } from "./packs.js";
 import { renderCard, renderEditorCard } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
 import { LANGS, detectVersion, toolchain, type Toolchain } from "./knowledge/versions.js";
@@ -401,7 +401,12 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Apply one accepted judgment to the episode and the profile (spec §5). */
-  function applyTurnJudgment(j: Judgment, episodeId?: string | null) {
+  function applyTurnJudgment(raw: Judgment, episodeId?: string | null) {
+    // Spec §5.4 (gap #5): tags from the card's vocabulary (aliases mapped, unknown dropped), plus the
+    // editor pack's; a language with no pack keeps its tags, only normalized.
+    const lang = project?.language ?? editorLanguage();
+    const pack = lang ? loadPack(lang) : null;
+    const j: Judgment = { ...raw, concept_tags: normalizeTags(raw.concept_tags, pack ? vocabOf(pack, loadPack("editor")) : null) };
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
     const ladder = roleNamed(activeRole).ladder;

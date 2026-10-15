@@ -999,3 +999,21 @@ describe("language card in the system prompt (spec §5.4)", () => {
     expect(n).toBe(1);
   });
 });
+
+describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "tags-")), "p.sqlite"); });
+  afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
+  const tagged = (tags: string[]) => assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "partial", concept_tags: tags }) + "\n```");
+  const lastJudgment = (b: { entries: { type: string; data: unknown }[] }) => b.entries.filter((e) => e.type === "tutor_judgment").at(-1)?.data;
+  it("aliases map, unknown tags drop, editor tags are allowed", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    await turn(b.events, b.ctx, REASONED, tagged(["KeyError", "monads", "motions"]));
+    expect(lastJudgment(b)).toMatchObject({ concept_tags: ["dicts", "motions"] });
+  });
+  it("a language with no pack keeps normalized tags", async () => {
+    const b = await boot({ cwd: await projectDir("c") });
+    await turn(b.events, b.ctx, REASONED, tagged(["Pointer Arithmetic"]));
+    expect(lastJudgment(b)).toMatchObject({ concept_tags: ["pointer-arithmetic"] });
+  });
+});
