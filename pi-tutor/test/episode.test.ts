@@ -36,6 +36,18 @@ async function linked(busy = false, branch: (root: string) => unknown[] = () => 
 }
 const setError = (msg: string) => nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 1, message = ... }})`, [msg]);
 
+describe("language card through a real Neovim (Review Focus #4)", () => {
+  it("outside a project the card follows the editor's filetype", async () => {
+    const b = await linked(); // opens a.py in h.root, which is not a recorded project
+    const first = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(first.sections["tutor_lang"]).toMatch(/^\[language card: python\]/);
+    writeFileSync(join(h!.root, "b.lua"), "local x = 1\n");
+    await nvim!.command(`edit ${join(h!.root, "b.lua")}`);
+    const next = await turn(b.events, b.ctx, "and now?", judged("none"));
+    expect(next.sections["tutor_lang"]).toMatch(/^\[language card: lua\]/);
+  }, 20000);
+});
+
 describe("stuck episodes through a real Neovim", () => {
   it("a beginner's new error opens an episode and nudges Pi once; clearing it closes the episode", async () => {
     const b = await linked();

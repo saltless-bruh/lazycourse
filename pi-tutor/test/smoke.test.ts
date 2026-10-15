@@ -960,3 +960,42 @@ describe("thinking visibility (/tutor-thinking)", () => {
     expect(b.notes.at(-1)).toMatch(/thinking: auto \(shown/);
   });
 });
+
+/** A recorded project of `lang` in the profile PI_TUTOR_PROFILE names (set per describe below). */
+async function projectDir(lang: string): Promise<string> {
+  const { realpathSync } = await import("node:fs");
+  const { Profile } = await import("../extensions/tutor/profile.js");
+  const d = realpathSync(mkd(pjoin(tmp(), "proj-")));
+  const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+  p.saveLanguage(lang, 50, {}, 1); p.addProject(lang, d, "t", 1); p.close();
+  return d;
+}
+
+describe("language card in the system prompt (spec §5.4)", () => {
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "card-")), "p.sqlite"); });
+  afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
+  it("a project's language gets its card with the detected version; the editor card always", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    b.execOut["python3"] = { stdout: "Python 3.14.8\n", stderr: "", code: 0 };
+    const t = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(t.sections["tutor_lang"]).toMatch(/^\[language card: python\]\nInstalled: Python 3\.14\.8/);
+    expect(t.sections["tutor_lang"]).toContain("[editor card: LazyVim]");
+  });
+  it("no language known: only the editor card; a language with no pack: only the editor card", async () => {
+    const b = await boot();
+    const t = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(t.sections["tutor_lang"]).toMatch(/^\[editor card: LazyVim\]/);
+    const c = await boot({ cwd: await projectDir("c") });
+    expect((await turn(c.events, c.ctx, "hi", judged("none"))).sections["tutor_lang"]).toMatch(/^\[editor card: LazyVim\]/);
+  });
+  it("the version command runs once per language and root, even across turns", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    let n = 0;
+    const exec = b.pi.exec;
+    b.pi.exec = async (cmd: string) => { if (cmd === "python3") n++; return exec(cmd); };
+    await turn(b.events, b.ctx, "a", judged("none"));
+    await turn(b.events, b.ctx, "b", judged("none"));
+    expect(n).toBe(1);
+  });
+});

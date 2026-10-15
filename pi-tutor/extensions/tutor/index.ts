@@ -1,5 +1,6 @@
-import { readFileSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
@@ -22,9 +23,15 @@ import { runStart } from "./start.js";
 import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
-import { fetchReference, skillsRoot } from "./knowledge/reference.js";
+import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
+import { loadPack } from "./packs.js";
+import { renderCard, renderEditorCard } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
-import { LANGS, detectVersion } from "./knowledge/versions.js";
+import { LANGS, detectVersion, toolchain, type Toolchain } from "./knowledge/versions.js";
+
+/** Bundled pack skills (cookbook, expert) that exist for a language; the card names them (spec §5.4). */
+const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
+const packSkills = (lang: string) => ["cookbook", "expert"].map((k) => `tutor-${lang}-${k}`).filter((s) => existsSync(join(SKILLS_DIR, s, "SKILL.md")));
 
 type Ui = ExtensionContext["ui"];
 
@@ -141,6 +148,13 @@ export default function (pi: ExtensionAPI): void {
   let paneWidth: number | undefined;
   /** Thinking visibility (learner setting, kept in the profile): auto hides it only at the pro band. */
   let thinking: ThinkingMode = "auto";
+  /** Toolchain per language+root, detected once per Pi on the first turn that needs it (spec §5.1). */
+  const toolchains = new Map<string, Promise<Toolchain>>();
+  const toolchainOf = (lang: string, root: string) => {
+    const k = `${lang}\0${root}`;
+    if (!toolchains.has(k)) toolchains.set(k, toolchain(lang, root, (command, args, options) => pi.exec(command, args, options)));
+    return toolchains.get(k)!;
+  };
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
   let activeRole = DEFAULT_ROLE;
   /** Design-recipe workflow in progress (spec 2026-10-13 §4), persisted as `tutor_workflow` entries. */
@@ -350,6 +364,19 @@ export default function (pi: ExtensionAPI): void {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
     }
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
+    // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
+    const lang = project?.language ?? editorLanguage();
+    const pack = lang ? loadPack(lang) : null;
+    const editorPack = loadPack("editor");
+    const cards: string[] = [];
+    if (lang && pack) {
+      const root = project?.path ?? session?.cwd ?? process.cwd();
+      let knows: string[] = [];
+      if (profile) { const p = profile; profileWrite(() => { knows = p.languages(); }); }
+      cards.push(renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang) }));
+    }
+    if (editorPack) cards.push(renderEditorCard(editorPack));
+    if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");
     const parts: string[] = [];
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
