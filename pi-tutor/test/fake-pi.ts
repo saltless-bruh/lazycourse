@@ -1,6 +1,7 @@
 import { mkdtempSync as __mk, writeFileSync as __wf } from "node:fs";
 import { tmpdir as __tmp } from "node:os";
 import { join as __join } from "node:path";
+import { execFile as __execFile } from "node:child_process";
 import extension from "../extensions/tutor/index.js";
 
 // The extension only activates when nvim-tutor started Pi (Task 6); tests are tutor mode.
@@ -109,3 +110,11 @@ export async function turn(events: Record<string, Handler>, ctx: unknown, prompt
   }
   return Object.assign(opts, { message: r?.message }); // sections + the hidden per-turn context
 }
+
+/** A real pi.exec stand-in (exit code, killed on timeout) for tests that run real toolchains. */
+export const realExec = (command: string, args: string[], o: { cwd: string; timeout: number }) =>
+  new Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>((res) =>
+    __execFile(command, args, { cwd: o.cwd, timeout: o.timeout, maxBuffer: 4 << 20 }, (e, stdout, stderr) => {
+      const err = e as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean }) | null;
+      res({ stdout: String(stdout), stderr: String(stderr), code: err ? (typeof err.code === "number" ? err.code : 127) : 0, killed: !!err?.killed });
+    }));
