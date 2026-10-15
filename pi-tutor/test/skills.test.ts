@@ -36,8 +36,8 @@ describe("bundled skills", () => {
 });
 
 /** M7 pack skills: same header rules; a diagram is optional, but any diagram line stays ≤ 40 columns. */
-const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook", "tutor-editor-cookbook",
-  "tutor-python-expert", "tutor-rust-expert", "tutor-go-expert", "tutor-typescript-expert", "tutor-lua-expert"];
+const PACK_SKILLS = ["tutor-python-cookbook", "tutor-rust-cookbook", "tutor-go-cookbook", "tutor-typescript-cookbook", "tutor-lua-cookbook", "tutor-javascript-cookbook", "tutor-editor-cookbook",
+  "tutor-python-expert", "tutor-rust-expert", "tutor-go-expert", "tutor-typescript-expert", "tutor-lua-expert", "tutor-javascript-expert"];
 describe("pack skills load in Pi", () => {
   it.each(PACK_SKILLS)("%s: name matches folder, description says when to use it, narrow diagrams", (name) => {
     const h = parseSkillHeader(read(name));
@@ -49,7 +49,7 @@ describe("pack skills load in Pi", () => {
 });
 
 const CATALOG = ["read-args", "parse-number", "loop-index", "lookup-default", "count-items", "group-by", "sort-by", "filter-map", "record-type", "maybe-value", "errors", "read-file", "write-file", "format-string", "split-join", "test-function", "read-trace"];
-const FENCE: Record<string, string> = { python: "python", rust: "rust", go: "go", typescript: "ts", lua: "lua" };
+const FENCE: Record<string, string> = { python: "python", rust: "rust", go: "go", typescript: "ts", lua: "lua", javascript: "js" };
 
 function cookbookChecks(lang: string) {
   const sections = read(`tutor-${lang}-cookbook`).split(/^## /m).slice(1);
@@ -66,11 +66,11 @@ function cookbookChecks(lang: string) {
 }
 
 describe("cookbooks (spec §5)", () => {
-  it.each(["python", "rust", "go", "typescript", "lua"])("%s cookbook has every catalog step with since, an example and a bridge", (lang) => cookbookChecks(lang));
+  it.each(["python", "rust", "go", "typescript", "lua", "javascript"])("%s cookbook has every catalog step with since, an example and a bridge", (lang) => cookbookChecks(lang));
 });
 
 describe("cards (spec §5)", () => {
-  it.each(["python", "rust", "go", "typescript", "lua"])("%s card names the essentials and has ≥ 12 concept tags", (lang) => {
+  it.each(["python", "rust", "go", "typescript", "lua", "javascript"])("%s card names the essentials and has ≥ 12 concept tags", (lang) => {
     const p = loadPack(lang)!;
     for (const k of ["**Format:**", "**Names:**", "**Errors:**", "**Layout:**", "**Test:**", "**Pitfalls:**"]) expect(p.body, k).toContain(k);
     expect(p.tags.length).toBeGreaterThanOrEqual(12);
@@ -78,7 +78,7 @@ describe("cards (spec §5)", () => {
 });
 
 describe("expert skills (spec §5.3)", () => {
-  const ADAPTED: Record<string, string> = { python: "python-pro", rust: "rust-engineer", go: "golang-pro", typescript: "typescript-pro" };
+  const ADAPTED: Record<string, string> = { python: "python-pro", rust: "rust-engineer", go: "golang-pro", typescript: "typescript-pro", javascript: "javascript-pro" };
   it.each(Object.entries(ADAPTED))("tutor-%s-expert credits %s, carries its LICENSE and records upstream", (lang, up) => {
     const dir = join(SKILLS, `tutor-${lang}-expert`);
     const text = readFileSync(join(dir, "SKILL.md"), "utf8");
@@ -121,8 +121,8 @@ describe("tutor-memory skill", () => {
 });
 
 describe("tutor-stack-traces skill", () => {
-  it("teaches the method and covers the five languages", () => {
+  it("teaches the method and covers the six languages", () => {
     const t = read("tutor-stack-traces");
-    for (const s of ["## Python", "## Rust", "## Go", "## TypeScript", "## Lua", "last line"]) expect(t).toContain(s);
+    for (const s of ["## Python", "## Rust", "## Go", "## TypeScript", "## JavaScript", "## Lua", "last line"]) expect(t).toContain(s);
   });
 });

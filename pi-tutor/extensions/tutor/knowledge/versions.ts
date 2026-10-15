@@ -17,10 +17,12 @@ export const LANGS: Readonly<Record<string, LangSpec>> = {
   go: { devdocsType: "go", command: "go", args: ["version"] },
   typescript: { devdocsType: "typescript", command: "tsc", args: ["--version"], runtime: { command: "node", args: ["--version"], name: "node" }, local: "node_modules/.bin/tsc" },
   lua: { devdocsType: "lua", command: "lua", args: ["-v"] },
+  // JavaScript has no version of its own: Node is what runs it, and DevDocs versions the Node docs.
+  javascript: { devdocsType: "node", command: "node", args: ["--version"] },
 };
 
-/** Neovim filetypes that are a pack language under another name (M7 minor). JavaScript has no pack yet. */
-const FILETYPE_LANG: Readonly<Record<string, string>> = { typescriptreact: "typescript" };
+/** Neovim filetypes that are a pack language under another name (M7 minor). */
+const FILETYPE_LANG: Readonly<Record<string, string>> = { typescriptreact: "typescript", javascriptreact: "javascript" };
 
 /** The pack language a buffer's filetype stands for, or null (markdown, help, a language with no pack). */
 export function languageOfFiletype(filetype: string | undefined): string | null {

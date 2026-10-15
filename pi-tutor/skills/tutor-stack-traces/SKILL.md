@@ -1,6 +1,6 @@
 ---
 name: tutor-stack-traces
-description: "How the lazycourse tutor teaches a learner to read an error trace from a failed run (Python tracebacks, Rust panics, Go panics, Node/TypeScript stack traces, Lua errors): start at the last line, find the learner's own frame, open that line, ask what value was there. Use whenever an [episode] says a run failed, or the learner pastes an error with a stack trace."
+description: "How the lazycourse tutor teaches a learner to read an error trace from a failed run (Python tracebacks, Rust panics, Go panics, Node JavaScript/TypeScript stack traces, Lua errors): start at the last line, find the learner's own frame, open that line, ask what value was there. Use whenever an [episode] says a run failed, or the learner pastes an error with a stack trace."
 ---
 # Reading a stack trace
 
@@ -36,6 +36,9 @@ At rung 1 ask which line of the trace says what went wrong. At rung 2 name the e
 
 ## TypeScript
 Node prints the error first (`TypeError: …`), then `at fn (file.ts:line:col)` frames, newest first. Frames under `node_modules` or `node:internal` are not theirs.
+
+## JavaScript
+Same shape as TypeScript, from plain `.js` files: `TypeError: Cannot read properties of undefined (reading 'name')` names the value that was missing; the first `at` frame in their own file is the line to open. An `Uncaught (in promise)` or `unhandled rejection` means a Promise failed with no `catch`.
 
 ## Lua
 `lua: file.lua:3: attempt to index a nil value (local 'user')` is the place and message; `stack traceback:` lists the callers below it, and the last line of that message is still where to start.

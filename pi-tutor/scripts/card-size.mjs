@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const PACKS = join(dirname(fileURLToPath(import.meta.url)), "..", "packs");
 const HEADER = 380; // the six header lines at their longest
-for (const lang of process.argv.slice(2).length ? process.argv.slice(2) : ["python", "rust", "go", "typescript", "lua", "editor"]) {
+for (const lang of process.argv.slice(2).length ? process.argv.slice(2) : ["python", "rust", "go", "typescript", "lua", "javascript", "editor"]) {
   const f = join(PACKS, lang, "card.md");
   if (!existsSync(f)) continue;
   const t = readFileSync(f, "utf8");

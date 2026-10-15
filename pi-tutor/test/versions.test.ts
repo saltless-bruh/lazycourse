@@ -146,10 +146,11 @@ describe("toolchainCache (M7 minor: the cache never refreshed)", () => {
 });
 
 describe("languageOfFiletype (M7 minor: .tsx got no card)", () => {
-  it("maps Neovim filetypes to pack languages; .tsx is TypeScript, plain JavaScript has no pack", () => {
+  it("maps Neovim filetypes to pack languages; .tsx is TypeScript, .js and .jsx are JavaScript", () => {
     expect(languageOfFiletype("python")).toBe("python");
     expect(languageOfFiletype("typescriptreact")).toBe("typescript");
-    expect(languageOfFiletype("javascript")).toBeNull();
+    expect(languageOfFiletype("javascript")).toBe("javascript");
+    expect(languageOfFiletype("javascriptreact")).toBe("javascript");
     expect(languageOfFiletype("markdown")).toBeNull();
     expect(languageOfFiletype(undefined)).toBeNull();
   });

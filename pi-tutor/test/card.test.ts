@@ -38,6 +38,9 @@ describe("renderCard", () => {
     const ts = parsePack("typescript", "# TypeScript card");
     expect(renderCard(ts, { tc: { installed: null, runtime: "node 26.11.1", constraint: null }, ref: null, knows: [], skills: [] }))
       .toContain("Installed: tsc not installed · runtime node 26.11.1");
+    const js = parsePack("javascript", "# JavaScript card");
+    expect(renderCard(js, { tc: { installed: "26.11.1", runtime: null, constraint: null }, ref: null, knows: [], skills: [] }))
+      .toContain("Installed: Node 26.11.1"); // JavaScript has no version of its own: it is the runtime
   });
   it("warns when the reference version differs from the installed one", () => {
     const old: RefMeta = { ...ref, slug: "python~3.13", release: "3.13" };

@@ -7,7 +7,7 @@ import type { RefMeta } from "./knowledge/reference.js";
 /** `skillsDir`: where the bundled skills live, so the model reads the real file instead of guessing a path. */
 export interface CardInfo { tc: Toolchain; ref: RefMeta | null; knows: string[]; skills: string[]; skillsDir?: string }
 
-const NAMES: Record<string, string> = { python: "Python", rust: "Rust", go: "Go", typescript: "TypeScript", lua: "Lua" };
+const NAMES: Record<string, string> = { python: "Python", rust: "Rust", go: "Go", typescript: "TypeScript", lua: "Lua", javascript: "JavaScript" };
 // When to open each skill, in the learner's words (skill-eval iteration 1: opened 2/14 times).
 const SKILL_ROLE: Record<string, (name: string) => string> = {
   cookbook: (name) => `for "how do I … in ${name}?" (find the plain step, show its example)`,
@@ -19,7 +19,8 @@ const tagLine = (p: Pack) => (p.tags.length ? `Tags: ${p.tags.map((t) => `\`${t.
 export function renderCard(pack: Pack, info: CardInfo): string {
   const lang = pack.language, name = NAMES[lang] ?? lang;
   const { installed, runtime, constraint } = info.tc;
-  const have = installed ? `${name} ${installed}`
+  // JavaScript's version is its runtime's: the card says Node so the model reads the right docs.
+  const have = installed ? `${lang === "javascript" ? "Node" : name} ${installed}`
     : runtime ? `${lang === "typescript" ? "tsc" : name} not installed · runtime ${runtime}`
     : "not installed (from the language's version command)";
   const lines = [`[language card: ${lang}]`, `Installed: ${have}${constraint ? ` · project: ${constraint}` : ""}`];

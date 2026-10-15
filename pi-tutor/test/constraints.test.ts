@@ -17,6 +17,8 @@ describe("readConstraint (spec §5.1)", () => {
     ["rust", { "Cargo.toml": '[package]\nedition = "2021"\n' }, "edition 2021 (Cargo.toml)"],
     ["go", { "go.mod": "module x\n\ngo 1.24\n\ntoolchain go1.27.2\n" }, "go 1.24 (go.mod)"],
     ["typescript", { "package.json": JSON.stringify({ engines: { node: ">=22" }, devDependencies: { typescript: "^5.9.0" } }) }, "node >=22, typescript ^5.9.0 (package.json)"],
+    ["javascript", { "package.json": JSON.stringify({ engines: { node: ">=22" }, type: "module" }) }, "node >=22, ES modules (package.json)"],
+    ["javascript", { "package.json": JSON.stringify({}) }, null],
     ["lua", { "x-1.0-1.rockspec": 'dependencies = {\n  "lua >= 5.1",\n}\n' }, "lua >= 5.1 (x-1.0-1.rockspec)"],
   ])("%s", (lang, files, want) => {
     expect(readConstraint(lang, dir(files))).toBe(want);

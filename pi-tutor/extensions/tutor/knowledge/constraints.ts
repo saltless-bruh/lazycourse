@@ -35,6 +35,14 @@ export function readConstraint(language: string, root: string): string | null {
         const parts = [j.engines?.node && `node ${j.engines.node}`, ts && `typescript ${ts}`].filter(Boolean);
         return parts.length ? `${parts.join(", ")} (package.json)` : null;
       }
+      case "javascript": {
+        const t = read(root, "package.json");
+        if (!t) return null;
+        const j = JSON.parse(t) as { engines?: { node?: string }; type?: string };
+        const mod = j.type === "module" ? "ES modules" : j.type === "commonjs" ? "CommonJS" : null;
+        const parts = [j.engines?.node && `node ${j.engines.node}`, mod].filter(Boolean);
+        return parts.length ? `${parts.join(", ")} (package.json)` : null;
+      }
       case "lua": {
         const f = readdirSync(root).find((n) => n.endsWith(".rockspec"));
         if (!f) return null;

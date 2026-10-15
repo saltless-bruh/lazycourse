@@ -15,6 +15,7 @@ describe("real cards map the tags the model used in skill-eval iteration 1", () 
     ["go", ["file-i-o", "file-reading", "scanner"], ["files-io"]],
     ["lua", ["table-frequency", "frequency-count", "table-dictionary"], ["tables"]],
     ["rust", ["overlapping-borrows", "borrow-conflict", "sorting"], ["borrowing", "collections"]],
+    ["javascript", ["var", "array-methods", "promise", "this-binding"], ["variables", "arrays", "promises", "this"]],
     ["typescript", ["enums", "compilation", "typescript-runtime", "typescript-node-interop"], ["unions", "tooling"]],
   ])("%s", (lang, used, want) => {
     expect(normalizeTags(used, vocabOf(loadPack(lang), loadPack("editor")))).toEqual(want);

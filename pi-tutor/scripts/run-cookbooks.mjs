@@ -21,6 +21,7 @@ const RUN = {
     execFileSync(join(PKG, "node_modules", ".bin", "tsc"), ["--noEmit", "--strict", "--target", "es2024", "--lib", "es2024",
       "--module", "nodenext", "--moduleResolution", "nodenext", "--types", "node", "--typeRoots", join(PKG, "node_modules", "@types"), f], { stdio: "pipe" });
     return ["node", [f], d]; } },
+  javascript: { tag: "js", ok: () => has("node", ["--version"]), run: (d, src) => { const f = join(d, "x.mjs"); writeFileSync(f, src); return ["node", [f], d]; } },
   // The module sits in a subfolder: Go ignores a go.mod in the system temp root, and TMPDIR is `d`.
   go: { tag: "go", ok: () => has("go", ["version"]), run: (d, src) => {
     const m = join(d, "mod"); mkdirSync(m);

@@ -11,7 +11,7 @@ import { suggestPrompt, checkSuggestions, suggestionLabel } from "./suggest.js";
 import { scaffoldPrompt, checkScaffold, writeScaffold, slugify, isEmptyOrMissing } from "./scaffold.js";
 
 // /tutor-start (spec §6): language → interview if new → 3 suggestions → folder → scaffold. Every dependency injected.
-export const LANGUAGES = ["python", "rust", "go", "typescript", "lua"] as const;
+export const LANGUAGES = ["python", "rust", "go", "typescript", "lua", "javascript"] as const;
 const OTHER = "other…";
 const NAME = /^[a-z][a-z0-9+#.-]{0,30}$/;
 

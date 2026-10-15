@@ -95,11 +95,12 @@ the editor exited; either way it still shows the tutor's state and last judgment
 - **Hint ladder.** When you're stuck, the tutor starts with a question. Each reply where you reason correctly unlocks a more concrete rung: concept, pointer to docs, pseudocode, and finally the line itself. Pro never reaches the last rung.
 - **Project suggestion.** A short interview per language builds a profile. The tutor proposes three projects targeting your weak or unknown concepts and scaffolds `spec/design.md`, `spec/tasks.md`, `spec/requirements.md` with stable task ids.
 - **Knowledge base.** Instructions, skills, and workflows map onto Pi's `AGENTS.md`, `SKILL.md`, and prompt templates. Official docs are fetched into skills per language; you can edit them, and `/tutor-learn` drafts a new skill from a finished stuck episode.
-- **Language packs** (Python, Rust, Go, TypeScript, Lua, plus the editor). Every turn carries a short
+- **Language packs** (Python, Rust, Go, TypeScript, Lua, JavaScript, plus the editor). Every turn carries a short
   language card: the version installed here and the project's constraint (`pyproject.toml`,
   `Cargo.toml`, `go.mod`, `package.json`, rockspec), formatter, naming, error style, layout, test
   command, pitfalls, and the concept tags the tutor may record. An editor card covers the LazyVim
-  keys you need. Skills per language: `tutor-<lang>-cookbook` (a plain step such as "count how often
+  keys you need. JavaScript's version is Node's, so its card and its DevDocs reference are
+  Node's; `.jsx` buffers use it too, and `.tsx` buffers the TypeScript card. Skills per language: `tutor-<lang>-cookbook` (a plain step such as "count how often
   each item appears" → the idiom, on an unrelated example, with bridge lines from the other
   languages), `tutor-<lang>-expert` (patterns and review checklists; Python, Rust, Go and TypeScript
   are adapted from [fullstack-dev-skills](https://github.com/Jeffallan/claude-skills) by Jeffallan,
