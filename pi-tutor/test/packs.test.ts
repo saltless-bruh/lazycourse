@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePack, vocabOf, normalizeTag, normalizeTags } from "../extensions/tutor/packs.js";
+import { parsePack, loadPack, vocabOf, normalizeTag, normalizeTags } from "../extensions/tutor/packs.js";
 
 const CARD = [
   "# Python card", "", "- **Format:** ruff format", "",
@@ -8,6 +8,21 @@ const CARD = [
   "- `loops`: for/while, range, enumerate",
   "not a tag line",
 ].join("\n");
+
+describe("real cards map the tags the model used in skill-eval iteration 1", () => {
+  it.each([
+    ["python", ["mutable-defaults", "exception-handling", "file-io", "context-manager"], ["functions", "exceptions", "files-io"]],
+    ["go", ["file-i-o", "file-reading", "scanner"], ["files-io"]],
+    ["lua", ["table-frequency", "frequency-count", "table-dictionary"], ["tables"]],
+    ["rust", ["overlapping-borrows", "borrow-conflict", "sorting"], ["borrowing", "collections"]],
+    ["typescript", ["enums", "compilation", "typescript-runtime", "typescript-node-interop"], ["unions", "tooling"]],
+  ])("%s", (lang, used, want) => {
+    expect(normalizeTags(used, vocabOf(loadPack(lang), loadPack("editor")))).toEqual(want);
+  });
+  it("editor: a jump-list question is about motions", () => {
+    expect(normalizeTags(["jump-list"], vocabOf(loadPack("editor")))).toEqual(["motions"]);
+  });
+});
 
 describe("packs", () => {
   it("splits the card body from its concept tags", () => {

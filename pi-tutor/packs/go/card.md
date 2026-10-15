@@ -25,4 +25,5 @@
 - `testing`: tests (aliases: go-test, tests)
 - `iterators`: range-over-func (aliases: range-over-func, iter)
 - `strings`: strings, runes (aliases: string, runes)
+- `files-io`: files, bufio (aliases: file-io, file-i-o, file-reading, io, bufio, scanner)
 - `defer`: defer, cleanup (aliases: cleanup)

@@ -10,7 +10,7 @@
 
 ## Concept tags
 - `ownership`: moves, drop (aliases: move, moves, drop)
-- `borrowing`: references, `&mut` (aliases: borrow-checker, references, e0502, e0499)
+- `borrowing`: references, `&mut` (aliases: borrow-checker, references, e0502, e0499, borrow-conflict, overlapping-borrows)
 - `lifetimes`: `'a` annotations (aliases: lifetime)
 - `structs`: structs, impl (aliases: struct, methods)
 - `enums`: enums, variants (aliases: enum)
@@ -21,7 +21,7 @@
 - `generics`: type parameters, bounds (aliases: generic)
 - `iterators`: iter, map, collect (aliases: iterator, iter)
 - `closures`: closures (aliases: closure, fn-mut)
-- `collections`: Vec, HashMap (aliases: vec, hashmap, vectors)
+- `collections`: Vec, HashMap, sorting (aliases: vec, hashmap, vectors, sorting, sort)
 - `strings`: String, &str (aliases: string, str)
 - `modules`: mod, use, crates (aliases: crates, use)
 - `testing`: tests (aliases: cargo-test, tests)

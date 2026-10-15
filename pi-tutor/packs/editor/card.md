@@ -9,7 +9,7 @@
 - Basics: `:w` save, `u` undo, `<C-r>` redo, `<Esc>` normal mode.
 
 ## Concept tags
-- `motions`: moving the cursor (aliases: movement, navigation)
+- `motions`: moving, jumping back (aliases: movement, navigation, jump-list, jumplist)
 - `editing`: insert, change, delete (aliases: insert-mode, text-editing)
 - `modes`: normal, insert, visual (aliases: mode, normal-mode, visual-mode)
 - `search`: find, grep (aliases: grep, find)

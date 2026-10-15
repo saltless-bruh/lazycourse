@@ -2,7 +2,7 @@
 
 - **Format:** `prettier` or `biome format`; lint with `eslint` or `biome lint`.
 - **Names:** `camelCase` values and functions, `PascalCase` types and classes, `UPPER_CASE` only for true constants.
-- **Errors:** `throw new Error(...)`; in `catch (e)` the value is `unknown`, so narrow it (`e instanceof Error`) before use; a union like `{ ok: true; value } | { ok: false; error }` for failures the caller should expect. A stack trace reads top-down from the message.
+- **Errors:** `throw new Error(...)`; in `catch (e)` narrow `e` (`instanceof Error`) before use; a result union for failures the caller should expect. Stack traces read top-down.
 - **Layout:** `package.json` with `"type": "module"`, `tsconfig.json` with `"strict": true`, code in `src/`, tests beside it or in `test/`.
 - **Test:** `node --test`, or the project's `npm test` (vitest, jest).
 - **Run:** Node 22.18+ runs `node file.ts` by stripping types, so only erasable syntax works there: no `enum`, `namespace` or constructor parameter properties; use a `const` object plus a union type instead.
@@ -10,7 +10,7 @@
 
 ## Concept tags
 - `types`: annotations, inference (aliases: type-annotations, inference)
-- `unions`: unions, literals (aliases: union, literal-types, discriminated-unions)
+- `unions`: unions, literals, enum replacements (aliases: union, literal-types, discriminated-unions, enum, enums)
 - `narrowing`: typeof, in, checks (aliases: type-narrowing)
 - `interfaces`: interfaces, object types (aliases: interface, object-types)
 - `generics`: type parameters (aliases: generic)
@@ -26,3 +26,4 @@
 - `testing`: tests (aliases: node-test, vitest, jest)
 - `type-guards`: guard functions (aliases: type-guard)
 - `utility-types`: Partial, Pick, Record (aliases: partial, pick, record)
+- `tooling`: tsc, node, tsconfig (aliases: compilation, tsc, tsconfig, typescript-runtime, typescript-node-interop, type-stripping)

@@ -373,7 +373,7 @@ export default function (pi: ExtensionAPI): void {
       const root = project?.path ?? session?.cwd ?? process.cwd();
       let knows: string[] = [];
       if (profile) { const p = profile; profileWrite(() => { knows = p.languages(); }); }
-      cards.push(renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang) }));
+      cards.push(renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang), skillsDir: SKILLS_DIR }));
     }
     if (editorPack) cards.push(renderEditorCard(editorPack));
     if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");

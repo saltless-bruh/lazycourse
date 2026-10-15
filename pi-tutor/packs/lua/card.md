@@ -9,7 +9,7 @@
 - **Pitfalls:** arrays start at 1; `#t` is unreliable when the table has `nil` holes; only `nil` and `false` are false (0 and "" are true); not-equal is `~=`; `..` joins strings; `obj:method()` passes `self`, `obj.method()` does not; string patterns are not regular expressions.
 
 ## Concept tags
-- `tables`: tables, arrays (aliases: table, arrays, indexing)
+- `tables`: tables, arrays, counting (aliases: table, arrays, indexing, dictionary, table-dictionary, frequency-count, table-frequency, counting)
 - `metatables`: metatables, `__index` (aliases: metatable, metamethods)
 - `closures`: closures, upvalues (aliases: closure, upvalues)
 - `functions`: functions, returns (aliases: function, multiple-returns)

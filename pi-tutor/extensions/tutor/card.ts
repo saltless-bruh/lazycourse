@@ -4,10 +4,15 @@ import type { RefMeta } from "./knowledge/reference.js";
 
 // The always-on language card (spec 2026-10-13 §5): live header (version, constraint, reference,
 // skills, other languages the learner knows) + the pack body + its concept tags. ≤ 600 tokens (gap #2).
-export interface CardInfo { tc: Toolchain; ref: RefMeta | null; knows: string[]; skills: string[] }
+/** `skillsDir`: where the bundled skills live, so the model reads the real file instead of guessing a path. */
+export interface CardInfo { tc: Toolchain; ref: RefMeta | null; knows: string[]; skills: string[]; skillsDir?: string }
 
 const NAMES: Record<string, string> = { python: "Python", rust: "Rust", go: "Go", typescript: "TypeScript", lua: "Lua" };
-const SKILL_ROLE: Record<string, string> = { cookbook: "plain step → idiom", expert: "patterns, pitfalls, review" };
+// When to open each skill, in the learner's words (skill-eval iteration 1: opened 2/14 times).
+const SKILL_ROLE: Record<string, (name: string) => string> = {
+  cookbook: (name) => `for "how do I … in ${name}?" (find the plain step, show its example)`,
+  expert: () => `for review, "is this idiomatic?" or a concept beyond one idiom`,
+};
 const majorMinor = (v: string) => /^(\d+\.\d+)/.exec(v)?.[1] ?? v;
 const tagLine = (p: Pack) => (p.tags.length ? `Tags: ${p.tags.map((t) => `\`${t.tag}\` ${t.meaning}`).join(" · ")}` : "");
 
@@ -26,8 +31,11 @@ export function renderCard(pack: Pack, info: CardInfo): string {
     }
     lines.push(r);
   } else lines.push(`Reference: none yet; suggest \`:TutorDocs ${lang}\`.`);
-  const skills = info.skills.map((s) => `\`${s}\` (${SKILL_ROLE[s.split("-").at(-1) ?? ""] ?? "see its description"})`);
-  if (skills.length) lines.push(`Skills: ${skills.join(", ")}`);
+  const skills = info.skills.map((s) => `\`${s}\` ${SKILL_ROLE[s.split("-").at(-1) ?? ""]?.(name) ?? "(see its description)"}`);
+  if (skills.length) {
+    const where = info.skillsDir ? ` in ${info.skillsDir}` : "";
+    lines.push(`Skills${where} (read <name>/SKILL.md before you answer when one fits): ${skills.join("; ")}`);
+  }
   const knows = info.knows.filter((l) => l !== lang);
   if (knows.length) lines.push(`Learner also knows: ${knows.join(", ")}. Use the cookbook's Bridge lines.`);
   if (pack.tags.length) lines.push("Concept tags: use only the tags listed below in the judgment block.");

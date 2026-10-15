@@ -11,12 +11,13 @@ const ref: RefMeta = { slug: "python~3.14", release: "3.14", mtime: 0, installed
 
 describe("renderCard", () => {
   it("states version, constraint, reference, skills, other languages, then the body and tags", () => {
-    const t = renderCard(PY, { tc, ref, knows: ["python", "rust"], skills: ["tutor-python-cookbook", "tutor-python-expert"] });
+    const t = renderCard(PY, { tc, ref, knows: ["python", "rust"], skills: ["tutor-python-cookbook", "tutor-python-expert"], skillsDir: "/pkg/skills" });
     expect(t.split("\n").slice(0, 6)).toEqual([
       "[language card: python]",
       "Installed: Python 3.14.8 · project: requires-python >=3.12 (pyproject.toml)",
       "Reference: `tutor-python-ref` for python~3.14; cite it.",
-      "Skills: `tutor-python-cookbook` (plain step → idiom), `tutor-python-expert` (patterns, pitfalls, review)",
+      // skill-eval iteration 1: the model opened a pack skill 2/14 times and once guessed its path.
+      "Skills in /pkg/skills (read <name>/SKILL.md before you answer when one fits): `tutor-python-cookbook` for \"how do I … in Python?\" (find the plain step, show its example); `tutor-python-expert` for review, \"is this idiomatic?\" or a concept beyond one idiom",
       "Learner also knows: rust. Use the cookbook's Bridge lines.",
       "Concept tags: use only the tags listed below in the judgment block.",
     ]);
@@ -50,7 +51,7 @@ describe("pack budget (gap #2)", () => {
   it.each([...LANGUAGES])("%s card renders ≤ 600 tokens with a full header", (lang) => {
     const p = loadPack(lang);
     expect(p, `packs/${lang}/card.md`).not.toBeNull();
-    const t = renderCard(p!, { tc: { installed: "9.99.9", runtime: null, constraint: "x".repeat(60) }, ref: null, knows: ["python", "rust", "go", "typescript", "lua"], skills: [`tutor-${lang}-cookbook`, `tutor-${lang}-expert`] });
+    const t = renderCard(p!, { tc: { installed: "9.99.9", runtime: null, constraint: "x".repeat(60) }, ref: null, knows: ["python", "rust", "go", "typescript", "lua"], skills: [`tutor-${lang}-cookbook`, `tutor-${lang}-expert`], skillsDir: "/home/ple/Documents/personal_Project/AI-Driven_Teaching_Coding_Project/pi-tutor/skills" });
     expect(estimateTokens(t)).toBeLessThanOrEqual(600);
     expect(p!.tags.length).toBeGreaterThanOrEqual(12);
   });
