@@ -37,7 +37,15 @@ describe("detectVersion", () => {
   });
   it("covers every /tutor-start language with a DevDocs type", () => {
     expect(Object.keys(LANGS).sort()).toEqual([...LANGUAGES].sort());
-    expect(LANGS.typescript).toEqual({ devdocsType: "typescript", command: "tsc", args: ["--version"], runtime: { command: "node", args: ["--version"], name: "node" }, local: "node_modules/.bin/tsc" });
+    expect(LANGS.typescript).toEqual({ devdocsType: "typescript", command: "tsc", args: ["--version"], runtime: { command: "node", args: ["--version"], name: "node" }, local: "node_modules/.bin/tsc", test: "node --test" });
+  });
+});
+
+describe("project test commands (M8 D9)", () => {
+  it("names each language's project test command", () => {
+    expect(Object.fromEntries(Object.entries(LANGS).map(([k, v]) => [k, v.test]))).toEqual({
+      python: "python3 -m unittest discover -v", rust: "cargo test", go: "go test ./...", typescript: "node --test", lua: "busted", javascript: "node --test",
+    });
   });
 });
 

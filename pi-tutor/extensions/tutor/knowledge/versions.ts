@@ -8,17 +8,18 @@ export type Exec = (command: string, args: string[], options?: { timeout?: numbe
 /**
  * `runtime`: what runs the language when its own compiler is missing (TypeScript without tsc → node).
  * `local`: a project-relative compiler that wins over the PATH one (TypeScript's node_modules/.bin/tsc).
+ * `test`: the project's test command, written to the README front matter by /tutor-start (M8 D9).
  */
-export interface LangSpec { devdocsType: string; command: string; args: string[]; runtime?: { command: string; args: string[]; name: string }; local?: string }
+export interface LangSpec { devdocsType: string; command: string; args: string[]; runtime?: { command: string; args: string[]; name: string }; local?: string; test: string }
 
 export const LANGS: Readonly<Record<string, LangSpec>> = {
-  python: { devdocsType: "python", command: "python3", args: ["--version"] },
-  rust: { devdocsType: "rust", command: "rustc", args: ["--version"] },
-  go: { devdocsType: "go", command: "go", args: ["version"] },
-  typescript: { devdocsType: "typescript", command: "tsc", args: ["--version"], runtime: { command: "node", args: ["--version"], name: "node" }, local: "node_modules/.bin/tsc" },
-  lua: { devdocsType: "lua", command: "lua", args: ["-v"] },
+  python: { devdocsType: "python", command: "python3", args: ["--version"], test: "python3 -m unittest discover -v" },
+  rust: { devdocsType: "rust", command: "rustc", args: ["--version"], test: "cargo test" },
+  go: { devdocsType: "go", command: "go", args: ["version"], test: "go test ./..." },
+  typescript: { devdocsType: "typescript", command: "tsc", args: ["--version"], runtime: { command: "node", args: ["--version"], name: "node" }, local: "node_modules/.bin/tsc", test: "node --test" },
+  lua: { devdocsType: "lua", command: "lua", args: ["-v"], test: "busted" },
   // JavaScript has no version of its own: Node is what runs it, and DevDocs versions the Node docs.
-  javascript: { devdocsType: "node", command: "node", args: ["--version"] },
+  javascript: { devdocsType: "node", command: "node", args: ["--version"], test: "node --test" },
 };
 
 /** Neovim filetypes that are a pack language under another name (M7 minor). */

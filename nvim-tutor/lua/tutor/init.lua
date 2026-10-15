@@ -36,14 +36,39 @@ function M.notify_tutor(payload)
   return ok
 end
 
-function M.run()
+local KINDS = { run = true, test = true }
+
+--- The README.md front matter of `dir`: `key: value` lines between a first-line `---` and the
+--- next `---` (written by /tutor-start). Missing file, no front matter or an unclosed block: {}.
+---@param dir string
+---@return table<string, string>
+function M.front_matter(dir)
+  local ok, lines = pcall(vim.fn.readfile, vim.fs.joinpath(dir, "README.md"), "", 40)
+  if not ok or lines[1] ~= "---" then return {} end
+  local fm = {}
+  for i = 2, #lines do
+    if lines[i] == "---" then return fm end
+    local k, v = lines[i]:match("^([%w_-]+):%s*(.-)%s*$")
+    if k and v ~= "" then fm[k] = v end
+  end
+  return {}
+end
+
+---@param kind? "run"|"test"
+function M.run(kind)
+  kind = kind or "run"
+  if not KINDS[kind] then
+    vim.notify("[tutor] usage: :TutorRun [run|test]", vim.log.levels.WARN)
+    return
+  end
   if M.state.run_job then
     vim.notify("[tutor] a run is already running", vim.log.levels.WARN)
     return
   end
-  local cmd = opts.run_cmd
+  -- M8: the project's own README names its commands; the plugin option is the fallback.
+  local cmd = M.front_matter(opts.cwd)[kind] or opts[kind .. "_cmd"]
   if not cmd then
-    vim.notify("[tutor] no run_cmd configured", vim.log.levels.WARN)
+    vim.notify(("[tutor] no %s command: add `%s:` to README.md's front matter (or the %s_cmd option)"):format(kind, kind, kind), vim.log.levels.WARN)
     return
   end
   -- A string run_cmd runs through 'shell' (jobstart does that); only a list names a program to check.
@@ -132,7 +157,7 @@ end
 
 function M.setup(user_opts)
   opts = vim.tbl_deep_extend("force", {
-    pi_cmd = { "pi" }, cwd = vim.fn.getcwd(), width = 0.45, run_cmd = nil, check_version = true,
+    pi_cmd = { "pi" }, cwd = vim.fn.getcwd(), width = 0.45, run_cmd = nil, test_cmd = nil, check_version = true,
   }, user_opts or {})
   check_version()
   -- PI_TUTOR=1 tells pi-tutor this Pi is the tutor; plain `pi` elsewhere stays untouched.
@@ -145,7 +170,8 @@ function M.setup(user_opts)
   local cmd = vim.api.nvim_create_user_command
   cmd("Tutor", function() M.state.term:toggle() end, {})
   cmd("TutorRestart", function() M.state.term:restart() end, {})
-  cmd("TutorRun", M.run, {})
+  cmd("TutorRun", function(a) M.run(a.args ~= "" and a.args or "run") end,
+    { nargs = "?", complete = function() return { "run", "test" } end })
   cmd("TutorStart", slash("/tutor-start"), {})
   cmd("TutorLevel", slash("/tutor-level"), { nargs = "?" })
   cmd("TutorLearn", slash("/tutor-learn"), {})

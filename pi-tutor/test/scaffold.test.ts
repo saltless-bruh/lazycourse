@@ -58,6 +58,17 @@ describe("helpers", () => {
 });
 
 describe("writeScaffold", () => {
+  it("the README front matter carries the language's test command (M8)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaf-"));
+    writeScaffold(dir, spec(), meta);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^---\nrun: cargo run\ntest: cargo test\nlanguage: rust\n---\n/);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toContain("test it with `:TutorRun test`");
+  });
+  it("a language with no known test command gets no test: line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaf-"));
+    writeScaffold(dir, spec({ entry_file: "src/main.c" }), { ...meta, language: "c" });
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^---\nrun: cargo run\nlanguage: c\n---\n/);
+  });
   it("writes the spec §6 layout and nothing outside the folder", () => {
     const dir = join(mkdtempSync(join(tmpdir(), "pitutor-scaffold-")), "rust-todo-cli");
     const written = writeScaffold(dir, spec(), meta);
@@ -66,7 +77,7 @@ describe("writeScaffold", () => {
     expect(readFileSync(join(dir, "spec/tasks.md"), "utf8")).toBe(spec().tasks_md);
     expect(readFileSync(join(dir, "src/main.rs"), "utf8")).toBe("// Start here: spec/tasks.md, task P1.T1. You write the code; the tutor coaches.\n");
     const readme = readFileSync(join(dir, "README.md"), "utf8");
-    expect(readme.startsWith("---\nrun: cargo run\nlanguage: rust\n---\n# Todo CLI\n")).toBe(true);
+    expect(readme.startsWith("---\nrun: cargo run\ntest: cargo test\nlanguage: rust\n---\n# Todo CLI\n")).toBe(true);
     const agents = readFileSync(join(dir, "AGENTS.md"), "utf8");
     expect(agents).toContain("rust");
     expect(agents).toContain("spec/tasks.md");

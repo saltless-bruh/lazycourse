@@ -161,6 +161,55 @@ describe("tutor.init", function()
     vim.cmd("Tutor")
   end)
 
+  local function project(lines)
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile(lines, dir .. "/README.md")
+    return dir
+  end
+
+  it("front_matter reads key: value lines between the first two --- lines (M8)", function()
+    local tutor = require("tutor")
+    local dir = project({ "---", "run: python3 main.py", "test: python3 -m unittest discover -v", "language: python", "---", "# T" })
+    assert.same({ run = "python3 main.py", test = "python3 -m unittest discover -v", language = "python" }, tutor.front_matter(dir))
+    assert.same({}, tutor.front_matter(project({ "# no front matter" })))
+    assert.same({}, tutor.front_matter(project({ "---", "run: x" }))) -- never closed
+    assert.same({}, tutor.front_matter(vim.fn.tempname())) -- no README
+  end)
+
+  it(":TutorRun test runs the README's test: command in the project, over the run_cmd option (M8)", function()
+    package.loaded["tutor"] = nil
+    local dir = project({ "---", "run: echo running", "test: echo testing; exit 5", "---" })
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false, run_cmd = { "sh", "-c", "echo option" } })
+    local got
+    tutor._notify_override = function(p) got = p end
+    vim.cmd("TutorRun test")
+    vim.wait(2000, function() return got ~= nil end)
+    assert.equals(5, got.code)
+    assert.equals("testing\n", got.stdout)
+    assert.same({ "echo testing; exit 5" }, got.cmd)
+    got = nil
+    vim.cmd("TutorRun")
+    vim.wait(2000, function() return got ~= nil end)
+    assert.equals("running\n", got.stdout)
+  end)
+
+  it(":TutorRun test with no test: anywhere says where to add it; a bad kind shows usage (M8)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = project({ "---", "run: x", "---" }), check_version = false })
+    local msgs = {}
+    local orig = vim.notify
+    vim.notify = function(m) table.insert(msgs, m) end
+    vim.cmd("TutorRun test")
+    vim.cmd("TutorRun bogus")
+    vim.notify = orig
+    assert.is_truthy(msgs[1]:find("add `test:` to README.md", 1, true))
+    assert.is_truthy(msgs[2]:find("usage: :TutorRun [run|test]", 1, true))
+    assert.is_nil(tutor.state.run_job)
+  end)
+
   it(":TutorRun notifies the extension channel with output and exit code", function()
     local tutor = require("tutor")
     local got

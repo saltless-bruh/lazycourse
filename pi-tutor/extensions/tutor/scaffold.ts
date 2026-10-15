@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, extname, join, normalize, isAbsolute } from "node:path";
 import type { Band } from "./policy.js";
+import { LANGS } from "./knowledge/versions.js";
 import type { InterviewAnswers } from "./interview.js";
 import type { Suggestion } from "./suggest.js";
 
@@ -73,8 +74,10 @@ export function isEmptyOrMissing(dir: string): boolean {
 }
 
 function readme(s: ScaffoldSpec, m: ScaffoldMeta): string {
-  return `---\nrun: ${s.run_cmd}\nlanguage: ${m.language}\n---\n# ${m.title}\n\n${m.summary}\n\n` +
+  const test = LANGS[m.language]?.test;
+  return `---\nrun: ${s.run_cmd}\n${test ? `test: ${test}\n` : ""}language: ${m.language}\n---\n# ${m.title}\n\n${m.summary}\n\n` +
     `## Run\n\n\`${s.run_cmd}\`\n\n## Working with the tutor\n\n` +
+    `- Run it with \`:TutorRun\`${test ? ", test it with `:TutorRun test`" : ""}.\n` +
     `- The plan is in \`spec/\`: start with \`spec/tasks.md\`, tick tasks as you finish them.\n` +
     `- Open the tutor with \`:Tutor\`; ask it anything, it answers with hints, not code.\n` +
     `- Change how much help you get with \`:TutorLevel <0-100>\`.\n`;
