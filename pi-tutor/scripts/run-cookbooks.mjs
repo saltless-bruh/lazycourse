@@ -2,7 +2,7 @@
 // Runs every cookbook example with the toolchains installed here (`npm run cookbooks`; not part of
 // `npm test`). Each example must run with no arguments and exit 0. A missing toolchain is a skip.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,10 +13,12 @@ const RUN = {
   python: { tag: "python", ok: () => has("python3", ["--version"]), run: (d, src) => { const f = join(d, "x.py"); writeFileSync(f, src); return ["python3", [f], d]; } },
   lua: { tag: "lua", ok: () => has("lua", ["-v"]), run: (d, src) => { const f = join(d, "x.lua"); writeFileSync(f, src); return ["lua", [f], d]; } },
   typescript: { tag: "ts", ok: () => has("node", ["--version"]), run: (d, src) => { const f = join(d, "x.ts"); writeFileSync(f, src); return ["node", [f], d]; } },
+  // The module sits in a subfolder: Go ignores a go.mod in the system temp root, and TMPDIR is `d`.
   go: { tag: "go", ok: () => has("go", ["version"]), run: (d, src) => {
-    writeFileSync(join(d, "go.mod"), "module x\n\ngo 1.22\n");
-    if (/func Test\w*\(t \*testing\.T\)/.test(src)) { writeFileSync(join(d, "x_test.go"), src); return ["go", ["test", "./..."], d]; }
-    writeFileSync(join(d, "main.go"), src); return ["go", ["run", "."], d]; } },
+    const m = join(d, "mod"); mkdirSync(m);
+    writeFileSync(join(m, "go.mod"), "module x\n\ngo 1.22\n");
+    if (/func Test\w*\(t \*testing\.T\)/.test(src)) { writeFileSync(join(m, "x_test.go"), src); return ["go", ["test", "./..."], m]; }
+    writeFileSync(join(m, "main.go"), src); return ["go", ["run", "."], m]; } },
   rust: { tag: "rust", ok: () => has("rustc", ["--version"]), run: (d, src) => {
     const f = join(d, "x.rs"); writeFileSync(f, src);
     const test = src.includes("#[cfg(test)]");
