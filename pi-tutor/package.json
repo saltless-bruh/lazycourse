@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit",
     "golden": "vitest run --config vitest.golden.config.ts",
     "cookbooks": "node scripts/run-cookbooks.mjs",
-    "upstream-diff": "node scripts/upstream-diff.mjs"
+    "upstream-diff": "node scripts/upstream-diff.mjs",
+    "skill-evals": "vitest run --config vitest.skilleval.config.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0"
