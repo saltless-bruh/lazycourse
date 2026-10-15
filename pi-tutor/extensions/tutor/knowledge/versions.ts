@@ -1,7 +1,7 @@
 import { readConstraint } from "./constraints.js";
 
 // Installed toolchain version per language (spec 2026-10-13 §5.1). Run by the extension, never by the model.
-export type Exec = (command: string, args: string[], options?: { timeout?: number }) => Promise<{ stdout: string; stderr: string; code: number }>;
+export type Exec = (command: string, args: string[], options?: { timeout?: number; cwd?: string }) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 /** `runtime`: what runs the language when its own compiler is missing (TypeScript without tsc → node). */
 export interface LangSpec { devdocsType: string; command: string; args: string[]; runtime?: { command: string; args: string[]; name: string } }
@@ -41,7 +41,7 @@ export async function toolchain(language: string, root: string, rawExec: Exec): 
   const exec: Exec = (c, a, o) => {
     let t: ReturnType<typeof setTimeout> | undefined;
     const limit = new Promise<never>((_, rej) => { t = setTimeout(() => rej(new Error("version command timed out")), 6000); });
-    return Promise.race([rawExec(c, a, o), limit]).finally(() => clearTimeout(t));
+    return Promise.race([rawExec(c, a, { ...o, cwd: root }), limit]).finally(() => clearTimeout(t));
   };
   const installed = await detectVersion(language, exec);
   let runtime: string | null = null;

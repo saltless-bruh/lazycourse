@@ -73,9 +73,9 @@ const HOW_TO = /\bhow (?:do|can|would|should|could) (?:i|you|we)\b|\bhow to\b|\b
  * Our own [tutor] nudges never get it.
  */
 export function indexWanted(o: { prompt: string; mapStep: boolean }): boolean {
-  if (o.mapStep) return true;
   const p = o.prompt.trim();
-  return !p.startsWith("[tutor]") && HOW_TO.test(p);
+  if (p.startsWith("[tutor]")) return false; // final review I1: also at Map (step change, stuck nudges)
+  return o.mapStep || HOW_TO.test(p);
 }
 
 export function renderEditorCard(pack: Pack): string {

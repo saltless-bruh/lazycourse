@@ -102,6 +102,10 @@ describe("indexWanted (Option 2: the index only where it pays off)", () => {
   it("the design recipe's Map step always gets it", () => {
     expect(indexWanted({ prompt: "done with steps", mapStep: true })).toBe(true);
   });
+  it("our own [tutor] nudges never get it, not even at the Map step (final review I1)", () => {
+    expect(indexWanted({ prompt: "[tutor] the learner moved on to step 5 (Map)", mapStep: true })).toBe(false);
+    expect(indexWanted({ prompt: "[tutor] stuck signal: idle at a.py:3", mapStep: true })).toBe(false);
+  });
 });
 
 describe("pack budget (gap #2)", () => {

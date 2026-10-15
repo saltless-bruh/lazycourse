@@ -32,13 +32,15 @@ export function toJudgment(raw: unknown): Judgment | null {
   const o = raw as Record<string, unknown>;
   if (typeof o.judgment !== "string") return null;
   // Skill-eval iteration 4: on concept questions the model invents values ("concept"). Read any unknown
-  // value as `none` (never moves the ladder) so the block's tags and flags are kept, not dropped.
+  // value as `none` (never moves the ladder) so the block's tags and episode flag are kept, not dropped.
+  // Final review I2: such a block is weak evidence, so it never finishes a design-recipe step.
+  const valid = VALUES.includes(o.judgment as JudgmentValue);
   return {
-    judgment: VALUES.includes(o.judgment as JudgmentValue) ? (o.judgment as JudgmentValue) : "none",
+    judgment: valid ? (o.judgment as JudgmentValue) : "none",
     concept_tags: strings(o.concept_tags),
     task_done_ids: strings(o.task_done_ids),
     episode_closed: o.episode_closed === true,
-    step_done: o.step_done === true,
+    step_done: valid && o.step_done === true,
   };
 }
 

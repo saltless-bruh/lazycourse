@@ -65,6 +65,10 @@ describe("an invented judgment value reads as none (skill-eval iteration 4, user
     const text = 'In short: an immutable borrow blocks a later mutable one.\n\n```tutor-judgment\n{"judgment":"concept","concept_tags":["borrowing","lifetimes"],"task_done_ids":[],"episode_closed":false,"step_done":false}\n```';
     expect(parseJudgment(text)).toMatchObject({ judgment: "none", concept_tags: ["borrowing", "lifetimes"] });
   });
+  it("an invented value never finishes a design-recipe step (final review I2)", () => {
+    expect(toJudgment({ judgment: "concept", step_done: true })?.step_done).toBe(false);
+    expect(toJudgment({ judgment: "none", step_done: true })?.step_done).toBe(true); // a valid none still may
+  });
   it("still rejects a block with no judgment string at all", () => {
     expect(toJudgment({ concept_tags: ["x"] })).toBeNull();
     expect(toJudgment({ judgment: 3 })).toBeNull();

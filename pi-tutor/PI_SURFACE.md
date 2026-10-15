@@ -37,7 +37,8 @@ Re-verify every line when bumping versions.
   extension (never the model) runs `python3 --version`, `rustc --version`, `go version`, `tsc --version`,
   `lua -v` to pick the DevDocs bundle. M7: the same commands (plus `node --version` when `tsc` is
   missing) run once per language and project root on the first turn that needs the language card,
-  cached for the life of the Pi, with a 6 s ceiling of our own on top of `timeout`.
+  cached for the life of the Pi, with a 6 s ceiling of our own on top of `timeout`. They run with
+  `cwd: <project root>` (`ExecOptions.cwd`, exec.d.ts:13) so pyenv, rustup and nvm pick the project's version.
 - `pi.getCommands()` → `SlashCommandInfo[]`; skills appear as `{ source: "skill", sourceInfo: { path: <SKILL.md> } }`
   regardless of `enableSkillCommands` (agent-session.js:2694). `guard.ts` allows `read/grep/find/ls` inside
   `dirname(path)` of each, because skills load through the `read` tool.

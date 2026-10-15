@@ -40,6 +40,12 @@ describe("detectVersion", () => {
 
 describe("toolchain (spec §5.1)", () => {
   const ok = (out: string) => async () => ({ stdout: out, stderr: "", code: 0 });
+  it("runs the version commands in the project root, where pyenv/rustup/nvm pick the version (final review)", async () => {
+    const seen: (string | undefined)[] = [];
+    const exec = async (cmd: string, _a: string[], o?: { cwd?: string }) => { seen.push(o?.cwd); return cmd === "node" ? { stdout: "v26.1.0", stderr: "", code: 0 } : Promise.reject(new Error("ENOENT")); };
+    await toolchain("typescript", "/home/u/proj", exec);
+    expect(seen).toEqual(["/home/u/proj", "/home/u/proj"]);
+  });
   it("typescript falls back to the node runtime when tsc is missing", async () => {
     const exec = async (cmd: string) => cmd === "node" ? { stdout: "v26.11.1\n", stderr: "", code: 0 } : Promise.reject(new Error("ENOENT"));
     expect(await toolchain("typescript", "/nonexistent", exec)).toEqual({ installed: null, runtime: "node 26.11.1", constraint: null });
