@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
@@ -151,6 +151,37 @@ describe("profile language in a scaffolded project (M4 final review I3)", () => 
 /** What `:TutorRun` sends (nvim-tutor init.lua M.run → M.notify_tutor). */
 const runPayload = (code: number, stderr = "") =>
   nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["python3", "a.py"], code, stdout: "", stderr }]);
+
+describe("task ticking (M8 D6)", () => {
+  const tasks = () => readFileSync(join(h!.root, "spec", "tasks.md"), "utf8");
+  const done = (ids: string[]) => assistant("nice\n```tutor-judgment\n" + JSON.stringify({ judgment: "correct", task_done_ids: ids }) + "\n```");
+  it("a done task is ticked by the next passing run, not before", async () => {
+    const b = await linked();
+    mkdirSync(join(h!.root, "spec"));
+    writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 parse\n- [ ] P1.T2 print\n");
+    await turn(b.events, b.ctx, REASONED, done(["P1.T1"]));
+    expect(tasks()).toContain("- [ ] P1.T1");
+    expect(b.notes.at(-1)).toMatch(/P1\.T1 .*ticked when :TutorRun passes/);
+    await runPayload(1);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(tasks()).toContain("- [ ] P1.T1");
+    await runPayload(0);
+    await until(() => tasks().includes("- [x] P1.T1"));
+    expect(tasks()).toContain("- [ ] P1.T2");
+    expect(b.entries.filter((e) => e.type === "tutor_tick").map((e) => e.data)).toEqual([{ ids: ["P1.T1"] }]);
+  }, 20000);
+  it("waits while spec/tasks.md has unsaved edits in Neovim (Review Focus #5)", async () => {
+    const b = await linked();
+    mkdirSync(join(h!.root, "spec"));
+    writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 parse\n");
+    await nvim!.command(`edit ${join(h!.root, "spec", "tasks.md")}`);
+    await nvim!.command("normal! Ox");
+    await turn(b.events, b.ctx, REASONED, done(["P1.T1"]));
+    await runPayload(0);
+    await until(() => /unsaved/.test(b.notes.at(-1) ?? ""));
+    expect(tasks()).toBe("- [ ] P1.T1 parse\n");
+  }, 20000);
+});
 
 describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
   it("a failing run takes over an open error episode and nudges inside the gap", async () => {

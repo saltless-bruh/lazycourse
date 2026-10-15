@@ -198,6 +198,25 @@ export class NvimLink {
     return true;
   }
 
+  /** A loaded buffer for `path` with unsaved changes (M8: never write under the learner's edits). */
+  async isModified(path: string): Promise<boolean> {
+    if (!this.isInRoot(path)) return false;
+    return (await this.timed(this.raw.lua(`local b = vim.fn.bufnr(...) return b > 0 and vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified`, [path]), 2000, "modified")) === true;
+  }
+
+  /** Re-read `path` into its buffer after the extension wrote it (no W11 prompt later). */
+  async reloadFile(path: string): Promise<void> {
+    if (!this.isInRoot(path)) return;
+    await this.timed(this.raw.lua(`local b = vim.fn.bufnr(...) if b > 0 and vim.api.nvim_buf_is_loaded(b) then vim.cmd.checktime(b) end`, [path]), 2000, "reload");
+  }
+
+  /** Open `path` in the editor window, never the Pi pane (M8: the brief and the grade). */
+  async openInEditor(path: string): Promise<boolean> {
+    if (!this.isInRoot(path)) return false;
+    await this.timed(this.raw.lua(EDITOR_WIN_LUA + `local p = ...; vim.api.nvim_win_call(__editor_win(), function() vim.cmd.edit(vim.fn.fnameescape(p)) end)`, [path]), 2000, "open");
+    return true;
+  }
+
   private timed<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
     return bounded(p, ms, what);
   }

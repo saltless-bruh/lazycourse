@@ -13,6 +13,8 @@ import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, 
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
 import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
+import { writeInRoot } from "./files.js";
+import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
 import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, rungCap, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -156,6 +158,8 @@ export default function (pi: ExtensionAPI): void {
   let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string | null; lang?: string | null } | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
   let pendingSteers = 0;
+  /** M8 D6: task ids the model reported done, ticked in spec/tasks.md by the next passing run. */
+  const pendingTicks = new Set<string>();
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
   let lastIssues: Issue[] = [];
   /** Markdown width Pi last rendered a reply at; undefined until the TUI draws one (print mode never does). */
@@ -279,10 +283,28 @@ export default function (pi: ExtensionAPI): void {
     signal = `episode closed (${reason})`;
   }
 
+  /** M8 D6: a passing run ticks the pending task ids in spec/tasks.md (inside the root, never under unsaved edits). */
+  async function tickPending() {
+    if (!pendingTicks.size || !session) return;
+    const root = session.cwd;
+    const path = join(realCwd(root), "spec", "tasks.md");
+    let md: string;
+    try { md = readFileSync(path, "utf8"); } catch { pendingTicks.clear(); return; }
+    try { if (link && await link.isModified(path)) { ui?.notify("spec/tasks.md has unsaved edits in Neovim; save it and run again to tick", "warning"); return; } } catch { /* busy editor: write anyway */ }
+    const r = tickTasks(md, [...pendingTicks]);
+    pendingTicks.clear();
+    if (r.missing.length) ui?.notify(`not an open task in spec/tasks.md: ${r.missing.join(", ")}`, "info");
+    if (!r.ticked.length) return;
+    try { writeInRoot(root, "spec/tasks.md", r.text); } catch (e) { ui?.notify(`tutor: could not tick tasks: ${e instanceof Error ? e.message : String(e)}`, "warning"); return; }
+    pi.appendEntry("tutor_tick", { ids: r.ticked });
+    ui?.notify(`ticked ${r.ticked.join(", ")} in spec/tasks.md`, "info");
+    try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
+  }
+
   function onStuck(events: StuckEvent[]) {
     for (const e of events) {
       if (e.type === "open") openEp(e.trigger, true);
-      else if (e.type === "run_passed") closeEp("run_passed");
+      else if (e.type === "run_passed") { closeEp("run_passed"); void tickPending(); }
       else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");
     }
   }
@@ -426,6 +448,11 @@ export default function (pi: ExtensionAPI): void {
     const j: Judgment = { ...raw, concept_tags: normalizeTags(raw.concept_tags, pack ? vocabOf(pack, loadPack("editor")) : null) };
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
+    const newIds = j.task_done_ids.filter((id) => TASK_ID.test(id) && !pendingTicks.has(id));
+    if (newIds.length) {
+      for (const id of newIds) pendingTicks.add(id);
+      ui?.notify(`${newIds.join(", ")} done? It is ticked when :TutorRun passes`, "info");
+    }
     const ladder = roleNamed(activeRole).ladder;
     const inRecipe = workflow !== null && ladder;
     if (ladder) advanceWorkflow(j.step_done);
