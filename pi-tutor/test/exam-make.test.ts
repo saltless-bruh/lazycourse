@@ -80,4 +80,11 @@ describe("makeExam (D5: the tests must fail, not break, against the stub)", () =
     await expect(makeExam(d)).rejects.toThrow(/rejected twice: .*pass against the stub/);
     expect(existsSync(join(d.root, "exam")) ? readdirSync(join(d.root, "exam")) : []).toEqual([]);
   });
+  it("a missing toolchain fails at once with a clear message, without asking the model again (final review I1)", async () => {
+    let calls = 0;
+    const d = { ...deps([]), complete: async () => { calls++; return JSON.stringify(PY_EXAM); }, exec: async () => ({ stdout: "", stderr: "", code: 1, killed: false }) };
+    await expect(makeExam(d)).rejects.toThrow(/could not run python3/);
+    expect(calls).toBe(1);
+    expect(existsSync(join(d.root, "exam"))).toBe(false);
+  });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { layout, examFiles, runExamTests, EXAM_TIMEOUT_MS } from "../extensions/tutor/exam/layout.js";
 import { realExec } from "./fake-pi.js";
 
@@ -78,7 +78,30 @@ describe("exam layouts run with the real toolchains (M8 D2, D5)", () => {
     expect(EXAM_TIMEOUT_MS).toBe(120_000);
   });
   it("a killed run (timeout) is reported, not mistaken for broken tests (Review Focus #2)", async () => {
-    const r = await runExamTests(async () => ({ stdout: "", stderr: "", code: 143, killed: true }), "python", "/nonexistent");
+    // Version checks answer; the test run itself is killed.
+    const r = await runExamTests(async (_c, a) => (a.includes("--version") ? { stdout: "1", stderr: "", code: 0, killed: false } : { stdout: "", stderr: "", code: 143, killed: true }), "python", "/nonexistent");
     expect(r).toMatchObject({ killed: true, broken: false });
+  });
+  it("a missing toolchain is reported as missing, not as failing tests (final review I1)", async () => {
+    // pi.exec never rejects: a program that cannot start resolves with code 1 and no output.
+    const exec = async () => ({ stdout: "", stderr: "", code: 1, killed: false });
+    const r = await runExamTests(exec, "rust", "/nonexistent");
+    expect(r.missing).toMatch(/could not run cargo/);
+    expect(r.broken).toBe(false);
+  });
+  it.skipIf(!has("go") || spawnSync("timeout", ["--version"]).status !== 0)("a solution that loops forever is stopped with every process it started (final review I2)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "exam-hang-"));
+    writeAll(dir, examFiles("go", "package exam\n\nfunc CountWords(text string) map[string]int {\n\tfor {\n\t}\n}\n", CASES.go.tests));
+    const r = await runExamTests(realExec, "go", dir, 3);
+    expect(r.killed).toBe(true);
+    await new Promise((res) => setTimeout(res, 500));
+    const left = execFileSync("ps", ["-eo", "comm"], { encoding: "utf8" }).split("\n").filter((c) => c === "exam.test");
+    expect(left).toEqual([]);
+  }, 60_000);
+  it.each(["typescript", "javascript"])("%s: the project's own `node --test` does not pick up exam tests (final review I5)", (lang) => {
+    const root = mkdtempSync(join(tmpdir(), "exam-proj-"));
+    writeAll(join(root, "exam", "01-x"), examFiles(lang, CASES[lang].stub, CASES[lang].tests));
+    const out = spawnSync("node", ["--test"], { cwd: root, encoding: "utf8" });
+    expect(`${out.stdout}${out.stderr}`).not.toMatch(/r1 counts/);
   });
 });

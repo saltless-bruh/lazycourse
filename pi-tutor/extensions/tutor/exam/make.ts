@@ -112,6 +112,7 @@ export async function makeExam(d: { complete: Complete; exec: RunExec; system: s
     try {
       for (const [rel, t] of files) written.push(writeInRoot(d.root, `${dir}/${rel}`, t, { exclusive: true }));
       const r = await runExamTests(d.exec, d.language, join(d.root, dir));
+      if (r.missing) throw new Error(r.missing); // not the model's fault: no retry (final review I1)
       if (r.killed) reason = "the example tests did not finish within 120 s against the stub";
       else if (r.broken) reason = `the example tests do not compile or load: ${r.out.slice(-1500)}`;
       else if (r.code === 0) reason = "the example tests pass against the stub; they must fail until the learner writes the solution";

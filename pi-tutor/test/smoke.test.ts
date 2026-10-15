@@ -1161,11 +1161,60 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     mkdir(pjoin(cwd, "exam", "01-word-frequency"), { recursive: true });
     wfile(pjoin(cwd, "exam", "01-word-frequency", "solution.py"), "def count_words(t):\n    while True: pass\n");
     wfile(pjoin(cwd, "exam", "01-word-frequency", "brief.md"), "# Exam\n\n## Requirements\n\n- **R1** a\n- **R2** b\n");
-    b.pi.exec = (async () => ({ stdout: "", stderr: "", code: 143, killed: true })) as never;
+    b.pi.exec = (async (_c: string, a: string[]) => (a.includes("--version") ? { stdout: "1", stderr: "", code: 0, killed: false } : { stdout: "", stderr: "", code: 143, killed: true })) as never;
     b.replies.push(JSON.stringify({ requirements: [{ id: "R1", met: false, evidence: "solution.py:2 — loops forever" }, { id: "R2", met: false, evidence: "solution.py:2 — loops forever" }], idioms: [], next_fixes: ["a", "b", "c"], in_short: "It never returns." }));
     await b.commands["tutor-submit"].handler("", b.ctx);
     expect(readFileSync(pjoin(cwd, "exam", "01-word-frequency", "grade.md"), "utf8")).toContain("timed out after 120 s");
   });
+  it("check and submit say when the toolchain cannot run, and the exam stays open (final review I1)", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd, branch: running() });
+    mkdir(pjoin(cwd, "exam", "01-word-frequency"), { recursive: true });
+    wfile(pjoin(cwd, "exam", "01-word-frequency", "brief.md"), "# Exam\n\n## Requirements\n\n- **R1** a\n- **R2** b\n");
+    b.pi.exec = (async () => ({ stdout: "", stderr: "", code: 1, killed: false })) as never;
+    await b.commands["tutor-exam"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/could not run python3/);
+    await b.commands["tutor-submit"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/could not run python3/);
+    expect(b.widgets["tutor"]?.[0]).toMatch(/exam 01/);
+  });
+  it("/new keeps the exam of this project; a closed exam does not come back from an old session (final review I3)", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    const fresh = fakeCtx([], cwd);
+    await b.events["session_start"]({ type: "session_start", reason: "new" }, fresh.ctx);
+    expect(fresh.widgets["tutor"]?.[0]).toMatch(/exam 01/);
+    const opened = b.entries.filter((x) => x.type === "tutor_exam").map((x) => ({ type: "custom", customType: "tutor_exam", data: x.data }));
+    await b.commands["tutor-exam"].handler("off", fresh.ctx);
+    const old = fakeCtx(opened, cwd); // /resume into the session that still says the exam is open
+    await b.events["session_start"]({ type: "session_start", reason: "resume" }, old.ctx);
+    expect(old.widgets["tutor"]?.[0]).not.toMatch(/exam/);
+  }, 30_000);
+  it("/tutor-feedback too-vague cannot lift hints above the exam cap (final review I4)", async () => {
+    const b = await boot({ cwd: await projectDir("python"), branch: running() });
+    await turn(b.events, b.ctx, "how do I start?", judged("none"));
+    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    await b.commands["tutor-feedback"].handler("too-vague", b.ctx);
+    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+  });
+  it("a second /tutor-submit while one runs is refused; the exam is recorded once (final review M1, re-graded)", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    const g = JSON.stringify({ requirements: [{ id: "R1", met: false, evidence: "solution.py:2 — not written" }, { id: "R2", met: false, evidence: "solution.py:2 — not written" }], idioms: [], next_fixes: ["a", "b", "c"], in_short: "Not started." });
+    b.replies.push(g, g);
+    await Promise.all([b.commands["tutor-submit"].handler("", b.ctx), b.commands["tutor-submit"].handler("", b.ctx)]);
+    expect(b.notes.some((n) => /still running/.test(n))).toBe(true);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    expect(p.exams("python")).toHaveLength(1);
+    p.close();
+  }, 30_000);
   it("the design recipe and the architect wait until the exam is over", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running() });
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);

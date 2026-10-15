@@ -193,6 +193,23 @@ export default function (pi: ExtensionAPI): void {
   /** The learner's feedback history (spec §7 #7): the profile's per language in a project, else this session's. */
   let feedbackHistory: FeedbackKind[] = [];
 
+  /**
+   * Final review I3: the exam outlives the session (/new, a second Pi) through the profile, keyed by
+   * project; the last state there wins over an older session's entries (a closed exam stays closed).
+   */
+  function saveExam(state: ExamState) {
+    pi.appendEntry("tutor_exam", state);
+    if (project && profile) { const p = profile, key = `exam:${project.path}`; profileWrite(() => p.setSetting(key, JSON.stringify(state))); }
+  }
+  /** Final review M1 (re-graded): one exam command at a time; a second submit must not grade twice. */
+  let examBusy = false;
+
+  async function exclusive(ctx: ExtensionContext, run: () => Promise<void>): Promise<void> {
+    if (examBusy) { ctx.ui.notify("an exam command is still running; wait for it to finish", "warning"); return; }
+    examBusy = true;
+    try { await run(); } finally { examBusy = false; }
+  }
+
   /** Spec §6: during an exam every episode's rung stays at EXAM_RUNG_CAP or lower. */
   const examCap = (ep: Episode) => (exam ? capRung(ep, EXAM_RUNG_CAP) : ep);
   /** One repaint a second while an exam runs (spec §6 mm:ss); unref'd, cleared when the exam ends. */
@@ -225,7 +242,7 @@ export default function (pi: ExtensionAPI): void {
   function setLevel(n: number) {
     state.level = n;
     if (episode) {
-      episode = rebandEpisode(episode, bandFor(n));
+      episode = examCap(rebandEpisode(episode, bandFor(n)));
       pi.appendEntry("tutor_episode", episode);
     }
   }
@@ -364,7 +381,12 @@ export default function (pi: ExtensionAPI): void {
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
-    exam = restoreExam(ctx.sessionManager.getBranch());
+    let saved: ExamState | null | undefined;
+    if (project && profile) {
+      const p = profile, key = `exam:${project.path}`;
+      profileWrite(() => { const raw = p.setting(key); if (raw) { try { saved = restoreExam([{ type: "custom", customType: "tutor_exam", data: JSON.parse(raw) }]); } catch { saved = undefined; } } });
+    }
+    exam = saved !== undefined ? saved : restoreExam(ctx.sessionManager.getBranch());
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       // Pane review #5: an old link's disconnect can land after /new or /resume connected a new one;
@@ -641,18 +663,20 @@ export default function (pi: ExtensionAPI): void {
 
   pi.registerCommand("tutor-exam", {
     description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons",
-    handler: async (args, ctx) => {
+    handler: (args, ctx) => exclusive(ctx, async () => {
       const a = parseExamArgs(args);
       if (a.kind === "off") {
         if (!exam) { ctx.ui.notify("no exam is running", "info"); return; }
-        pi.appendEntry("tutor_exam", { ...exam, abandoned: Date.now() });
+        saveExam({ ...exam, abandoned: Date.now() });
         ctx.ui.notify(`exam ${exam.id} abandoned; its files stay in ${exam.dir}`, "info");
         exam = null; examClock(); paint();
         return;
       }
       if (a.kind === "check") {
         if (!exam || !project) { ctx.ui.notify("no exam is running", "info"); return; }
+        ctx.ui.notify("running the example tests…", "info");
         const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir));
+        if (r.missing) { ctx.ui.notify(r.missing, "warning"); return; }
         ctx.ui.notify(r.killed ? "examples timed out after 120 s: a loop that never ends?" : r.code === 0 ? "all examples pass; :TutorSubmit when you are ready" : `examples fail (exit ${r.code}): ${r.out.split("\n").slice(-6).join("\n")}`, r.code === 0 ? "info" : "warning");
         return;
       }
@@ -677,7 +701,7 @@ export default function (pi: ExtensionAPI): void {
         });
         setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
         exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts };
-        pi.appendEntry("tutor_exam", exam);
+        saveExam(exam);
         if (episode) { episode = examCap(episode); pi.appendEntry("tutor_episode", episode); }
         examClock();
         paint();
@@ -686,7 +710,7 @@ export default function (pi: ExtensionAPI): void {
       } catch (e) {
         ctx.ui.notify(e instanceof Cancelled ? "exam cancelled" : `exam failed: ${e instanceof Error ? e.message : String(e)}`, e instanceof Cancelled ? "info" : "error");
       }
-    },
+    }),
   });
 
   /** Requirement ids as the brief on disk states them (`- **R1** …`). */
@@ -695,14 +719,16 @@ export default function (pi: ExtensionAPI): void {
 
   pi.registerCommand("tutor-submit", {
     description: "Hand in the running exam: run its tests, grade it, write exam/<id>/grade.md",
-    handler: async (_args, ctx) => {
+    handler: (_args, ctx) => exclusive(ctx, async () => {
       if (!exam || !project || !profile) { ctx.ui.notify("no exam is running; start one with /tutor-exam", "info"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
       const e = exam, proj = project, p = profile, dir = join(proj.path, e.dir);
       let brief: string;
       try { brief = readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
       const ids = briefIds(brief);
+      ctx.ui.notify("running the example tests…", "info");
       const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir);
+      if (test.missing) { ctx.ui.notify(`${test.missing} The exam stays open.`, "warning"); return; }
       const files = learnerFiles(dir, e.language);
       const minutes = Math.round((Date.now() - e.started) / 6000) / 10;
       let grade: Grade;
@@ -720,13 +746,13 @@ export default function (pi: ExtensionAPI): void {
       try { gradePath = writeInRoot(proj.path, `${e.dir}/grade.md`, renderGrade(grade, { id: e.id, score: s, minutes, limit: e.limit, test })); }
       catch (err) { ctx.ui.notify(`could not write grade.md: ${err instanceof Error ? err.message : String(err)}`, "error"); return; }
       profileWrite(() => p.recordExam({ exam: e.id, project: proj.path, language: e.language, topic: e.topic, score: s, minutes, late, concepts: e.concepts, created: Date.now() }));
-      pi.appendEntry("tutor_exam", { ...e, submitted: Date.now(), score: s });
+      saveExam({ ...e, submitted: Date.now(), score: s });
       exam = null; examClock(); paint();
       const summary = [`**Exam ${e.id}: ${s}/100** (${late ? "late" : "on time"}, ${minutes} of ${e.limit} min)`, "",
         ...grade.requirements.map((r) => `- ${r.met ? "✔" : "✘"} ${r.id}`), "", "Next:", ...grade.next_fixes.map((f, n) => `${n + 1}. ${f}`), "", `Full grade: \`${e.dir}/grade.md\``].join("\n");
       pi.sendMessage({ customType: "tutor_grade", content: summary, display: true, details: { exam: e.id, score: s } }, { triggerTurn: false });
       try { await link?.openInEditor(gradePath); } catch { /* the summary names the file */ }
-    },
+    }),
   });
 
   pi.registerCommand("tutor-progress", {
@@ -789,7 +815,8 @@ export default function (pi: ExtensionAPI): void {
       const rung = episode ? episode.rung : null;
       if (episode && roleNamed(activeRole).ladder) {
         const next = feedbackRung(kind, episode.rung, rungCap(episode.band));
-        if (next !== episode.rung) { episode = { ...episode, rung: next }; pi.appendEntry("tutor_episode", episode); }
+        const capped = examCap({ ...episode, rung: next }); // final review I4: feedback never lifts an exam's cap
+        if (capped.rung !== episode.rung) { episode = capped; pi.appendEntry("tutor_episode", episode); }
       }
       feedbackHistory.push(kind);
       pi.appendEntry("tutor_feedback", { kind, rung });
