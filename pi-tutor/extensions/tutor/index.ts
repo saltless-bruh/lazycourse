@@ -17,7 +17,7 @@ import { writeInRoot } from "./files.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, rungCap, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, rungCap, capRung, EXAM_RUNG_CAP, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, feedbackRung, formatFeedback } from "./feedback.js";
@@ -27,9 +27,9 @@ import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progre
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
 import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakConcepts, type IndexEntry } from "./packs.js";
-import { layout } from "./exam/layout.js";
+import { layout, runExamTests } from "./exam/layout.js";
 import { parseExamArgs, examPrompt, makeExam, LIMIT_MIN } from "./exam/make.js";
-import { restoreExam, type ExamState } from "./exam/state.js";
+import { restoreExam, examLabel, formatExamContext, type ExamState } from "./exam/state.js";
 import { renderCard, renderEditorCard, renderIndex, indexWanted } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
 import { LANGS, detectVersion, toolchainCache, languageOfFiletype } from "./knowledge/versions.js";
@@ -191,8 +191,19 @@ export default function (pi: ExtensionAPI): void {
   /** The learner's feedback history (spec §7 #7): the profile's per language in a project, else this session's. */
   let feedbackHistory: FeedbackKind[] = [];
 
+  /** Spec §6: during an exam every episode's rung stays at EXAM_RUNG_CAP or lower. */
+  const examCap = (ep: Episode) => (exam ? capRung(ep, EXAM_RUNG_CAP) : ep);
+  /** One repaint a second while an exam runs (spec §6 mm:ss); unref'd, cleared when the exam ends. */
+  let examTimer: ReturnType<typeof setInterval> | null = null;
+  function examClock() {
+    if (exam && !examTimer) { examTimer = setInterval(paint, 1000); examTimer.unref?.(); }
+    if (!exam && examTimer) { clearInterval(examTimer); examTimer = null; }
+  }
+
   function paint() {
     state.rung = episode ? episode.rung : startRung(bandFor(level()));
+    if (exam) state.rung = Math.min(state.rung, EXAM_RUNG_CAP);
+    state.exam = exam ? examLabel(exam, Date.now()) : undefined;
     state.state = episode ? `stuck: ${describeTrigger(episode.trigger)}` : signal;
     const r = roleNamed(activeRole);
     state.role = r.name === DEFAULT_ROLE ? undefined : r.name;
@@ -222,7 +233,7 @@ export default function (pi: ExtensionAPI): void {
     const run = trigger.kind === "run";
     // Final review I1: re-running a still-failing program keeps the hint level; only the trace is new.
     if (run && episode?.trigger.kind === "run") {
-      episode = { ...episode, trigger };
+      episode = examCap({ ...episode, trigger });
       pi.appendEntry("tutor_episode", episode);
       nudgeFor(trigger, nudge, true);
       return;
@@ -232,7 +243,7 @@ export default function (pi: ExtensionAPI): void {
       if (!nudge || !(run || yieldsTo(episode))) return;
       closeEp("superseded");
     }
-    episode = openEpisode(trigger, bandFor(level()), Date.now());
+    episode = examCap(openEpisode(trigger, bandFor(level()), Date.now()));
     pi.appendEntry("tutor_episode", episode);
     nudgeFor(trigger, nudge, run);
   }
@@ -372,12 +383,15 @@ export default function (pi: ExtensionAPI): void {
       }, TICK_MS);
       tick.unref?.();
     }
+    examClock();
     paint();
   });
 
   pi.on("session_shutdown", async () => {
     closing = true;
     if (tick) clearInterval(tick);
+    if (examTimer) clearInterval(examTimer);
+    examTimer = null;
     tick = null;
     profile?.close();
     profile = null;
@@ -422,6 +436,7 @@ export default function (pi: ExtensionAPI): void {
     if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");
     const parts: string[] = [];
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
+    if (exam && role.ladder) parts.push(formatExamContext(exam, Date.now()));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
     // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
@@ -479,7 +494,7 @@ export default function (pi: ExtensionAPI): void {
       episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
     }
     const rung = episode.rung;
-    episode = applyJudgment(episode, j, Date.now());
+    episode = examCap(applyJudgment(episode, j, Date.now()));
     // Spec §4: in the design recipe the learner writes every artifact; good step answers must not
     // climb the ladder toward reveal (final review I2: the rung went 3 → 5 in the live walk).
     if (inRecipe) episode = { ...episode, rung };
@@ -569,6 +584,7 @@ export default function (pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const q = args.trim();
       if (q === "off") { setRole(DEFAULT_ROLE); paint(); ctx.ui.notify("back to the coding tutor", "info"); return; }
+      if (exam) { ctx.ui.notify("the design recipe and the architect wait until after the exam (/tutor-submit or /tutor-exam off)", "warning"); return; }
       setRole("architect");
       paint();
       // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
@@ -600,6 +616,7 @@ export default function (pi: ExtensionAPI): void {
         }
         return;
       }
+      if (exam) { ctx.ui.notify("the design recipe and the architect wait until after the exam (/tutor-submit or /tutor-exam off)", "warning"); return; }
       if (!TASK_ID.test(id)) { ctx.ui.notify("usage: /tutor-plan <task id>, e.g. /tutor-plan P1.T1, or /tutor-plan next|off", "warning"); return; }
       let tasks: string;
       try { tasks = readFileSync(join(ctx.cwd, "spec", "tasks.md"), "utf8"); } catch {
@@ -623,7 +640,19 @@ export default function (pi: ExtensionAPI): void {
     description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons",
     handler: async (args, ctx) => {
       const a = parseExamArgs(args);
-      if (a.kind !== "start") { ctx.ui.notify("not yet", "info"); return; } // Task 6
+      if (a.kind === "off") {
+        if (!exam) { ctx.ui.notify("no exam is running", "info"); return; }
+        pi.appendEntry("tutor_exam", { ...exam, abandoned: Date.now() });
+        ctx.ui.notify(`exam ${exam.id} abandoned; its files stay in ${exam.dir}`, "info");
+        exam = null; examClock(); paint();
+        return;
+      }
+      if (a.kind === "check") {
+        if (!exam || !project) { ctx.ui.notify("no exam is running", "info"); return; }
+        const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir));
+        ctx.ui.notify(r.killed ? "examples timed out after 120 s: a loop that never ends?" : r.code === 0 ? "all examples pass; :TutorSubmit when you are ready" : `examples fail (exit ${r.code}): ${r.out.split("\n").slice(-6).join("\n")}`, r.code === 0 ? "info" : "warning");
+        return;
+      }
       if (exam) { ctx.ui.notify(`exam ${exam.id} is running: /tutor-submit, or /tutor-exam off to abandon it`, "warning"); return; }
       if (!profile || !project) { ctx.ui.notify("exams run inside a project: /tutor-start makes one", "warning"); return; }
       const proj = project, lang = proj.language, lay = layout(lang);
@@ -646,6 +675,8 @@ export default function (pi: ExtensionAPI): void {
         setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
         exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts };
         pi.appendEntry("tutor_exam", exam);
+        if (episode) { episode = examCap(episode); pi.appendEntry("tutor_episode", episode); }
+        examClock();
         paint();
         ctx.ui.notify(`exam ${made.id}: ${exam.limit} minutes. Brief: ${made.dir}/brief.md · write ${made.dir}/${lay.stub} · :TutorExam check · :TutorSubmit`, "info");
         try { await link?.openInEditor(join(proj.path, made.dir, "brief.md")); } catch { /* the notice names the file */ }

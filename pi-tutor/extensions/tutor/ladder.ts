@@ -41,6 +41,12 @@ export function rungCap(band: Band): 4 | 5 {
   return band === "pro" ? 4 : 5;
 }
 
+/** Spec 2026-10-13 §6: during an exam hints stay at rung 2 or lower. */
+export const EXAM_RUNG_CAP = 2;
+export function capRung(ep: Episode, max: number): Episode {
+  return ep.rung > max ? { ...ep, rung: max } : ep;
+}
+
 export function openEpisode(trigger: Trigger, band: Band, now: number): Episode {
   return { id: `ep-${now}`, trigger, band, rung: startRung(band), opened: now, turns: 0, concept_tags: [] };
 }

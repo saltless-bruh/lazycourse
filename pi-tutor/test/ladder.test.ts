@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { easeStart, episodeScore, yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES } from "../extensions/tutor/ladder.js";
+import { easeStart, episodeScore, yieldsTo, openEpisode, nextRung, applyJudgment, closeEpisode, rebandEpisode, rungCap, describeTrigger, RUNG_NAMES, capRung, EXAM_RUNG_CAP } from "../extensions/tutor/ladder.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 
 const j = (judgment: Judgment["judgment"], over: Partial<Judgment> = {}): Judgment =>
@@ -114,5 +114,13 @@ describe("run episodes", () => {
   it("hold their place against editor triggers and describe the failed command", () => {
     expect(yieldsTo(openEpisode(run, "beginner", 1))).toBe(false);
     expect(describeTrigger(run)).toBe("run failed (exit 101): cargo run");
+  });
+});
+
+describe("capRung (M8: exam hints stay at rung 2)", () => {
+  it("lowers a rung above the cap and leaves others alone", () => {
+    const ep = openEpisode({ kind: "chat" }, "beginner", 1); // starts at 3
+    expect(capRung(ep, EXAM_RUNG_CAP).rung).toBe(2);
+    expect(capRung({ ...ep, rung: 1 }, 2).rung).toBe(1);
   });
 });

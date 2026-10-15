@@ -2,6 +2,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { bandFor } from "./policy.js";
 
 export interface TutorState {
+  /** Exam timer label (M8): first on line 1 so clipping never hides it. */
+  exam?: string;
   /** Active role when it is not the default coding tutor (spec 2026-10-13 §3). */
   role?: string;
   language?: string; level?: number; rung?: number; task?: string;
@@ -29,6 +31,7 @@ function clip(s: string, max = MAX): string {
 
 export function renderWidget(s: TutorState): string[] {
   const parts: string[] = [];
+  if (s.exam) parts.push(s.exam);
   if (s.role) parts.push(s.role);
   if (s.language) parts.push(s.language);
   if (s.level !== undefined) parts.push(`lvl ${s.level}`);

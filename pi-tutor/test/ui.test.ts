@@ -32,6 +32,10 @@ describe("renderWidget", () => {
     expect(visibleWidth(w[1])).toBeLessThanOrEqual(44);
     expect(w[1].endsWith("…")).toBe(true);
   });
+  it("an exam label leads line 1, so clipping never hides the timer (M8)", () => {
+    const [l1] = renderWidget({ exam: "exam 01 19:59 left", role: "architect", language: "typescript", level: 50, rung: 2, state: "idle", connected: true });
+    expect(l1.startsWith("tutor  exam 01 19:59 left · ")).toBe(true);
+  });
   it("keeps both lines within 44 cells", () => {
     const w = renderWidget({ language: "typescript", level: 100, rung: 5, task: "P12.T34.S56", state: "stuck: cannot borrow `x` as mutable more than once at a time", connected: true, last: "partial" });
     for (const l of w) expect(l.length).toBeLessThanOrEqual(44);

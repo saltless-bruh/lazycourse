@@ -1077,6 +1077,7 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     const e = b.entries.filter((x) => x.type === "tutor_exam").at(-1)?.data;
     expect(e).toMatchObject({ id: "01-word-frequency", dir: "exam/01-word-frequency", language: "python", size: "small", limit: 20, concepts: ["dicts", "strings"] });
     expect(b.notes.at(-1)).toMatch(/exam 01-word-frequency: 20 minutes/);
+    expect(b.widgets["tutor"]?.[0]).toMatch(/^tutor {2}exam 01 (20:00|19:5\d) left/); // Task 6
   }, 30_000);
   it("refuses outside a recorded project, for a language with no exams, and while one runs", async () => {
     const out = await boot();
@@ -1088,5 +1089,38 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     const b = await boot({ cwd: await projectDir("python"), branch: [{ type: "custom", customType: "tutor_exam", data: { id: "01-x", dir: "exam/01-x", language: "python", topic: null, size: "small", started: Date.now(), limit: 20, concepts: [] } }] });
     await b.commands["tutor-exam"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/exam 01-x is running/);
+  });
+  const running = (over: object = {}) => [{ type: "custom", customType: "tutor_exam", data: { id: "01-word-frequency", dir: "exam/01-word-frequency", language: "python", topic: null, size: "small", started: Date.now(), limit: 20, concepts: ["dicts"], ...over } }];
+  it("during an exam, hints are capped at rung 2 and every turn carries the [exam] line", async () => {
+    const b = await boot({ cwd: await projectDir("python"), branch: running() });
+    await b.commands["tutor-level"].handler("10", b.ctx); // beginner: would start at rung 3
+    const t = await turn(b.events, b.ctx, "how do I start?", judged("none"));
+    expect(t.message?.content).toMatch(/\[exam\] timed exam 01-word-frequency/);
+    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    await turn(b.events, b.ctx, REASONED, judged("correct"));
+    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+  });
+  it("a resumed exam keeps its real start: one that began an hour ago is late (Review Focus #3)", async () => {
+    const b = await boot({ cwd: await projectDir("python"), branch: running({ started: Date.now() - 3_600_000 }) });
+    expect(b.widgets["tutor"]?.[0]).toMatch(/exam 01 \+40:0\d late/);
+  });
+  it("off abandons the exam; check runs the examples without a model call", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    await b.commands["tutor-exam"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/examples fail \(exit 1\)/);
+    await b.commands["tutor-exam"].handler("off", b.ctx);
+    expect(b.entries.filter((x) => x.type === "tutor_exam").at(-1)?.data).toMatchObject({ abandoned: expect.any(Number) });
+    expect(b.widgets["tutor"]?.[0]).not.toMatch(/exam/);
+  }, 30_000);
+  it("the design recipe and the architect wait until the exam is over", async () => {
+    const b = await boot({ cwd: await projectDir("python"), branch: running() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/after the exam/);
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/after the exam/);
   });
 });
