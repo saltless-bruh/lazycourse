@@ -20,7 +20,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "golden": "vitest run --config vitest.golden.config.ts"
+    "golden": "vitest run --config vitest.golden.config.ts",
+    "cookbooks": "node scripts/run-cookbooks.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0"
