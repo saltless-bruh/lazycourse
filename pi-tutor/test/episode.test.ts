@@ -46,6 +46,13 @@ describe("language card through a real Neovim (Review Focus #4)", () => {
     const next = await turn(b.events, b.ctx, "and now?", judged("none"));
     expect(next.sections["tutor_lang"]).toMatch(/^\[language card: lua\]/);
   }, 20000);
+  it("a .tsx buffer gets the TypeScript card (M7 minor)", async () => {
+    const b = await linked();
+    writeFileSync(join(h!.root, "App.tsx"), "export const App = () => null;\n");
+    await nvim!.command(`edit ${join(h!.root, "App.tsx")}`);
+    const t = await turn(b.events, b.ctx, "hi", judged("none"));
+    expect(t.sections["tutor_lang"]).toMatch(/^\[language card: typescript\]/);
+  }, 20000);
 });
 
 describe("stuck episodes through a real Neovim", () => {

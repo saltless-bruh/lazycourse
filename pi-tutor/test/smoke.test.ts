@@ -954,6 +954,14 @@ describe("thinking visibility (/tutor-thinking)", () => {
     await again.commands["tutor-level"].handler("90", again.ctx);
     expect(think(again.transformers[0])).toBe("The user asks about rung 2 and INDEX.md");
   });
+  it("without a profile the choice is said to last this session only (M7 minor)", async () => {
+    process.env.PI_TUTOR_PROFILE = mkd(pjoin(tmp(), "think-dir-")); // a directory: the profile cannot open
+    const b = await boot();
+    expect(b.notes.join("\n")).toMatch(/tutor profile unavailable/);
+    await b.commands["tutor-thinking"].handler("hide", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/^thinking: hide .*this session only/);
+    expect(think(b.transformers[0])).toBe(THINKING_LABEL);
+  });
   it("with no argument it reports the current mode", async () => {
     const b = await boot();
     await b.commands["tutor-thinking"].handler("", b.ctx);
@@ -1026,6 +1034,17 @@ describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
     const b = await boot({ cwd: await projectDir("python") });
     await turn(b.events, b.ctx, REASONED, tagged(["KeyError", "monads", "motions"]));
     expect(lastJudgment(b)).toMatchObject({ concept_tags: ["dicts", "motions"] });
+  });
+  it("ease saved under an old free-form tag counts for its vocabulary tag (M7 minor)", async () => {
+    const cwd = await projectDir("python");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    p.recordEpisode({ language: "python", project: null, concept_tags: ["keyerror"], rungs_used: 1, turns: 1, opened: 1, closed: 2 }, 1);
+    p.close();
+    const b = await boot({ cwd });
+    await turn(b.events, b.ctx, REASONED, assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "none", concept_tags: ["dicts"] }) + "\n```"));
+    const ep = b.entries.filter((e) => e.type === "tutor_episode").at(-1)?.data as { rung: number };
+    expect(ep.rung).toBe(1); // intermediate (level 50) starts at rung 2; ease 1.0 on dicts eases it by one
   });
   it("a language with no pack keeps normalized tags", async () => {
     const b = await boot({ cwd: await projectDir("c") });

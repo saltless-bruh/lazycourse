@@ -83,7 +83,8 @@ search them with `tutor_recall`. Everything lives in your profile (`profile.sqli
   keeps that per language until you say `good`; outside a project it lasts for the session.
 - `:TutorThinking auto|show|hide` shows or hides the model's thinking in the pane. `auto` (the
   default) hides it at the pro level only; the choice is kept across sessions. It changes only
-  what is drawn: the model still thinks.
+  what is drawn: the model still thinks. While the tutor hides it, Pi's own click-to-expand on a
+  thinking block does nothing; run `:TutorThinking show` to read it.
 
 The widget's second line says `outside nvim` when Pi runs without Neovim and `nvim closed` when
 the editor exited; either way it still shows the tutor's state and last judgment.

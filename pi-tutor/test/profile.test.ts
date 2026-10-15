@@ -210,3 +210,29 @@ describe("M6c: profile minors", () => {
     q.close();
   });
 });
+
+describe("M7 minors: profile", () => {
+  it("a real v2 profile keeps memory (with its search index) and feedback through the v3 upgrade", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "pitutor-v2full-")), "profile.sqlite");
+    const raw = new DatabaseSync(file);
+    raw.exec(`CREATE TABLE schema_version (v INTEGER NOT NULL); INSERT INTO schema_version (v) VALUES (2);`);
+    raw.exec(MIGRATIONS[0]);
+    raw.exec(MIGRATIONS[1]);
+    raw.close();
+    // Rows written through the v2 code path: the FTS triggers must fire on the old schema.
+    const v2 = new DatabaseSync(file);
+    v2.exec(`INSERT INTO languages VALUES ('python', 30, '{}', 1);
+      INSERT INTO memory (type, text, language, project, created, updated) VALUES ('learner', 'prefers while loops', 'python', NULL, 1, 1);
+      INSERT INTO feedback (kind, language, project, rung, created) VALUES ('too-easy', 'python', NULL, 2, 1);`);
+    v2.close();
+    const q = Profile.open(file);
+    expect(q.version).toBe(3);
+    expect(q.language("python")?.level).toBe(30);
+    expect(q.recall("loops", 5).map((m) => m.text)).toEqual(["prefers while loops"]);
+    expect(q.feedback("python").map((f) => f.kind)).toEqual(["too-easy"]);
+    expect(q.setting("thinking")).toBeNull();
+    q.setSetting("thinking", "hide");
+    q.close();
+    expect(Profile.open(file).setting("thinking")).toBe("hide");
+  });
+});

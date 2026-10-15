@@ -69,3 +69,22 @@ export function normalizeTags(tags: string[], vocab: Vocab | null): string[] {
   }
   return out;
 }
+
+interface ConceptEase { language: string; tag: string; ease: number; episodes: number }
+
+/**
+ * M7 minor: concept rows saved before the vocabulary (e.g. `keyerror`, `list-comprehension`) read
+ * under their vocabulary tag, folded as an episode-weighted mean. Read-time only: the rows stay as
+ * stored. A tag the vocabulary does not know keeps its own name.
+ */
+export function remapConcepts<T extends ConceptEase>(rows: T[], vocab: Vocab | null): ConceptEase[] {
+  const out = new Map<string, ConceptEase>();
+  for (const r of rows) {
+    const tag = vocab?.get(normalizeTag(r.tag)) ?? r.tag;
+    const had = out.get(tag);
+    if (!had) { out.set(tag, { language: r.language, tag, ease: r.ease, episodes: r.episodes }); continue; }
+    const n = had.episodes + r.episodes;
+    out.set(tag, { ...had, ease: n ? (had.ease * had.episodes + r.ease * r.episodes) / n : had.ease, episodes: n });
+  }
+  return [...out.values()];
+}

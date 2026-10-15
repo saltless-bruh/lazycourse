@@ -53,6 +53,17 @@ describe("runStart", () => {
     expect(t.prompts).toHaveLength(2);
   });
 
+  it("weak concepts saved under old free-form tags reach the suggester under the vocabulary tag (M7 minor)", async () => {
+    const t = deps([undefined]);
+    t.profile.saveLanguage("python", 50, {}, 1);
+    t.profile.recordEpisode({ language: "python", project: null, concept_tags: ["keyerror", "dicts"], rungs_used: 3, turns: 2, opened: 1, closed: 2 }, 0.2);
+    let user = "";
+    const complete = t.d.complete;
+    t.d.complete = async (system, u) => { user ||= u; return complete(system, u); };
+    await runStart("python", t.d);
+    expect(user).toMatch(/weak concepts: dicts\n/);
+  });
+
   it("offers the built-in languages plus profile languages and an 'other' entry", async () => {
     const t = deps([undefined]);
     t.profile.saveLanguage("zig", 30, {}, 1);

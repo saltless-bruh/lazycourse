@@ -24,10 +24,10 @@ import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
-import { loadPack, normalizeTags, vocabOf, cookbookIndex, type IndexEntry } from "./packs.js";
+import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, type IndexEntry } from "./packs.js";
 import { renderCard, renderEditorCard, renderIndex, indexWanted } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
-import { LANGS, detectVersion, toolchain, type Toolchain } from "./knowledge/versions.js";
+import { LANGS, detectVersion, toolchainCache, languageOfFiletype } from "./knowledge/versions.js";
 
 /** Bundled pack skills (cookbook, expert) that exist for a language; the card names them (spec §5.4). */
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
@@ -161,13 +161,8 @@ export default function (pi: ExtensionAPI): void {
   let paneWidth: number | undefined;
   /** Thinking visibility (learner setting, kept in the profile): auto hides it only at the pro band. */
   let thinking: ThinkingMode = "auto";
-  /** Toolchain per language+root, detected once per Pi on the first turn that needs it (spec §5.1). */
-  const toolchains = new Map<string, Promise<Toolchain>>();
-  const toolchainOf = (lang: string, root: string) => {
-    const k = `${lang}\0${root}`;
-    if (!toolchains.has(k)) toolchains.set(k, toolchain(lang, root, (command, args, options) => pi.exec(command, args, options)));
-    return toolchains.get(k)!;
-  };
+  /** Toolchain per language+root (spec §5.1): versions re-checked every few minutes, the constraint every turn. */
+  const toolchainOf = toolchainCache((command, args, options) => pi.exec(command, args, options));
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
   let activeRole = DEFAULT_ROLE;
   /** Design-recipe workflow in progress (spec 2026-10-13 §4), persisted as `tutor_workflow` entries. */
@@ -177,7 +172,7 @@ export default function (pi: ExtensionAPI): void {
   const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
   // Spec 2026-10-13 §7.1: the model's two memory tools, scoped to this session's project.
   /** The language to use outside a recorded project: the buffer's filetype, if it is a pack language (M5 #38). */
-  const editorLanguage = () => (state.language && LANGS[state.language] ? state.language : null);
+  const editorLanguage = () => languageOfFiletype(state.language);
   const memoryScope = { profile: () => profile, language: () => project?.language ?? editorLanguage(), project: () => project?.path ?? null, now: Date.now };
   pi.registerTool(rememberTool(memoryScope));
   pi.registerTool(recallTool(memoryScope));
@@ -438,7 +433,8 @@ export default function (pi: ExtensionAPI): void {
     if (episode.turns === 0 && project && profile) {
       let known = new Map<string, number>();
       const p = profile, lang = project.language;
-      profileWrite(() => { known = new Map(p.concepts(lang).map((c) => [c.tag, c.ease])); });
+      const vocab = pack ? vocabOf(pack, loadPack("editor")) : null;
+      profileWrite(() => { known = new Map(remapConcepts(p.concepts(lang), vocab).map((c) => [c.tag, c.ease])); });
       episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
     }
     const rung = episode.rung;
@@ -611,7 +607,9 @@ export default function (pi: ExtensionAPI): void {
       if (!mode) { ctx.ui.notify("usage: /tutor-thinking auto|show|hide", "warning"); return; }
       thinking = mode;
       if (profile) { const p = profile; profileWrite(() => p.setSetting("thinking", mode)); }
-      ctx.ui.notify(`thinking: ${mode} (${shown()} now; replies already on screen redraw on the next update)`, "info");
+      // M7 minor: without a profile the choice is not saved; say so instead of implying it lasts.
+      const keep = profile ? "" : "; this session only: the profile is unavailable";
+      ctx.ui.notify(`thinking: ${mode} (${shown()} now; replies already on screen redraw on the next update${keep})`, "info");
     },
   });
 

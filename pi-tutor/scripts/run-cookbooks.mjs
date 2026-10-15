@@ -2,7 +2,7 @@
 // Runs every cookbook example with the toolchains installed here (`npm run cookbooks`; not part of
 // `npm test`). Each example must run with no arguments and exit 0. A missing toolchain is a skip.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +50,7 @@ for (const [lang, r] of Object.entries(RUN)) {
       ran++;
       if (p.status !== 0) { failed++; process.stdout.write(`FAIL ${lang} ${id}\n${p.stdout}${p.stderr}\n`); }
     } catch (e) { failed++; ran++; process.stdout.write(`FAIL ${lang} ${id}\n${e.stderr ?? e.message}\n`); }
+    finally { rmSync(d, { recursive: true, force: true }); } // M7 minor: no cb-* folder left behind
   }
 }
 process.stdout.write(`${ran - failed}/${ran} cookbook examples ran\n`);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePack, loadPack, vocabOf, normalizeTag, normalizeTags } from "../extensions/tutor/packs.js";
+import { parsePack, loadPack, vocabOf, normalizeTag, normalizeTags, remapConcepts } from "../extensions/tutor/packs.js";
 
 const CARD = [
   "# Python card", "", "- **Format:** ruff format", "",
@@ -52,5 +52,25 @@ describe("packs", () => {
     const v = vocabOf(parsePack("python", CARD), ed)!;
     expect(v.get("motions")).toBe("motions");
     expect(v.get("loops")).toBe("loops");
+  });
+});
+
+describe("remapConcepts (M7 minor: rows saved before the vocabulary)", () => {
+  const vocab = vocabOf(loadPack("python"));
+  it("folds old free-form tags into their vocabulary tag as an episode-weighted mean", () => {
+    const rows = [
+      { language: "python", tag: "dicts", ease: 0.8, episodes: 3 },
+      { language: "python", tag: "keyerror", ease: 0.4, episodes: 1 },
+      { language: "python", tag: "list-comprehension", ease: 0.9, episodes: 2 },
+    ];
+    expect(remapConcepts(rows, vocab)).toEqual([
+      { language: "python", tag: "dicts", ease: expect.closeTo(0.7, 10), episodes: 4 },
+      { language: "python", tag: "comprehensions", ease: 0.9, episodes: 2 },
+    ]);
+  });
+  it("keeps a tag the vocabulary does not know, and every tag when there is no vocabulary", () => {
+    const rows = [{ language: "c", tag: "pointer-arithmetic", ease: 0.3, episodes: 1 }];
+    expect(remapConcepts(rows, vocab)).toEqual(rows);
+    expect(remapConcepts(rows, null)).toEqual(rows);
   });
 });
