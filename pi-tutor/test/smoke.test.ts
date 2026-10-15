@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { fakePi, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
+import { fakePi, fakeCtx, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile } from "node:fs";
@@ -1045,6 +1045,15 @@ describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
     await turn(b.events, b.ctx, REASONED, assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "none", concept_tags: ["dicts"] }) + "\n```"));
     const ep = b.entries.filter((e) => e.type === "tutor_episode").at(-1)?.data as { rung: number };
     expect(ep.rung).toBe(1); // intermediate (level 50) starts at rung 2; ease 1.0 on dicts eases it by one
+  });
+  it("tags follow the language the question was asked in, even if the session moved mid-reply (M7 minor)", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: opts }, b.ctx);
+    const rust = fakeCtx([], await projectDir("rust")); // e.g. /resume into a rust project before turn_end
+    await b.events["session_start"]({ type: "session_start", reason: "resume" }, rust.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: tagged(["KeyError"]) }, rust.ctx);
+    expect(lastJudgment(b)).toMatchObject({ concept_tags: ["dicts"] });
   });
   it("a language with no pack keeps normalized tags", async () => {
     const b = await boot({ cwd: await projectDir("c") });

@@ -152,7 +152,8 @@ export default function (pi: ExtensionAPI): void {
    * and then writes the fence must not move the rung twice.
    */
   /** `episodeId`: the episode a ladder-role run answers, `null` when it started without one (M6c M6). */
-  let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string | null } | null = null;
+  /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
+  let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string | null; lang?: string | null } | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
   let pendingSteers = 0;
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
@@ -374,6 +375,7 @@ export default function (pi: ExtensionAPI): void {
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
     // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
     const lang = project?.language ?? editorLanguage();
+    run.lang = lang;
     const pack = lang ? loadPack(lang) : null;
     const editorPack = loadPack("editor");
     const cards: string[] = [];
@@ -415,10 +417,11 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Apply one accepted judgment to the episode and the profile (spec §5). */
-  function applyTurnJudgment(raw: Judgment, episodeId?: string | null) {
+  function applyTurnJudgment(raw: Judgment, episodeId?: string | null, promptLang?: string | null) {
     // Spec §5.4 (gap #5): tags from the card's vocabulary (aliases mapped, unknown dropped), plus the
-    // editor pack's; a language with no pack keeps its tags, only normalized.
-    const lang = project?.language ?? editorLanguage();
+    // editor pack's; a language with no pack keeps its tags, only normalized. The vocabulary is the one
+    // the model saw on its card at the prompt (M7 minor); a run with no prompt falls back to now.
+    const lang = promptLang !== undefined ? promptLang : project?.language ?? editorLanguage();
     const pack = lang ? loadPack(lang) : null;
     const j: Judgment = { ...raw, concept_tags: normalizeTags(raw.concept_tags, pack ? vocabOf(pack, loadPack("editor")) : null) };
     state.last = j.judgment;
@@ -499,7 +502,7 @@ export default function (pi: ExtensionAPI): void {
     const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // A judgment may come in a tool-use turn's text too (live check); the first one in the run counts.
     const j = callArgs !== undefined ? toJudgment(callArgs) : parseJudgment(text);
-    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId); }
+    if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId, cur.lang); }
     if (final) {
       if (!cur.judged) state.last = "missing";
       lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
