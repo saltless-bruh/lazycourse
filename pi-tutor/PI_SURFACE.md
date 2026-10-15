@@ -112,6 +112,10 @@ Re-verify every line when bumping versions.
   `AssistantMessageComponent` passes `"assistant"` (thinking is `"assistant-thinking"`). `availableWidth` is the Markdown content width (terminal minus `paddingX` 1 each
   side; probe: 70-col tmux → 68); code block lines are indented by `codeBlockIndent` (default 2, pi-tui
   markdown.js:393). Used for the screen rewording and the real diagram width.
+  Thinking blocks come through as `"assistant-thinking"` (assistant-message.js:118). When Pi's own
+  `hideThinkingBlock` is on, Pi draws its label and never calls the transformer (:112-113). No
+  extension API sets `hideThinkingBlock` (only `ctx.ui.setHiddenThinkingLabel`), so `/tutor-thinking`
+  swaps the thinking Markdown for one line instead; the setting lives in profile `settings(thinking)`.
 - `ctx.sessionManager.getBranch()` (ReadonlySessionManager): custom entries are
   `{ type: "custom", customType, data }`; used to restore `tutor_level` on resume.
 - `pi.on("context", (event: { messages: AgentMessage[] }) => { messages? })` transforms the

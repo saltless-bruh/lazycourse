@@ -10,6 +10,7 @@ import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judg
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, type Issue } from "./compliance.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
+import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
 import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
@@ -138,6 +139,8 @@ export default function (pi: ExtensionAPI): void {
   let lastIssues: Issue[] = [];
   /** Markdown width Pi last rendered a reply at; undefined until the TUI draws one (print mode never does). */
   let paneWidth: number | undefined;
+  /** Thinking visibility (learner setting, kept in the profile): auto hides it only at the pro band. */
+  let thinking: ThinkingMode = "auto";
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
   let activeRole = DEFAULT_ROLE;
   /** Design-recipe workflow in progress (spec 2026-10-13 §4), persisted as `tutor_workflow` entries. */
@@ -287,6 +290,7 @@ export default function (pi: ExtensionAPI): void {
     if (proj) state.language = proj.language;
     // M2 #14: a new session (/new) without a project keeps the level this Pi already has.
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? state.level ?? DEFAULT_LEVEL;
+    if (profile) { const p = profile; profileWrite(() => { thinking = parseThinkingMode(p.setting("thinking") ?? "") ?? "auto"; }); }
     memoryNote = null;
     if (profile) { const p = profile; profileWrite(() => { memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); }); }
     feedbackHistory = [];
@@ -416,6 +420,7 @@ export default function (pi: ExtensionAPI): void {
   // reworded text while it streams; message_end swaps it into the finished reply before turn_end,
   // the saved session and the model's next context see it. Fences (the judgment block) are kept.
   pi.registerMarkdownTransformer((md, c) => {
+    if (c.messageType === "assistant-thinking") return thinkingHidden(thinking, bandFor(level())) ? THINKING_LABEL : md;
     if (c.messageType !== "assistant") return md;
     paneWidth = c.availableWidth;
     return scrubInternals(md);
@@ -543,6 +548,19 @@ export default function (pi: ExtensionAPI): void {
       // Final review I3: a forget is the learner correcting the tutor, so the snapshot is rebuilt now.
       profileWrite(() => { gone = p.forget(id); if (gone) memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); });
       ctx.ui.notify(gone ? `forgot memory #${id}` : `memory #${id} was already gone`, "info");
+    },
+  });
+
+  pi.registerCommand("tutor-thinking", {
+    description: "Show or hide the model's thinking: auto (hidden at pro) | show | hide",
+    handler: async (args, ctx) => {
+      const shown = () => (thinkingHidden(thinking, bandFor(level())) ? "hidden" : "shown");
+      if (!args.trim()) { ctx.ui.notify(`thinking: ${thinking} (${shown()} now)`, "info"); return; }
+      const mode = parseThinkingMode(args);
+      if (!mode) { ctx.ui.notify("usage: /tutor-thinking auto|show|hide", "warning"); return; }
+      thinking = mode;
+      if (profile) { const p = profile; profileWrite(() => p.setSetting("thinking", mode)); }
+      ctx.ui.notify(`thinking: ${mode} (${shown()} now; replies already on screen redraw on the next update)`, "info");
     },
   });
 

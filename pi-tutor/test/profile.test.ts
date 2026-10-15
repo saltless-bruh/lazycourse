@@ -110,9 +110,23 @@ describe("busy profile (final review I4)", () => {
   });
 });
 
+describe("profile v3: settings", () => {
+  it("is schema v3 and keeps a setting across reopen", () => {
+    expect(SCHEMA_VERSION).toBe(3);
+    const path = join(mkdtempSync(join(tmpdir(), "prof-")), "p.sqlite");
+    const a = Profile.open(path);
+    expect(a.setting("thinking")).toBeNull();
+    a.setSetting("thinking", "hide");
+    a.setSetting("thinking", "show"); // upsert
+    a.close();
+    const b = Profile.open(path);
+    expect(b.setting("thinking")).toBe("show");
+    b.close();
+  });
+});
+
 describe("profile v2: memory and feedback (spec 2026-10-13 §7.1, §7 #7, §8)", () => {
   const open = () => Profile.open(":memory:");
-  it("is schema v2", () => { expect(SCHEMA_VERSION).toBe(2); expect(open().version).toBe(2); });
   it("upgrades a v1 profile in place and keeps its rows", () => {
     const file = join(mkdtempSync(join(tmpdir(), "pitutor-v1-")), "profile.sqlite");
     const raw = new DatabaseSync(file);
@@ -121,7 +135,7 @@ describe("profile v2: memory and feedback (spec 2026-10-13 §7.1, §7 #7, §8)",
       INSERT INTO languages VALUES ('rust', 40, '{}', 1);`);
     raw.close();
     const q = Profile.open(file);
-    expect(q.version).toBe(2);
+    expect(q.version).toBe(SCHEMA_VERSION);
     expect(q.language("rust")?.level).toBe(40);
     expect(q.remember({ type: "learner", text: "knows Go", language: null, project: null }, 2).created).toBe(true);
     q.close();
@@ -188,7 +202,7 @@ describe("M6c: profile minors", () => {
       INSERT INTO projects (language, path, title, status, created) VALUES ('rust', '/p', 'T', 'active', 1);`);
     raw.close();
     const q = Profile.open(file);
-    expect(q.version).toBe(2);
+    expect(q.version).toBe(SCHEMA_VERSION);
     expect(q.language("rust")?.level).toBe(40);
     expect(q.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: 0.5, episodes: 2 }]);
     expect(q.episodes("rust")).toHaveLength(1);

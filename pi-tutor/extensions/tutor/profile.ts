@@ -24,6 +24,8 @@ export const MIGRATIONS: string[] = [
    CREATE TRIGGER memory_ad AFTER DELETE ON memory BEGIN INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.id, old.text); END;
    CREATE TABLE feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, language TEXT, project TEXT, rung INTEGER,
      created INTEGER NOT NULL);`,
+  // v3 (M7): learner settings that outlast sessions (thinking visibility).
+  `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -103,6 +105,15 @@ export class Profile {
 
   setLevel(name: string, level: number): boolean {
     return Number(this.db.prepare("UPDATE languages SET level = ? WHERE name = ?").run(level, name).changes) > 0;
+  }
+
+  setting(key: string): string | null {
+    const r = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as Row | undefined;
+    return r ? String(r.value) : null;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
   }
 
   concepts(language: string): ConceptRow[] {

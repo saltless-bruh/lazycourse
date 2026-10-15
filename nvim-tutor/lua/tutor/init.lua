@@ -154,6 +154,8 @@ function M.setup(user_opts)
   cmd("TutorArchitect", slash("/tutor-architect"), { nargs = "?" })
   cmd("TutorFeedback", slash("/tutor-feedback"), { nargs = 1,
     complete = function() return { "too-long", "too-vague", "too-much-help", "good" } end })
+  cmd("TutorThinking", slash("/tutor-thinking"), { nargs = "?",
+    complete = function() return { "auto", "show", "hide" } end })
   cmd("TutorReload", slash("/reload"), {})
 end
 

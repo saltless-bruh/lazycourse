@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
+import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile } from "node:fs";
 import { tmpdir as tmp } from "node:os";
@@ -922,5 +923,40 @@ describe("M6c: turn and episode bookkeeping", () => {
   it("/tutor-memory shows each memory's language (M6b #62)", async () => {
     const { memoryLine } = await import("../extensions/tutor/memory.js");
     expect(memoryLine({ id: 3, type: "learner", text: "knows Go", language: "python", project: null, created: 1, updated: 1 })).toBe("#3 [learner] knows Go (python)");
+  });
+});
+
+describe("thinking visibility (/tutor-thinking)", () => {
+  // A file-backed profile shared by every boot in this block, so a second boot is "Pi restarted".
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "think-")), "p.sqlite"); });
+  afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
+  const think = (t: (md: string, c: { messageType: string; isStreaming: boolean; availableWidth: number }) => string) =>
+    t("The user asks about rung 2 and INDEX.md", { messageType: "assistant-thinking", isStreaming: true, availableWidth: 68 });
+  it("auto: shown below pro, a one-line label at pro", async () => {
+    const b = await boot();
+    const [t] = b.transformers;
+    expect(think(t)).toBe("The user asks about rung 2 and INDEX.md");
+    await b.commands["tutor-level"].handler("90", b.ctx);
+    expect(think(t)).toBe(THINKING_LABEL);
+  });
+  it("hide and show override the band, persist in the profile, and bad input only warns", async () => {
+    const b = await boot();
+    const [t] = b.transformers;
+    await b.commands["tutor-thinking"].handler("hide", b.ctx);
+    expect(think(t)).toBe(THINKING_LABEL);
+    await b.commands["tutor-thinking"].handler("bogus", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/usage: \/tutor-thinking auto\|show\|hide/);
+    expect(think(t)).toBe(THINKING_LABEL);
+    const again = await boot(); // a new Pi: the profile keeps the choice
+    expect(think(again.transformers[0])).toBe(THINKING_LABEL);
+    await again.commands["tutor-thinking"].handler("show", again.ctx);
+    await again.commands["tutor-level"].handler("90", again.ctx);
+    expect(think(again.transformers[0])).toBe("The user asks about rung 2 and INDEX.md");
+  });
+  it("with no argument it reports the current mode", async () => {
+    const b = await boot();
+    await b.commands["tutor-thinking"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/thinking: auto \(shown/);
   });
 });

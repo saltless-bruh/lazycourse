@@ -81,6 +81,9 @@ search them with `tutor_recall`. Everything lives in your profile (`profile.sqli
 - `:TutorFeedback too-long|too-vague|too-much-help|good` tells the tutor how it is doing; it
   adjusts its style (and the hint level for `too-much-help` / `too-vague`). Inside a project it
   keeps that per language until you say `good`; outside a project it lasts for the session.
+- `:TutorThinking auto|show|hide` shows or hides the model's thinking in the pane. `auto` (the
+  default) hides it at the pro level only; the choice is kept across sessions. It changes only
+  what is drawn: the model still thinks.
 
 The widget's second line says `outside nvim` when Pi runs without Neovim and `nvim closed` when
 the editor exited; either way it still shows the tutor's state and last judgment.
@@ -130,7 +133,7 @@ return {
     dir = "<repo>/nvim-tutor",
     name = "nvim-tutor",
     cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn",
-            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback" },
+            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback", "TutorThinking" },
     keys = {
       { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
       { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },
