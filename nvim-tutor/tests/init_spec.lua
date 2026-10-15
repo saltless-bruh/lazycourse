@@ -77,6 +77,18 @@ describe("tutor.init", function()
     assert.same({ "small", "medium", "check", "off" }, vim.fn.getcompletion("TutorExam ", "cmdline"))
   end)
 
+  it(":TutorSubmit and :TutorProgress type their slash commands (M8)", function()
+    local tutor = require("tutor")
+    vim.cmd("Tutor")
+    vim.cmd("TutorSubmit")
+    vim.cmd("TutorProgress rust")
+    local buf = tutor.state.term:bufnr()
+    local has = function(l) return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), l) end
+    vim.wait(1000, function() return has("/tutor-submit") and has("/tutor-progress rust") end)
+    assert.is_true(has("/tutor-submit"))
+    assert.is_true(has("/tutor-progress rust"))
+  end)
+
   it("a slash wrapper run under textlock (an <expr> mapping) opens the pane later and types (pane #3)", function()
     local tutor = require("tutor")
     vim.keymap.set("n", "<F14>", function() vim.cmd("TutorDocs go"); return "" end, { expr = true })

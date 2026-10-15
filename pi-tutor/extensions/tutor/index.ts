@@ -30,6 +30,7 @@ import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakCon
 import { layout, runExamTests } from "./exam/layout.js";
 import { parseExamArgs, examPrompt, makeExam, LIMIT_MIN } from "./exam/make.js";
 import { restoreExam, examLabel, formatExamContext, type ExamState } from "./exam/state.js";
+import { learnerFiles, checkGrade, score, gradePrompt, renderGrade, type Grade } from "./exam/grade.js";
 import { renderCard, renderEditorCard, renderIndex, indexWanted } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
 import { LANGS, detectVersion, toolchainCache, languageOfFiletype } from "./knowledge/versions.js";
@@ -683,6 +684,46 @@ export default function (pi: ExtensionAPI): void {
       } catch (e) {
         ctx.ui.notify(e instanceof Cancelled ? "exam cancelled" : `exam failed: ${e instanceof Error ? e.message : String(e)}`, e instanceof Cancelled ? "info" : "error");
       }
+    },
+  });
+
+  /** Requirement ids as the brief on disk states them (`- **R1** …`). */
+  const briefIds = (brief: string) => [...brief.matchAll(/^- \*\*(R\d+)\*\*/gm)].map((m) => m[1]);
+  const rubric = () => { try { return readFileSync(join(SKILLS_DIR, "tutor-exam-rubric", "SKILL.md"), "utf8").replace(/^---[\s\S]*?---\n/, ""); } catch { return ""; } };
+
+  pi.registerCommand("tutor-submit", {
+    description: "Hand in the running exam: run its tests, grade it, write exam/<id>/grade.md",
+    handler: async (_args, ctx) => {
+      if (!exam || !project || !profile) { ctx.ui.notify("no exam is running; start one with /tutor-exam", "info"); return; }
+      if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
+      const e = exam, proj = project, p = profile, dir = join(proj.path, e.dir);
+      let brief: string;
+      try { brief = readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
+      const ids = briefIds(brief);
+      const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir);
+      const files = learnerFiles(dir, e.language);
+      const minutes = Math.round((Date.now() - e.started) / 6000) / 10;
+      let grade: Grade;
+      try {
+        grade = await completeJson(modelComplete(ctx, () => "tutor: grading your exam…"),
+          `${rolePrompt(roleNamed("examiner"))}\n\n${rubric()}\n\n${systemText("exam-grade")}`,
+          gradePrompt({ brief, files, test, checklist: loadPack(e.language)?.body ?? "", minutes, limit: e.limit }),
+          (v) => checkGrade(v, { ids, files, testsPassed: test.code === 0 && !test.killed }));
+      } catch (err) {
+        ctx.ui.notify(err instanceof Cancelled ? "grading cancelled; the exam is still open" : `grading failed: ${err instanceof Error ? err.message : String(err)}; the exam is still open`, err instanceof Cancelled ? "info" : "error");
+        return;
+      }
+      const s = score(grade), late = minutes > e.limit;
+      let gradePath: string;
+      try { gradePath = writeInRoot(proj.path, `${e.dir}/grade.md`, renderGrade(grade, { id: e.id, score: s, minutes, limit: e.limit, test })); }
+      catch (err) { ctx.ui.notify(`could not write grade.md: ${err instanceof Error ? err.message : String(err)}`, "error"); return; }
+      profileWrite(() => p.recordExam({ exam: e.id, project: proj.path, language: e.language, topic: e.topic, score: s, minutes, late, concepts: e.concepts, created: Date.now() }));
+      pi.appendEntry("tutor_exam", { ...e, submitted: Date.now(), score: s });
+      exam = null; examClock(); paint();
+      const summary = [`**Exam ${e.id}: ${s}/100** (${late ? "late" : "on time"}, ${minutes} of ${e.limit} min)`, "",
+        ...grade.requirements.map((r) => `- ${r.met ? "✔" : "✘"} ${r.id}`), "", "Next:", ...grade.next_fixes.map((f, n) => `${n + 1}. ${f}`), "", `Full grade: \`${e.dir}/grade.md\``].join("\n");
+      pi.sendMessage({ customType: "tutor_grade", content: summary, display: true, details: { exam: e.id, score: s } }, { triggerTurn: false });
+      try { await link?.openInEditor(gradePath); } catch { /* the summary names the file */ }
     },
   });
 

@@ -1116,6 +1116,56 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     expect(b.entries.filter((x) => x.type === "tutor_exam").at(-1)?.data).toMatchObject({ abandoned: expect.any(Number) });
     expect(b.widgets["tutor"]?.[0]).not.toMatch(/exam/);
   }, 30_000);
+  it("/tutor-submit runs the tests, grades with one call, writes grade.md, records the exam, posts the summary", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    const dir = pjoin(cwd, "exam", "01-word-frequency");
+    wfile(pjoin(dir, "solution.py"), "def count_words(text):\n    out = {}\n    for w in text.split():\n        out[w] = out.get(w, 0) + 1\n    return out\n");
+    b.replies.push(JSON.stringify({
+      requirements: [{ id: "R1", met: true, evidence: "solution.py:4 — counts each word" }, { id: "R2", met: false, evidence: "solution.py:3 — words are not lowercased" }],
+      idioms: [{ ok: true, note: "dict.get counting", evidence: "solution.py:4" }],
+      next_fixes: ["lowercase each word before counting", "name the dict counts", "add a docstring"], in_short: "Counting works; case does not.",
+    }));
+    await b.commands["tutor-submit"].handler("", b.ctx);
+    const md = readFileSync(pjoin(dir, "grade.md"), "utf8");
+    expect(md).toMatch(/\*\*60\/100\*\*/);
+    expect(md).toContain("The example tests failed (exit 1).");
+    expect(md).toMatch(/test_r2_lowercase/); // real unittest output is the test evidence
+    expect(b.entries.filter((x) => x.type === "tutor_exam").at(-1)?.data).toMatchObject({ submitted: expect.any(Number), score: 60 });
+    expect(b.messages.at(-1)).toMatchObject({ message: { customType: "tutor_grade", display: true }, options: { triggerTurn: false } });
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    expect(p.exams("python")).toMatchObject([{ exam: "01-word-frequency", score: 60, late: false, concepts: ["dicts", "strings"] }]);
+    p.close();
+    expect(b.widgets["tutor"]?.[0]).not.toMatch(/exam/);
+  }, 30_000);
+  it("a grade the model gets wrong twice writes nothing and keeps the exam open (Review Focus #4)", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    const bad = JSON.stringify({ requirements: [{ id: "R1", met: true, evidence: "nowhere.py:1 — x" }], idioms: [], next_fixes: ["a", "b", "c"], in_short: "x" });
+    b.replies.push(bad, bad);
+    await b.commands["tutor-submit"].handler("", b.ctx);
+    expect(existsSync(pjoin(cwd, "exam", "01-word-frequency", "grade.md"))).toBe(false);
+    expect(b.notes.at(-1)).toMatch(/grading failed: .*rejected twice/);
+    expect(b.widgets["tutor"]?.[0]).toMatch(/exam 01/);
+  }, 30_000);
+  it("a submission whose tests hang is graded as timed out, and Pi is not stuck (Review Focus #2)", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd, branch: running() });
+    mkdir(pjoin(cwd, "exam", "01-word-frequency"), { recursive: true });
+    wfile(pjoin(cwd, "exam", "01-word-frequency", "solution.py"), "def count_words(t):\n    while True: pass\n");
+    wfile(pjoin(cwd, "exam", "01-word-frequency", "brief.md"), "# Exam\n\n## Requirements\n\n- **R1** a\n- **R2** b\n");
+    b.pi.exec = (async () => ({ stdout: "", stderr: "", code: 143, killed: true })) as never;
+    b.replies.push(JSON.stringify({ requirements: [{ id: "R1", met: false, evidence: "solution.py:2 — loops forever" }, { id: "R2", met: false, evidence: "solution.py:2 — loops forever" }], idioms: [], next_fixes: ["a", "b", "c"], in_short: "It never returns." }));
+    await b.commands["tutor-submit"].handler("", b.ctx);
+    expect(readFileSync(pjoin(cwd, "exam", "01-word-frequency", "grade.md"), "utf8")).toContain("timed out after 120 s");
+  });
   it("the design recipe and the architect wait until the exam is over", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running() });
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);

@@ -184,6 +184,8 @@ function M.setup(user_opts)
     complete = function() return { "auto", "show", "hide" } end })
   cmd("TutorExam", slash("/tutor-exam"), { nargs = "*",
     complete = function() return { "small", "medium", "check", "off" } end })
+  cmd("TutorSubmit", slash("/tutor-submit"), {})
+  cmd("TutorProgress", slash("/tutor-progress"), { nargs = "?" })
   cmd("TutorReload", slash("/reload"), {})
 end
 

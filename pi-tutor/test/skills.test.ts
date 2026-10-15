@@ -13,7 +13,7 @@ const diagramLines = (t: string) => [...t.matchAll(/```([^\n`]*)\r?\n([\s\S]*?)`
   .filter((m) => ["", "text"].includes(m[1].trim())).flatMap((m) => m[2].split("\n"));
 
 describe("bundled skills", () => {
-  for (const name of ["tutor-teaching-style", "tutor-design-recipe", "tutor-memory", "tutor-stack-traces"]) {
+  for (const name of ["tutor-teaching-style", "tutor-design-recipe", "tutor-memory", "tutor-stack-traces", "tutor-exam-rubric"]) {
     it(`${name} loads in Pi (name matches folder, description ≤ 1024)`, () => {
       const h = parseSkillHeader(read(name));
       expect(h.name).toBe(name);

@@ -23,6 +23,7 @@ export function fakePi() {
   const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
   const entries: { type: string; data: unknown }[] = [];
   const sent: { text: string; opts: unknown }[] = [];
+  const messages: { message: unknown; options: unknown }[] = [];
   const execOut: Record<string, { stdout: string; stderr: string; code: number }> = {};
   const skills: { path: string }[] = [];
   const tools: Record<string, { execute: (...a: unknown[]) => Promise<unknown> }> = {};
@@ -34,10 +35,11 @@ export function fakePi() {
     registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
     appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); },
     sendUserMessage: (text: string, opts: unknown) => { sent.push({ text, opts }); },
+    sendMessage: (message: unknown, options: unknown) => { messages.push({ message, options }); },
     exec: async (command: string) => ({ ...(execOut[command] ?? { stdout: "", stderr: `${command}: not found`, code: 127 }), killed: false }),
     getCommands: () => skills.map((s) => ({ name: "skill:x", source: "skill", sourceInfo: { path: s.path } })),
   };
-  return { pi, events, commands, entries, sent, skills, execOut, tools, transformers };
+  return { pi, events, commands, entries, sent, messages, skills, execOut, tools, transformers };
 }
 
 export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {

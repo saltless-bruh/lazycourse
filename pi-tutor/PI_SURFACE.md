@@ -26,6 +26,10 @@ Re-verify every line when bumping versions.
 - `pi.sendUserMessage(text, { deliverAs: "followUp" })`: always triggers a turn; `deliverAs` is
   ignored when idle and required while streaming (agent-session.js:1551). Used once per
   editor-triggered episode, text prefixed `[tutor]`.
+- `pi.sendMessage({ customType, content, display, details }, { triggerTurn: false })` (types.d.ts:1234;
+  agent-session.js:1782 `sendCustomMessage`): while idle it appends the message to the session now and renders it
+  with the default CustomMessageComponent (a labelled Markdown box, custom-message.js); while streaming it is
+  deferred to the end of the turn. Custom messages are in the model's context. M8: tutor_grade, tutor_progress.
 - `ctx.isIdle()` (types.d.ts:236): nudges are sent only when true. The session_start `ctx` is kept.
 - `pi.on("tool_call", (event, ctx) => ToolCallEventResult | undefined)` (types.d.ts:1200);
   `event.toolName`, `event.input` (mutable; we never mutate); result `{ block: true, reason }`.
