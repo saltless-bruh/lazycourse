@@ -981,6 +981,8 @@ describe("language card in the system prompt (spec §5.4)", () => {
     const t = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(t.sections["tutor_lang"]).toMatch(/^\[language card: python\]\nInstalled: Python 3\.14\.8/);
     expect(t.sections["tutor_lang"]).toContain("[editor card: LazyVim]");
+    // Option A: the index follows the language card, before the editor card.
+    expect(t.sections["tutor_lang"]).toMatch(/\[index: python\][\s\S]*count-items `Counter\(xs\)`[\s\S]*tutor-python-expert\/SKILL\.md[\s\S]*\[editor card: LazyVim\]/);
   });
   it("no language known: only the editor card; a language with no pack: only the editor card", async () => {
     const b = await boot();

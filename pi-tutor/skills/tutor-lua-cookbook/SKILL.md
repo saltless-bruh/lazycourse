@@ -11,6 +11,7 @@ Every example runs with the standalone `lua` and uses only Lua 5.1 features unle
 
 ## read-args: read the command-line arguments
 since: 5.1
+index: `arg[1]`
 The standalone interpreter puts the arguments in the global table `arg`: `arg[1]` is the first, `#arg` the count. (Inside Neovim there is no `arg`; commands get their own arguments.)
 ```lua
 local words = {}
@@ -24,6 +25,7 @@ Bridge: Python `sys.argv[1:]` · Rust `std::env::args().skip(1)` · Go `os.Args[
 
 ## parse-number: turn text into a number, handling bad input
 since: 5.1
+index: `tonumber(s)` returns `nil`
 `tonumber(text)` returns `nil` when the text is not a number, so test for `nil` before using it.
 ```lua
 for _, raw in ipairs({ "21", "oops", "-4" }) do
@@ -39,6 +41,7 @@ Bridge: Python `int(s)` with `except ValueError` · Rust `s.parse::<i64>()` retu
 
 ## loop-index: loop over items with their position
 since: 5.1
+index: `for i, x in ipairs(xs)`
 `ipairs(t)` walks the array part from index 1 and stops at the first `nil`, handing out index and value.
 ```lua
 local rivers = { "Nile", "Amazon", "Yangtze" }
@@ -50,6 +53,7 @@ Bridge: Python `for i, x in enumerate(xs)` · Rust `for (i, x) in xs.iter().enum
 
 ## lookup-default: look up a key with a fallback value
 since: 5.1
+index: `t[k] or 0`
 A missing key reads as `nil`, and `x or default` picks the default when `x` is `nil` (or `false`).
 ```lua
 local stock = { apples = 3, pears = 0 }
@@ -61,6 +65,7 @@ Bridge: Python `d.get(k, 0)` · Rust `m.get(k).copied().unwrap_or(0)` · Go `v, 
 
 ## count-items: count how often each item appears
 since: 5.1
+index: `t[x] = (t[x] or 0) + 1`
 Read the count with `or 0`, add one, store it back; `pairs` then walks the result in no fixed order.
 ```lua
 local colours = { "red", "blue", "red", "green", "red", "blue" }
@@ -74,6 +79,7 @@ Bridge: Python `Counter(xs)` · Rust `*counts.entry(x).or_insert(0) += 1` · Go 
 
 ## group-by: group items by a key
 since: 5.1
+index: `t[k] = t[k] or {}; table.insert(t[k], x)`
 Create the group table the first time a key is seen, then `table.insert` into it.
 ```lua
 local animals = { "cat", "cow", "dog", "duck", "crow" }
@@ -89,6 +95,7 @@ Bridge: Python `d.setdefault(k, []).append(x)` · Rust `m.entry(k).or_default().
 
 ## sort-by: sort records by a field
 since: 5.1
+index: `table.sort(xs, less)`
 `table.sort(t, less)` sorts in place; `less(a, b)` must return true when `a` goes first (and false for equal items).
 ```lua
 local books = {
@@ -105,6 +112,7 @@ Bridge: Python `sorted(xs, key=lambda r: r.year)` · Rust `xs.sort_by_key(|r| r.
 
 ## filter-map: keep some items and transform them
 since: 5.1
+index: `for` loop with `table.insert`
 Lua has no built-in map/filter: loop, test, and `table.insert` into a new table.
 ```lua
 local temps = { 12, 25, 31, 8, 28 }
@@ -120,6 +128,7 @@ Bridge: Python `[f(x) for x in xs if p(x)]` · Rust `xs.iter().filter(p).map(f).
 
 ## record-type: define a small record type with named fields
 since: 5.1
+index: `{ name = …, moons = … }` table
 A record is a table with string keys; a constructor function keeps every record the same shape.
 ```lua
 local function Planet(name, moons)
@@ -134,6 +143,7 @@ Bridge: Python `@dataclass` · Rust `struct` · Go `type T struct { … }` · Ty
 
 ## maybe-value: represent "maybe there is no value"
 since: 5.1
+index: `nil`
 Return `nil` for "nothing"; the caller tests with `if x == nil` (or `if not x`).
 ```lua
 local function first_long(words)
@@ -150,6 +160,7 @@ Bridge: Python `X | None` · Rust `Option<T>` · Go `(v, ok)` or a pointer · Ty
 
 ## errors: report a failure and handle it
 since: 5.1
+index: `error(msg)` with `pcall`
 `error(msg, 2)` raises an error blamed on the caller; `pcall(f, ...)` runs `f` and returns `false, msg` instead of crashing.
 ```lua
 local function withdraw(balance, amount)
@@ -166,6 +177,7 @@ Bridge: Python `raise` with `try`/`except` · Rust `Result<T, E>` with `?` · Go
 
 ## read-file: read a text file line by line
 since: 5.1
+index: `for line in io.lines(p)`
 `io.lines(path)` opens the file, yields one line at a time without the newline, and closes it at the end.
 ```lua
 local path = os.tmpname()
@@ -183,6 +195,7 @@ Bridge: Python `for line in open(p)` · Rust `BufReader::new(File::open(p)?).lin
 
 ## write-file: write text to a file
 since: 5.1
+index: `io.open(p, "w"):write(s)`
 `io.open(path, "w")` returns a file handle (or `nil, err`); write, then `close` so the text is flushed.
 ```lua
 local path = os.tmpname()
@@ -198,6 +211,7 @@ Bridge: Python `Path(p).write_text(s)` · Rust `std::fs::write(p, s)?` · Go `os
 
 ## format-string: build a string from values
 since: 5.1
+index: `string.format("%s: %.2f", name, n)`
 `string.format` works like C's printf: `%s` text, `%d` integer, `%.2f` two decimals.
 ```lua
 local item, price, qty = "tea", 3.5, 4
@@ -207,6 +221,7 @@ Bridge: Python `f"{name}: {n:.2f}"` · Rust `format!("{name}: {n:.2}")` · Go `f
 
 ## split-join: split a string and join parts
 since: 5.1
+index: `s:gmatch("[^,]+")` and `table.concat(xs, ",")`
 There is no `split`: `gmatch` with the pattern `[^,]+` ("one or more non-commas") yields each piece; `table.concat` joins.
 ```lua
 local trees = {}
@@ -219,6 +234,7 @@ Bridge: Python `s.split(",")` and `",".join(xs)` · Rust `s.split(',')` and `xs.
 
 ## test-function: write a unit test for a function
 since: 5.1
+index: `assert(...)` or busted
 Without a framework, a test is a function of `assert(got == expected, message)` calls run through `pcall`, so one failure reports and the rest still run. busted (`describe`/`it`) does the same with nicer output.
 ```lua
 local function initials(name)
@@ -245,5 +261,6 @@ Bridge: Python `unittest` or `pytest` · Rust `#[test]` in a `mod tests` · Go `
 
 ## read-trace: read a stack trace (point to `tutor-stack-traces`)
 since: -
+index: `tutor-stack-traces`
 A Lua error prints `file.lua:line: message`, then `stack traceback:` with the newest call first; the first line in the learner's own file is where to look. In Neovim, errors from a plugin show the same shape in `:messages`. For the full walk-through, load `tutor-stack-traces` (section Lua).
 Bridge: Python the traceback, read bottom-up · Rust panic message plus `RUST_BACKTRACE=1` · Go `panic:` and the goroutine trace · TypeScript the stack, read top-down

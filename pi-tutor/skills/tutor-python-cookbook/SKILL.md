@@ -9,6 +9,7 @@ How to use: find the learner's plain step below and show the idiom on the exampl
 
 ## read-args: read the command-line arguments
 since: 3.0
+index: `sys.argv[1:]`
 `sys.argv` is the list of words on the command line; `sys.argv[0]` is the script, so the arguments start at index 1.
 ```python
 import sys
@@ -20,6 +21,7 @@ Bridge: Rust `std::env::args().skip(1)` · Go `os.Args[1:]` · TypeScript `proce
 
 ## parse-number: turn text into a number, handling bad input
 since: 3.0
+index: `int(s)` with `except ValueError`
 `int(text)` raises `ValueError` on bad input; catch exactly that error and decide what a bad value means.
 ```python
 for raw in ["21", "oops", "-4"]:
@@ -34,6 +36,7 @@ Bridge: Rust `s.parse::<i64>()` returns a `Result` · Go `strconv.Atoi(s)` retur
 
 ## loop-index: loop over items with their position
 since: 3.0
+index: `for i, x in enumerate(xs)`
 `enumerate` hands out (position, item) pairs, so there is no `range(len(...))` to get wrong.
 ```python
 rivers = ["Nile", "Amazon", "Yangtze"]
@@ -44,6 +47,7 @@ Bridge: Rust `for (i, x) in xs.iter().enumerate()` · Go `for i, x := range xs` 
 
 ## lookup-default: look up a key with a fallback value
 since: 3.0
+index: `d.get(k, 0)`
 `dict.get(key, default)` returns the default instead of raising `KeyError` when the key is missing.
 ```python
 stock = {"apples": 3, "pears": 0}
@@ -54,6 +58,7 @@ Bridge: Rust `m.get(k).copied().unwrap_or(0)` · Go `v, ok := m[k]` · TypeScrip
 
 ## count-items: count how often each item appears
 since: 3.1
+index: `Counter(xs)`
 `collections.Counter` counts anything you can iterate; `most_common(n)` gives the top entries.
 ```python
 from collections import Counter
@@ -67,6 +72,7 @@ Bridge: Rust `*counts.entry(x).or_insert(0) += 1` · Go `counts[x]++` · TypeScr
 
 ## group-by: group items by a key
 since: 3.0
+index: `d.setdefault(k, []).append(x)`
 `dict.setdefault(key, [])` returns the list for that key, creating it the first time.
 ```python
 animals = ["cat", "cow", "dog", "duck", "crow"]
@@ -79,6 +85,7 @@ Bridge: Rust `m.entry(k).or_default().push(x)` · Go `g[k] = append(g[k], x)` ·
 
 ## sort-by: sort records by a field
 since: 3.0
+index: `sorted(xs, key=lambda r: r.year)`
 `sorted(items, key=...)` sorts by whatever the key function returns; `reverse=True` flips it.
 ```python
 books = [("Dune", 1965), ("Emma", 1815), ("Ulysses", 1922)]
@@ -89,6 +96,7 @@ Bridge: Rust `xs.sort_by_key(|r| r.year)` · Go `slices.SortFunc(xs, func(a, b T
 
 ## filter-map: keep some items and transform them
 since: 3.0
+index: `[f(x) for x in xs if p(x)]`
 A list comprehension reads "this, for each item, if that"; it keeps and transforms in one line.
 ```python
 temps = [12, 25, 31, 8, 28]
@@ -99,6 +107,7 @@ Bridge: Rust `xs.iter().filter(p).map(f).collect()` · Go a `for` loop with `app
 
 ## record-type: define a small record type with named fields
 since: 3.7 (`slots=True` 3.10)
+index: `@dataclass`
 `@dataclass` writes `__init__`, `__repr__` and `==` for you from the field list.
 ```python
 from dataclasses import dataclass
@@ -115,6 +124,7 @@ Bridge: Rust `struct` · Go `type T struct { … }` · TypeScript `type T = { �
 
 ## maybe-value: represent "maybe there is no value"
 since: 3.10 (the `X | None` hint)
+index: `X | None`
 Return `None` for "nothing found" and say so in the hint; the caller must check before using it.
 ```python
 def first_long(words: list[str]) -> str | None:
@@ -130,6 +140,7 @@ Bridge: Rust `Option<T>` · Go `(v, ok)` or a pointer · TypeScript `T | undefin
 
 ## errors: report a failure and handle it
 since: 3.0
+index: `raise` with `try`/`except`
 `raise` a specific exception with a message; the caller catches that type and nothing broader.
 ```python
 def withdraw(balance: int, amount: int) -> int:
@@ -146,6 +157,7 @@ Bridge: Rust `Result<T, E>` with `?` · Go `return fmt.Errorf("...: %w", err)` �
 
 ## read-file: read a text file line by line
 since: 3.0
+index: `for line in open(p)`
 `with open(...)` closes the file for you; iterating the file gives one line at a time, newline included.
 ```python
 import tempfile
@@ -161,6 +173,7 @@ Bridge: Rust `BufReader::new(File::open(p)?).lines()` · Go `bufio.NewScanner(f)
 
 ## write-file: write text to a file
 since: 3.5
+index: `Path(p).write_text(s)`
 `Path.write_text` opens, writes and closes in one call; use `open(path, "a")` to append instead.
 ```python
 import tempfile
@@ -174,6 +187,7 @@ Bridge: Rust `std::fs::write(p, s)?` · Go `os.WriteFile(p, b, 0o644)` · TypeSc
 
 ## format-string: build a string from values
 since: 3.6 (`{x=}` 3.8)
+index: `f"{name}: {n:.2f}"`
 An f-string puts expressions in `{}`; after `:` comes the format, such as `.2f` for two decimals.
 ```python
 item, price, qty = "tea", 3.5, 4
@@ -184,6 +198,7 @@ Bridge: Rust `format!("{name}: {n:.2}")` · Go `fmt.Sprintf("%s: %.2f", name, n)
 
 ## split-join: split a string and join parts
 since: 3.0
+index: `s.split(",")` and `",".join(xs)`
 `text.split(sep)` gives a list; `sep.join(list)` glues strings back together (the separator is the object).
 ```python
 csv_line = "oak,pine,birch"
@@ -195,6 +210,7 @@ Bridge: Rust `s.split(',')` and `xs.join(",")` · Go `strings.Split(s, ",")` and
 
 ## test-function: write a unit test for a function
 since: 3.0
+index: `unittest` or `pytest`
 A `unittest.TestCase` method per behaviour; `assertEqual(got, expected)` reports both values on failure. pytest runs the same file and also plain `assert`.
 ```python
 import unittest
@@ -215,5 +231,6 @@ Bridge: Rust `#[test]` in a `mod tests` · Go `func TestX(t *testing.T)` · Type
 
 ## read-trace: read a stack trace (point to `tutor-stack-traces`)
 since: -
+index: `tutor-stack-traces`
 A Python traceback reads bottom-up: the last line names the exception and its message, the frame just above it is where it happened, and frames higher up are the calls that led there. For the full walk-through, load `tutor-stack-traces` (section Python) and ask the learner which line of their own code appears lowest in the trace.
 Bridge: Rust panic message plus `RUST_BACKTRACE=1` · Go `panic:` and the goroutine trace · TypeScript the stack, read top-down · Lua `stack traceback:`

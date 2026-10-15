@@ -1,4 +1,4 @@
-import type { Pack } from "./packs.js";
+import type { IndexEntry, Pack } from "./packs.js";
 import type { Toolchain } from "./knowledge/versions.js";
 import type { RefMeta } from "./knowledge/reference.js";
 
@@ -40,6 +40,28 @@ export function renderCard(pack: Pack, info: CardInfo): string {
   if (knows.length) lines.push(`Learner also knows: ${knows.join(", ")}. Use the cookbook's Bridge lines.`);
   if (pack.tags.length) lines.push("Concept tags: use only the tags listed below in the judgment block.");
   return [...lines, pack.body, tagLine(pack)].filter(Boolean).join("\n");
+}
+
+/**
+ * The always-on index (skill-eval iterations 1-2: the model opened a pack skill 3/28 times; Vercel's
+ * evals: a compressed index in always-on context beat on-demand skills). One line of recipes pointing
+ * at the cookbook, one line pointing at the expert. Own allowance: ≤ 250 tokens.
+ * `expertRefs`: the expert's references/ file names, or null when there is no expert skill.
+ */
+export function renderIndex(o: { language: string; dir: string; entries: IndexEntry[]; expertRefs: string[] | null }): string {
+  const lines: string[] = [];
+  if (o.entries.length) {
+    // Side-agent note: an answer list on every turn invites leaks, so it says what the names are for.
+    lines.push(`[index: ${o.language}] Prefer it over memory. Names to point at, not lines to write: below rung 5 never put one into the learner's code. Full examples: ${o.dir}/tutor-${o.language}-cookbook/SKILL.md, "## <step>".`);
+    // First code span only, and no read-trace (it only points at tutor-stack-traces): fits 250 tokens.
+    lines.push(o.entries.filter((e) => e.step !== "read-trace").map((e) => `${e.step} ${/`[^`]+`/.exec(e.idiom)?.[0] ?? e.idiom}`).join(" | "));
+  }
+  if (o.expertRefs) {
+    const refs = o.expertRefs.map((f) => f.replace(/\.md$/, "")).sort();
+    const where = o.entries.length ? `tutor-${o.language}-expert/SKILL.md in the same folder` : `${o.dir}/tutor-${o.language}-expert/SKILL.md`;
+    lines.push(`Review or a concept: ${where} (checklist${refs.length ? `; references/: ${refs.join(", ")}` : ""}).`);
+  }
+  return lines.join("\n");
 }
 
 export function renderEditorCard(pack: Pack): string {

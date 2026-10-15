@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -24,14 +24,27 @@ import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
-import { loadPack, normalizeTags, vocabOf } from "./packs.js";
-import { renderCard, renderEditorCard } from "./card.js";
+import { loadPack, normalizeTags, vocabOf, cookbookIndex, type IndexEntry } from "./packs.js";
+import { renderCard, renderEditorCard, renderIndex } from "./card.js";
 import { overrideFor } from "./knowledge/sources.js";
 import { LANGS, detectVersion, toolchain, type Toolchain } from "./knowledge/versions.js";
 
 /** Bundled pack skills (cookbook, expert) that exist for a language; the card names them (spec §5.4). */
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
 const packSkills = (lang: string) => ["cookbook", "expert"].map((k) => `tutor-${lang}-${k}`).filter((s) => existsSync(join(SKILLS_DIR, s, "SKILL.md")));
+/** The card's always-on index (Option A), built once per language from the bundled skill files. */
+const indexCache = new Map<string, string>();
+function packIndex(lang: string): string {
+  if (!indexCache.has(lang)) {
+    let entries: IndexEntry[] = [];
+    let refs: string[] | null = null;
+    try { entries = cookbookIndex(readFileSync(join(SKILLS_DIR, `tutor-${lang}-cookbook`, "SKILL.md"), "utf8")); } catch { /* no cookbook */ }
+    const expert = join(SKILLS_DIR, `tutor-${lang}-expert`);
+    if (existsSync(join(expert, "SKILL.md"))) { try { refs = readdirSync(join(expert, "references")); } catch { refs = []; } }
+    indexCache.set(lang, renderIndex({ language: lang, dir: SKILLS_DIR, entries, expertRefs: refs }));
+  }
+  return indexCache.get(lang)!;
+}
 
 type Ui = ExtensionContext["ui"];
 
@@ -374,6 +387,8 @@ export default function (pi: ExtensionAPI): void {
       let knows: string[] = [];
       if (profile) { const p = profile; profileWrite(() => { knows = p.languages(); }); }
       cards.push(renderCard(pack, { tc: await toolchainOf(lang, root), ref: referenceInfo(skillsRoot(), lang), knows, skills: packSkills(lang), skillsDir: SKILLS_DIR }));
+      const index = packIndex(lang);
+      if (index) cards.push(index);
     }
     if (editorPack) cards.push(renderEditorCard(editorPack));
     if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");

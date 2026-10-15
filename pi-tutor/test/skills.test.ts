@@ -58,6 +58,8 @@ function cookbookChecks(lang: string) {
     const id = s.split(":")[0].trim();
     expect(s, id).toMatch(/^since: \S+/m);
     expect(s, id).toMatch(/^Bridge: /m);
+    // Option A (skill-eval iterations 1-2): a one-line idiom the card's index carries.
+    expect(s, id).toMatch(/^index: `[^`\n]+`( [^\n]{0,30})?$/m);
     if (id === "read-trace") { expect(s).toContain("tutor-stack-traces"); continue; }
     expect(s, id).toContain("```" + FENCE[lang] + "\n");
   }

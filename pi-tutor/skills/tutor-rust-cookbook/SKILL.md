@@ -9,6 +9,7 @@ How to use: find the learner's plain step below and show the idiom on the exampl
 
 ## read-args: read the command-line arguments
 since: 1.0
+index: `std::env::args().skip(1)`
 `std::env::args()` yields the program name first, so `.skip(1)` leaves the arguments as owned `String`s.
 ```rust
 fn main() {
@@ -23,6 +24,7 @@ Bridge: Python `sys.argv[1:]` · Go `os.Args[1:]` · TypeScript `process.argv.sl
 
 ## parse-number: turn text into a number, handling bad input
 since: 1.0
+index: `s.parse::<i64>()` returns a `Result`
 `str::parse::<T>()` returns a `Result`; `match` on it so the bad case is handled where it happens.
 ```rust
 fn main() {
@@ -38,6 +40,7 @@ Bridge: Python `int(s)` with `except ValueError` · Go `strconv.Atoi(s)` returns
 
 ## loop-index: loop over items with their position
 since: 1.0
+index: `for (i, x) in xs.iter().enumerate()`
 `.iter().enumerate()` yields `(index, &item)` pairs; indexes start at 0.
 ```rust
 fn main() {
@@ -51,6 +54,7 @@ Bridge: Python `for i, x in enumerate(xs)` · Go `for i, x := range xs` · TypeS
 
 ## lookup-default: look up a key with a fallback value
 since: 1.35
+index: `get(k).copied().unwrap_or(0)`
 `HashMap::get` returns `Option<&V>`; `.copied()` turns it into `Option<V>` and `.unwrap_or` supplies the fallback.
 ```rust
 use std::collections::HashMap;
@@ -66,6 +70,7 @@ Bridge: Python `d.get(k, 0)` · Go `v, ok := m[k]` · TypeScript `m.get(k) ?? 0`
 
 ## count-items: count how often each item appears
 since: 1.0
+index: `entry(x).or_insert(0)`
 `map.entry(key).or_insert(0)` gives a mutable reference to the count, created at 0 the first time.
 ```rust
 use std::collections::BTreeMap;
@@ -83,6 +88,7 @@ Bridge: Python `Counter(xs)` · Go `counts[x]++` · TypeScript `m.set(x, (m.get(
 
 ## group-by: group items by a key
 since: 1.28
+index: `m.entry(k).or_default().push(x)`
 `entry(key).or_default()` creates an empty `Vec` the first time, then you `push` into it.
 ```rust
 use std::collections::BTreeMap;
@@ -101,6 +107,7 @@ Bridge: Python `d.setdefault(k, []).append(x)` · Go `g[k] = append(g[k], x)` ·
 
 ## sort-by: sort records by a field
 since: 1.7
+index: `xs.sort_by_key(|r| r.year)`
 `sort_by_key` sorts in place by what the closure returns; use `sort_by` with `cmp` for two fields.
 ```rust
 struct Book { title: &'static str, year: u32 }
@@ -121,6 +128,7 @@ Bridge: Python `sorted(xs, key=lambda r: r.year)` · Go `slices.SortFunc(xs, fun
 
 ## filter-map: keep some items and transform them
 since: 1.0
+index: `iter().filter().map()`
 Iterator adapters are lazy: `filter` then `map`, and `collect` builds the result.
 ```rust
 fn main() {
@@ -137,6 +145,7 @@ Bridge: Python `[f(x) for x in xs if p(x)]` · Go a `for` loop with `append` · 
 
 ## record-type: define a small record type with named fields
 since: 1.0
+index: `struct`
 A `struct` names its fields; `#[derive(...)]` adds printing (`Debug`) and comparison (`PartialEq`).
 ```rust
 #[derive(Debug, Clone, PartialEq)]
@@ -154,6 +163,7 @@ Bridge: Python `@dataclass` · Go `type T struct { … }` · TypeScript `type T 
 
 ## maybe-value: represent "maybe there is no value"
 since: 1.0
+index: `Option<T>`
 `Option<T>` is `Some(value)` or `None`; the compiler makes the caller handle both.
 ```rust
 fn first_long<'a>(words: &[&'a str]) -> Option<&'a str> {
@@ -171,6 +181,7 @@ Bridge: Python `X | None` · Go `(v, ok)` or a pointer · TypeScript `T | undefi
 
 ## errors: report a failure and handle it
 since: 1.13
+index: `Result<T, E>` with `?`
 Return `Result<T, E>`; inside another function that returns `Result`, `?` passes the error up.
 ```rust
 fn withdraw(balance: u32, amount: u32) -> Result<u32, String> {
@@ -196,6 +207,7 @@ Bridge: Python `raise` with `try`/`except` · Go `return fmt.Errorf("...: %w", e
 
 ## read-file: read a text file line by line
 since: 1.0
+index: `BufReader::lines()`
 `BufReader::new(file).lines()` yields `io::Result<String>` per line, without the newline.
 ```rust
 use std::fs::{self, File};
@@ -214,6 +226,7 @@ Bridge: Python `for line in open(p)` · Go `bufio.NewScanner(f)` · TypeScript `
 
 ## write-file: write text to a file
 since: 1.26
+index: `std::fs::write(p, s)?`
 `std::fs::write` creates or replaces the file in one call; use `OpenOptions` with `.append(true)` to add to it.
 ```rust
 use std::fs;
@@ -229,6 +242,7 @@ Bridge: Python `Path(p).write_text(s)` · Go `os.WriteFile(p, b, 0o644)` · Type
 
 ## format-string: build a string from values
 since: 1.58 (names inside `{}`)
+index: `format!("{name}: {n:.2}")`
 `format!` builds a `String`; `{:.2}` gives two decimals and `{name}` reads a variable in scope.
 ```rust
 fn main() {
@@ -241,6 +255,7 @@ Bridge: Python `f"{name}: {n:.2f}"` · Go `fmt.Sprintf("%s: %.2f", name, n)` · 
 
 ## split-join: split a string and join parts
 since: 1.3
+index: `s.split(',')` and `xs.join(",")`
 `split` returns an iterator of `&str`; collect it, and `join` glues a slice of strings.
 ```rust
 fn main() {
@@ -255,6 +270,7 @@ Bridge: Python `s.split(",")` and `",".join(xs)` · Go `strings.Split(s, ",")` a
 
 ## test-function: write a unit test for a function
 since: 1.0
+index: `#[test]` in a `mod tests`
 Tests live in a `#[cfg(test)] mod tests` next to the code; each `#[test]` fn uses `assert_eq!(got, expected)`. Run them with `cargo test`.
 ```rust
 fn initials(name: &str) -> String {
@@ -285,5 +301,6 @@ Bridge: Python `unittest` or `pytest` · Go `func TestX(t *testing.T)` · TypeSc
 
 ## read-trace: read a stack trace (point to `tutor-stack-traces`)
 since: -
+index: `tutor-stack-traces`
 A Rust panic prints `thread 'main' panicked at src/file.rs:line:col:` and the message; that location is where it failed. Run with `RUST_BACKTRACE=1` for the call chain, newest call first. Compile errors are different: read them top-down from the error code. For the full walk-through, load `tutor-stack-traces` (section Rust).
 Bridge: Python the traceback, read bottom-up · Go `panic:` and the goroutine trace · TypeScript the stack, read top-down · Lua `stack traceback:`

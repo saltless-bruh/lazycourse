@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkReply } from "../extensions/tutor/compliance.js";
-import { loadPack, vocabOf } from "../extensions/tutor/packs.js";
+import { loadPack, vocabOf, cookbookIndex } from "../extensions/tutor/packs.js";
 import { parseJudgment, toJudgment, isJudgmentTool } from "../extensions/tutor/judgment.js";
 
 // skill-creator test runs for the M7 pack skills (`npm run skill-evals`): each eval runs through the
@@ -21,7 +21,11 @@ const RUNS = Number(process.env.SKILL_EVAL_RUNS) || 2;
 const PARALLEL = Number(process.env.SKILL_EVAL_PARALLEL) || 3;
 const ONLY = process.env.SKILL_EVAL_ONLY?.split(",");
 
-interface Eval { id: number; name: string; language: string; skill: string; skillsAny?: string[]; prompt: string; expected_output: string; files: Record<string, string>; idioms: { text: string; pattern: string }[] }
+/**
+ * `should_trigger: false`: a request where no cookbook recipe fits (skill-creator's negative controls).
+ * `leak`: the learner's own fixed line; writing it at rung 2, in code or prose, breaks the hint ladder.
+ */
+interface Eval { id: number; name: string; language: string; skill: string; skillsAny?: string[]; should_trigger?: boolean; leak?: string; prompt: string; expected_output: string; files: Record<string, string>; idioms: { text: string; pattern: string }[] }
 interface Run { reply: string; reads: string[]; tools: string[]; tags: string[] | null; transcript: string[] }
 interface Expectation { text: string; passed: boolean; evidence: string }
 
@@ -88,11 +92,23 @@ function runPi(root: string, e: Eval): Promise<{ stdout: string; stderr: string;
 }
 
 function grade(e: Eval, r: Run): Expectation[] {
-  const wanted = e.skillsAny ?? [e.skill];
-  const read = r.reads.find((p) => wanted.some((s) => p.includes(`/${s}/`)));
-  const out: Expectation[] = [
-    { text: `loads ${wanted.join(" or ")}`, passed: Boolean(read), evidence: read ? `read ${read}` : `reads: ${r.reads.join(", ") || "none"}` },
-  ];
+  const out: Expectation[] = [];
+  if (e.should_trigger === false) {
+    const cook = r.reads.find((p) => /\/tutor-[\w-]+-cookbook\//.test(p));
+    out.push({ text: "does not open a cookbook (no recipe fits)", passed: !cook, evidence: cook ? `read ${cook}` : `reads: ${r.reads.join(", ") || "none"}` });
+    let spans: string[] = [];
+    try { spans = cookbookIndex(readFileSync(join(PKG, "skills", `tutor-${e.language}-cookbook`, "SKILL.md"), "utf8")).map((x) => /`([^`]+)`/.exec(x.idiom)?.[1] ?? "").filter((s) => s.length >= 6); } catch { /* none */ }
+    const recited = spans.filter((s) => r.reply.includes(s));
+    out.push({ text: "does not recite index idioms unprompted", passed: recited.length === 0, evidence: recited.length ? `reply has ${JSON.stringify(recited)}` : "none of the index idioms" });
+  } else {
+    const wanted = e.skillsAny ?? [e.skill];
+    const read = r.reads.find((p) => wanted.some((s) => p.includes(`/${s}/`)));
+    out.push({ text: `loads ${wanted.join(" or ")}`, passed: Boolean(read), evidence: read ? `read ${read}` : `reads: ${r.reads.join(", ") || "none"}` });
+  }
+  if (e.leak) {
+    const m = new RegExp(e.leak, "i").exec(r.reply);
+    out.push({ text: "does not write the learner's own line (code or prose)", passed: !m, evidence: m ? `reply has "${m[0].slice(0, 80)}"` : "no leak pattern" });
+  }
   for (const i of e.idioms) {
     const m = new RegExp(i.pattern, "i").exec(r.reply);
     out.push({ text: i.text, passed: Boolean(m), evidence: m ? `reply has "${m[0]}"` : "not in the final reply" });

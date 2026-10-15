@@ -11,6 +11,7 @@ Every example runs as `node file.ts` (Node 22.18+), so it uses only syntax Node 
 
 ## read-args: read the command-line arguments
 since: Node 0.x
+index: `process.argv.slice(2)`
 `process.argv` holds the node binary and the script path first, so the arguments start at index 2.
 ```ts
 const given: string[] = process.argv.slice(2);
@@ -21,6 +22,7 @@ Bridge: Python `sys.argv[1:]` · Rust `std::env::args().skip(1)` · Go `os.Args[
 
 ## parse-number: turn text into a number, handling bad input
 since: ES2015 (`Number.isInteger`)
+index: `Number(s)` then `Number.isNaN`
 `Number(text)` never throws; bad input becomes `NaN`, so check the result before using it.
 ```ts
 for (const raw of ["21", "oops", "-4"]) {
@@ -36,6 +38,7 @@ Bridge: Python `int(s)` with `except ValueError` · Rust `s.parse::<i64>()` retu
 
 ## loop-index: loop over items with their position
 since: ES2015
+index: `for (const [i, x] of xs.entries())`
 `array.entries()` yields `[index, item]` pairs; destructure them in a `for…of`.
 ```ts
 const rivers = ["Nile", "Amazon", "Yangtze"];
@@ -47,6 +50,7 @@ Bridge: Python `for i, x in enumerate(xs)` · Rust `for (i, x) in xs.iter().enum
 
 ## lookup-default: look up a key with a fallback value
 since: ES2020 (`??`)
+index: `m.get(k) ?? 0`
 `Map.get` returns `undefined` for a missing key; `??` replaces only `null`/`undefined`, so a stored 0 survives.
 ```ts
 const stock = new Map<string, number>([["apples", 3], ["pears", 0]]);
@@ -58,6 +62,7 @@ Bridge: Python `d.get(k, 0)` · Rust `m.get(k).copied().unwrap_or(0)` · Go `v, 
 
 ## count-items: count how often each item appears
 since: ES2020
+index: `m.get(x) ?? 0` then `m.set`
 Read the current count with a fallback of 0, add one, and store it back.
 ```ts
 const colours = ["red", "blue", "red", "green", "red", "blue"];
@@ -71,6 +76,7 @@ Bridge: Python `Counter(xs)` · Rust `*counts.entry(x).or_insert(0) += 1` · Go 
 
 ## group-by: group items by a key
 since: ES2024 / Node 21 (`Map.groupBy`)
+index: `Map.groupBy(xs, f)`
 `Map.groupBy(items, keyFn)` builds a `Map` from key to the array of items with that key.
 ```ts
 const animals = ["cat", "cow", "dog", "duck", "crow"];
@@ -81,6 +87,7 @@ Bridge: Python `d.setdefault(k, []).append(x)` · Rust `m.entry(k).or_default().
 
 ## sort-by: sort records by a field
 since: ES2023 (`toSorted`)
+index: `toSorted(compare)`
 `toSorted(compare)` returns a sorted copy; the compare function returns negative, zero or positive.
 ```ts
 type Book = { title: string; year: number };
@@ -97,6 +104,7 @@ Bridge: Python `sorted(xs, key=lambda r: r.year)` · Rust `xs.sort_by_key(|r| r.
 
 ## filter-map: keep some items and transform them
 since: ES5
+index: `xs.filter(p).map(f)`
 `filter` keeps the items whose callback returns true; `map` turns each kept item into a new value.
 ```ts
 const temps = [12, 25, 31, 8, 28];
@@ -107,6 +115,7 @@ Bridge: Python `[f(x) for x in xs if p(x)]` · Rust `xs.iter().filter(p).map(f).
 
 ## record-type: define a small record type with named fields
 since: TypeScript 2.x
+index: `type T = { … }`
 A `type` alias (or `interface`) names the fields; any object of that shape fits, no class needed.
 ```ts
 type Planet = { readonly name: string; moons: number };
@@ -119,6 +128,7 @@ Bridge: Python `@dataclass` · Rust `struct` · Go `type T struct { … }` · Lu
 
 ## maybe-value: represent "maybe there is no value"
 since: TypeScript 2.0 (strict null checks)
+index: `T | undefined`
 Return `T | undefined`; with `"strict": true` the compiler makes the caller check before using it.
 ```ts
 function firstLong(words: string[]): string | undefined {
@@ -132,6 +142,7 @@ Bridge: Python `X | None` · Rust `Option<T>` · Go `(v, ok)` or a pointer · Lu
 
 ## errors: report a failure and handle it
 since: ES2022 (`cause`)
+index: `throw new Error(...)` with `try`/`catch`
 `throw new Error(message)`; in `catch`, the value is `unknown`, so check it is an `Error` first.
 ```ts
 function withdraw(balance: number, amount: number): number {
@@ -151,6 +162,7 @@ Bridge: Python `raise` with `try`/`except` · Rust `Result<T, E>` with `?` · Go
 
 ## read-file: read a text file line by line
 since: Node 0.x (`fs`)
+index: `readFileSync(p, "utf8")` then `split`
 For small files, read the whole text and split on newlines; for big ones use `node:readline`.
 ```ts
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -166,6 +178,7 @@ Bridge: Python `for line in open(p)` · Rust `BufReader::new(File::open(p)?).lin
 
 ## write-file: write text to a file
 since: Node 0.x (`fs`)
+index: `writeFileSync(p, s)`
 `writeFileSync` creates or replaces the file; `appendFileSync` adds to the end instead.
 ```ts
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -180,6 +193,7 @@ Bridge: Python `Path(p).write_text(s)` · Rust `std::fs::write(p, s)?` · Go `os
 
 ## format-string: build a string from values
 since: ES2015 (template literals)
+index: `n.toFixed(2)` in a template literal
 A template literal puts expressions in `${}`; `toFixed(2)` gives two decimals as a string.
 ```ts
 const item = "tea", price = 3.5, qty = 4;
@@ -189,6 +203,7 @@ Bridge: Python `f"{name}: {n:.2f}"` · Rust `format!("{name}: {n:.2}")` · Go `f
 
 ## split-join: split a string and join parts
 since: ES1
+index: `s.split(",")` and `xs.join(",")`
 `split(sep)` returns an array of strings; `join(sep)` glues an array back into one string.
 ```ts
 const trees = "oak,pine,birch".split(",");
@@ -199,6 +214,7 @@ Bridge: Python `s.split(",")` and `",".join(xs)` · Rust `s.split(',')` and `xs.
 
 ## test-function: write a unit test for a function
 since: Node 18 (`node:test`)
+index: `test()` from `node:test`
 `test(name, fn)` from `node:test` registers a test; `assert.equal(actual, expected)` from `node:assert/strict` reports both on failure. Run a test file with `node --test` (or the project's `npm test`).
 ```ts
 import { test } from "node:test";
@@ -220,5 +236,6 @@ Bridge: Python `unittest` or `pytest` · Rust `#[test]` in a `mod tests` · Go `
 
 ## read-trace: read a stack trace (point to `tutor-stack-traces`)
 since: -
+index: `tutor-stack-traces`
 A Node error prints the message first, then `at function (file:line:col)` lines, newest call first; the first line that points into the learner's own files is usually where to look. A TypeScript compile error is different: `file.ts(line,col): error TSnnnn`. For the full walk-through, load `tutor-stack-traces` (section TypeScript).
 Bridge: Python the traceback, read bottom-up · Rust panic message plus `RUST_BACKTRACE=1` · Go `panic:` and the goroutine trace · Lua `stack traceback:`

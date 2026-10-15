@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parsePack, loadPack } from "../extensions/tutor/packs.js";
-import { renderCard, renderEditorCard } from "../extensions/tutor/card.js";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parsePack, loadPack, cookbookIndex } from "../extensions/tutor/packs.js";
+import { renderCard, renderEditorCard, renderIndex } from "../extensions/tutor/card.js";
 import { estimateTokens } from "../extensions/tutor/prompts.js";
 import { LANGUAGES } from "../extensions/tutor/start.js";
 import type { RefMeta } from "../extensions/tutor/knowledge/reference.js";
@@ -44,6 +47,35 @@ describe("renderCard", () => {
     const ed = parsePack("editor", "# Editor card\n- leader is Space\n\n## Concept tags\n- `motions`: moving around");
     expect(renderEditorCard(ed)).toBe("[editor card: LazyVim]\n# Editor card\n- leader is Space\nTags: `motions` moving around");
     expect(estimateTokens(renderEditorCard(ed))).toBeLessThan(300);
+  });
+});
+
+describe("card index (Option A: a short always-on index pointing at the skill files)", () => {
+  const COOK = "# X\n\n## read-args: read the args\nsince: 1\nindex: `sys.argv[1:]`\nbody\n\n## errors: report a failure\nsince: 1\nindex: `raise` with `try`/`except`\n";
+  it("reads each recipe's step and index line", () => {
+    expect(cookbookIndex(COOK)).toEqual([{ step: "read-args", idiom: "`sys.argv[1:]`" }, { step: "errors", idiom: "`raise` with `try`/`except`" }]);
+    expect(cookbookIndex("# no recipes")).toEqual([]);
+  });
+  it("renders a compact block: the instruction, one line of recipes, the expert's file and references", () => {
+    const t = renderIndex({ language: "python", dir: "/pkg/skills", entries: cookbookIndex(COOK), expertRefs: ["testing.md", "type-system.md"] });
+    expect(t.split("\n")).toEqual([
+      // Side-agent note: an answer list on every turn invites leaks, so it says what the names are for.
+      "[index: python] Prefer it over memory. Names to point at, not lines to write: below rung 5 never put one into the learner's code. Full examples: /pkg/skills/tutor-python-cookbook/SKILL.md, \"## <step>\".",
+      "read-args `sys.argv[1:]` | errors `raise`", // first code span only; the cookbook has the rest
+      "Review or a concept: tutor-python-expert/SKILL.md in the same folder (checklist; references/: testing, type-system).",
+    ]);
+  });
+  it("leaves out what does not exist", () => {
+    expect(renderIndex({ language: "c", dir: "/d", entries: [], expertRefs: null })).toBe("");
+    expect(renderIndex({ language: "lua", dir: "/d", entries: [], expertRefs: [] })).toBe("Review or a concept: /d/tutor-lua-expert/SKILL.md (checklist).");
+  });
+  it.each([...LANGUAGES])("%s: the real index stays within its own 250-token allowance", (lang) => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
+    const entries = cookbookIndex(readFileSync(join(dir, `tutor-${lang}-cookbook`, "SKILL.md"), "utf8"));
+    expect(entries).toHaveLength(17);
+    expect(renderIndex({ language: lang, dir: "/d", entries, expertRefs: null })).not.toContain("read-trace"); // tutor-stack-traces is listed by Pi already
+    const t = renderIndex({ language: lang, dir: "/home/ple/Documents/personal_Project/AI-Driven_Teaching_Coding_Project/pi-tutor/skills", entries, expertRefs: readdirSync(join(dir, `tutor-${lang}-expert`, "references")) });
+    expect(estimateTokens(t)).toBeLessThanOrEqual(250);
   });
 });
 

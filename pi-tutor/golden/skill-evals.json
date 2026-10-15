@@ -12,7 +12,13 @@
         "Cargo.toml": "[package]\nname = \"people\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         "src/main.rs": "struct Person {\n    name: String,\n    age: u32,\n}\n\nfn main() {\n    let people = vec![\n        Person { name: \"Ada\".into(), age: 36 },\n        Person { name: \"Alan\".into(), age: 41 },\n        Person { name: \"Grace\".into(), age: 29 },\n    ];\n    for p in &people {\n        println!(\"{} {}\", p.name, p.age);\n    }\n}\n"
       },
-      "idioms": [{ "text": "names the Rust idiom for sorting by a field (sort_by_key / sort_by)", "pattern": "sort_by_key|sort_by\\b|sort_unstable_by" }]
+      "idioms": [
+        {
+          "text": "names the Rust idiom for sorting by a field (sort_by_key / sort_by)",
+          "pattern": "sort_by_key|sort_by\\b|sort_unstable_by"
+        }
+      ],
+      "leak": "people\\s*\\.\\s*sort"
     },
     {
       "id": 2,
@@ -24,7 +30,13 @@
       "files": {
         "init.lua": "local seen = { \"lua\", \"python\", \"lua\", \"markdown\", \"lua\", \"python\" }\n-- count each filetype here\n"
       },
-      "idioms": [{ "text": "names the count-with-default idiom (t[x] or 0) + 1", "pattern": "or 0\\)?\\s*\\+\\s*1" }]
+      "idioms": [
+        {
+          "text": "names the count-with-default idiom (t[x] or 0) + 1",
+          "pattern": "or 0\\)?\\s*\\+\\s*1"
+        }
+      ],
+      "leak": "in\\s+ipairs\\(\\s*seen\\s*\\)[\\s\\S]{0,120}or\\s+0"
     },
     {
       "id": 3,
@@ -38,7 +50,13 @@
         "main.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() {\n\tdata, err := os.ReadFile(\"input.txt\")\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tfmt.Println(len(data))\n}\n",
         "input.txt": "first\nsecond\nthird\n"
       },
-      "idioms": [{ "text": "names bufio.Scanner (or bufio.NewScanner)", "pattern": "bufio\\.(New)?Scanner" }]
+      "idioms": [
+        {
+          "text": "names bufio.Scanner (or bufio.NewScanner)",
+          "pattern": "bufio\\.(New)?Scanner"
+        }
+      ],
+      "leak": "os\\.Open\\(\\s*\"input\\.txt\"\\s*\\)[\\s\\S]{0,300}NewScanner|NewScanner\\([\\s\\S]{0,200}input\\.txt"
     },
     {
       "id": 4,
@@ -51,9 +69,16 @@
         "app.py": "def add_item(item, basket=[]):\n    basket.append(item)\n    return basket\n\n\ndef load(path):\n    try:\n        return open(path).read()\n    except:\n        return \"\"\n\n\nprint(add_item(\"apple\"))\nprint(add_item(\"pear\"))\nprint(load(\"missing.txt\"))\n"
       },
       "idioms": [
-        { "text": "points out the mutable default argument", "pattern": "mutable default|default (argument|value|list)|basket=\\[\\]|shared between calls" },
-        { "text": "points out the bare except", "pattern": "bare `?except|except:|catch(es)? (every|all|any)" }
-      ]
+        {
+          "text": "points out the mutable default argument",
+          "pattern": "mutable default|default (argument|value|list)|basket=\\[\\]|shared between calls"
+        },
+        {
+          "text": "points out the bare except",
+          "pattern": "bare `?except|except:|catch(es)? (every|all|any)"
+        }
+      ],
+      "leak": "basket\\s*=\\s*None"
     },
     {
       "id": 5,
@@ -66,7 +91,13 @@
         "Cargo.toml": "[package]\nname = \"scores\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         "src/main.rs": "fn main() {\n    let mut scores = vec![3, 7, 5];\n    let best = scores.iter().max().unwrap();\n    scores.push(*best + 1);\n    println!(\"{best}\");\n}\n"
       },
-      "idioms": [{ "text": "explains that a shared (immutable) borrow is still alive while a mutable one is taken", "pattern": "(immutabl|shared)[\\s\\S]{0,200}mutabl|mutabl[\\s\\S]{0,200}(immutabl|shared)" }]
+      "idioms": [
+        {
+          "text": "explains that a shared (immutable) borrow is still alive while a mutable one is taken",
+          "pattern": "(immutabl|shared)[\\s\\S]{0,200}mutabl|mutabl[\\s\\S]{0,200}(immutabl|shared)"
+        }
+      ],
+      "leak": "let best = \\*scores\\.iter\\(\\)\\.max\\(\\)|\\.max\\(\\)\\.(copied|cloned)\\(\\)|let \\w+ = \\*best"
     },
     {
       "id": 6,
@@ -79,8 +110,14 @@
         "app.py": "def greet(name):\n    return f\"hi {name}\"\n\n\nprint(greet(\"ada\"))\n"
       },
       "idioms": [
-        { "text": "names gd for go to definition", "pattern": "`gd`|\\bgd\\b" },
-        { "text": "names <C-o> to jump back", "pattern": "<C-o>|Ctrl-o|Ctrl\\+o|CTRL-O|C-o" }
+        {
+          "text": "names gd for go to definition",
+          "pattern": "`gd`|\\bgd\\b"
+        },
+        {
+          "text": "names <C-o> to jump back",
+          "pattern": "<C-o>|Ctrl-o|Ctrl\\+o|CTRL-O|C-o"
+        }
       ]
     },
     {
@@ -88,14 +125,65 @@
       "name": "typescript-enum-in-node",
       "language": "typescript",
       "skill": "tutor-typescript-expert",
-      "skillsAny": ["tutor-typescript-expert", "tutor-typescript-cookbook"],
+      "skillsAny": [
+        "tutor-typescript-expert",
+        "tutor-typescript-cookbook"
+      ],
       "prompt": "When I run `node main.ts` I get a SyntaxError on my enum. Node is supposed to run TypeScript now, so what's wrong?",
       "expected_output": "Explains that node only strips erasable syntax and enum is not erasable; suggests a const object plus a union type without writing the learner's code.",
       "files": {
         "package.json": "{\n  \"type\": \"module\"\n}\n",
         "main.ts": "enum Colour { Red, Green }\n\nconst c: Colour = Colour.Red;\nconsole.log(c);\n"
       },
-      "idioms": [{ "text": "explains that node strips types and enum is not erasable syntax", "pattern": "strip|erasable|not (supported|erasable)|runtime (code|value)" }]
+      "idioms": [
+        {
+          "text": "explains that node strips types and enum is not erasable syntax",
+          "pattern": "strip|erasable|not (supported|erasable)|runtime (code|value)"
+        }
+      ],
+      "leak": "const\\s+Colour\\s*=\\s*\\{"
+    },
+    {
+      "id": 8,
+      "name": "no-trigger-python-reasoning",
+      "language": "python",
+      "should_trigger": false,
+      "skill": "tutor-python-cookbook",
+      "prompt": "I think my loop in loop.py skips the last item because range(len(items) - 1) stops one early.",
+      "expected_output": "Judges the learner's reasoning (it is right) without opening a cookbook or reciting index idioms, and does not write the fixed line at rung 2.",
+      "files": {
+        "loop.py": "items = [\"a\", \"b\", \"c\"]\nfor i in range(len(items) - 1):\n    print(items[i])\n"
+      },
+      "idioms": [],
+      "leak": "range\\(len\\(items\\)\\)(?!\\s*-)"
+    },
+    {
+      "id": 9,
+      "name": "no-trigger-rust-concept",
+      "language": "rust",
+      "should_trigger": false,
+      "skill": "tutor-rust-cookbook",
+      "prompt": "Why doesn't Rust have a garbage collector like Go or Python?",
+      "expected_output": "Explains ownership as the alternative at a concept level; a cookbook recipe does not fit (the expert skill may).",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"why\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        "src/main.rs": "fn main() {}\n"
+      },
+      "idioms": []
+    },
+    {
+      "id": 10,
+      "name": "no-trigger-go-project-name",
+      "language": "go",
+      "should_trigger": false,
+      "skill": "tutor-go-cookbook",
+      "prompt": "What would be a good name for my Go project? It counts words in text files.",
+      "expected_output": "Answers the naming question (Go module/package naming conventions at most) without opening a cookbook or listing idioms.",
+      "files": {
+        "go.mod": "module wc\n\ngo 1.24\n",
+        "main.go": "package main\n\nfunc main() {}\n"
+      },
+      "idioms": []
     }
   ]
 }

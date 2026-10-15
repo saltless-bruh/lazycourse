@@ -38,6 +38,19 @@ export function loadPack(language: string): Pack | null {
   return cache.get(language)!;
 }
 
+export interface IndexEntry { step: string; idiom: string }
+
+/** Each cookbook recipe's step id and its one-line `index:` idiom (the card's always-on index). */
+export function cookbookIndex(text: string): IndexEntry[] {
+  const out: IndexEntry[] = [];
+  for (const sec of text.split(/^## /m).slice(1)) {
+    const step = /^([\w-]+):/.exec(sec)?.[1];
+    const idiom = /^index: (.+)$/m.exec(sec)?.[1].trim();
+    if (step && idiom) out.push({ step, idiom });
+  }
+  return out;
+}
+
 /** Real tags first, then aliases: an alias in one pack never shadows a real tag in another. */
 export function vocabOf(...packs: (Pack | null)[]): Vocab | null {
   const v: Vocab = new Map();

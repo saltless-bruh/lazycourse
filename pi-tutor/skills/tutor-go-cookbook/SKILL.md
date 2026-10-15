@@ -9,6 +9,7 @@ How to use: find the learner's plain step below and show the idiom on the exampl
 
 ## read-args: read the command-line arguments
 since: 1.0
+index: `os.Args[1:]`
 `os.Args[0]` is the program, so `os.Args[1:]` is the arguments as strings (use the `flag` package for options).
 ```go
 package main
@@ -31,6 +32,7 @@ Bridge: Python `sys.argv[1:]` · Rust `std::env::args().skip(1)` · TypeScript `
 
 ## parse-number: turn text into a number, handling bad input
 since: 1.0
+index: `strconv.Atoi(s)` returns `(n, err)`
 `strconv.Atoi` returns the number and an `error`; check the error before using the number.
 ```go
 package main
@@ -55,6 +57,7 @@ Bridge: Python `int(s)` with `except ValueError` · Rust `s.parse::<i64>()` retu
 
 ## loop-index: loop over items with their position
 since: 1.0
+index: `for i, x := range xs`
 `for i, x := range slice` gives the index and a copy of the element; use `_` to drop either.
 ```go
 package main
@@ -72,6 +75,7 @@ Bridge: Python `for i, x in enumerate(xs)` · Rust `for (i, x) in xs.iter().enum
 
 ## lookup-default: look up a key with a fallback value
 since: 1.0
+index: `v, ok := m[k]`
 A missing key returns the zero value; the "comma ok" form tells you whether the key was really there.
 ```go
 package main
@@ -90,6 +94,7 @@ Bridge: Python `d.get(k, 0)` · Rust `m.get(k).copied().unwrap_or(0)` · TypeScr
 
 ## count-items: count how often each item appears
 since: 1.0
+index: `counts[x]++`
 Because a missing key reads as 0, `counts[x]++` works without checking first.
 ```go
 package main
@@ -109,6 +114,7 @@ Bridge: Python `Counter(xs)` · Rust `*counts.entry(x).or_insert(0) += 1` · Typ
 
 ## group-by: group items by a key
 since: 1.0
+index: `g[k] = append(g[k], x)`
 `append` to a nil slice works, so `g[k] = append(g[k], x)` creates each group on first use.
 ```go
 package main
@@ -128,6 +134,7 @@ Bridge: Python `d.setdefault(k, []).append(x)` · Rust `m.entry(k).or_default().
 
 ## sort-by: sort records by a field
 since: 1.21
+index: `slices.SortFunc` with `cmp.Compare`
 `slices.SortFunc` takes a compare function returning negative, zero or positive; `cmp.Compare` writes it for you.
 ```go
 package main
@@ -155,6 +162,7 @@ Bridge: Python `sorted(xs, key=lambda r: r.year)` · Rust `xs.sort_by_key(|r| r.
 
 ## filter-map: keep some items and transform them
 since: 1.0
+index: `for` loop with `append`
 Go spells it as a plain loop: test, transform, `append` to a new slice.
 ```go
 package main
@@ -176,6 +184,7 @@ Bridge: Python `[f(x) for x in xs if p(x)]` · Rust `xs.iter().filter(p).map(f).
 
 ## record-type: define a small record type with named fields
 since: 1.0
+index: `type T struct { … }`
 A `struct` groups named fields; `%+v` prints them with their names, and `==` compares field by field.
 ```go
 package main
@@ -196,6 +205,7 @@ Bridge: Python `@dataclass` · Rust `struct` · TypeScript `type T = { … }` ·
 
 ## maybe-value: represent "maybe there is no value"
 since: 1.0
+index: `(v, ok)` or a pointer
 Return the value plus a `bool` (the "comma ok" shape) so the caller must look at both.
 ```go
 package main
@@ -223,6 +233,7 @@ Bridge: Python `X | None` · Rust `Option<T>` · TypeScript `T | undefined` · L
 
 ## errors: report a failure and handle it
 since: 1.13
+index: `return fmt.Errorf("...: %w", err)`
 Return an `error` last; wrap it with `%w` to add context, and `errors.Is` still finds the original.
 ```go
 package main
@@ -251,6 +262,7 @@ Bridge: Python `raise` with `try`/`except` · Rust `Result<T, E>` with `?` · Ty
 
 ## read-file: read a text file line by line
 since: 1.1
+index: `bufio.NewScanner(f)`
 `bufio.Scanner` reads one line per `Scan()`; check `scanner.Err()` after the loop.
 ```go
 package main
@@ -285,6 +297,7 @@ Bridge: Python `for line in open(p)` · Rust `BufReader::new(File::open(p)?).lin
 
 ## write-file: write text to a file
 since: 1.16
+index: `os.WriteFile(p, b, 0o644)`
 `os.WriteFile` creates or replaces the file with the given permissions in one call.
 ```go
 package main
@@ -310,6 +323,7 @@ Bridge: Python `Path(p).write_text(s)` · Rust `std::fs::write(p, s)?` · TypeSc
 
 ## format-string: build a string from values
 since: 1.0
+index: `fmt.Sprintf("%s: %.2f", name, n)`
 `fmt.Sprintf` fills verbs left to right: `%s` text, `%d` integer, `%.2f` two decimals, `%v` anything.
 ```go
 package main
@@ -326,6 +340,7 @@ Bridge: Python `f"{name}: {n:.2f}"` · Rust `format!("{name}: {n:.2}")` · TypeS
 
 ## split-join: split a string and join parts
 since: 1.0
+index: `strings.Split(s, ",")` and `strings.Join(xs, ",")`
 `strings.Split` returns a `[]string`; `strings.Join` glues one back with a separator.
 ```go
 package main
@@ -348,6 +363,7 @@ Bridge: Python `s.split(",")` and `",".join(xs)` · Rust `s.split(',')` and `xs.
 
 ## test-function: write a unit test for a function
 since: 1.0
+index: `func TestX(t *testing.T)`
 Tests go in a `_test.go` file in the same package; each `func TestX(t *testing.T)` reports with `t.Errorf`. Run them with `go test ./...`.
 ```go
 package main
@@ -378,5 +394,6 @@ Bridge: Python `unittest` or `pytest` · Rust `#[test]` in a `mod tests` · Type
 
 ## read-trace: read a stack trace (point to `tutor-stack-traces`)
 since: -
+index: `tutor-stack-traces`
 A Go crash prints `panic:` and the message, then `goroutine 1 [running]:` and the calls, newest first; each call is followed by its `file.go:line`. The first frame in the learner's own code is usually the place to look. For the full walk-through, load `tutor-stack-traces` (section Go).
 Bridge: Python the traceback, read bottom-up · Rust panic message plus `RUST_BACKTRACE=1` · TypeScript the stack, read top-down · Lua `stack traceback:`
