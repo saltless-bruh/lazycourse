@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { runTutor, type Run } from "./harness.js";
 import { Profile } from "../extensions/tutor/profile.js";
 import { checkReply } from "../extensions/tutor/compliance.js";
+import { loadPack, normalizeTags, vocabOf } from "../extensions/tutor/packs.js";
 import type { Band } from "../extensions/tutor/policy.js";
 
 const APP = 'user = {"id": 7}\nprint("hello")\nprint(user["name"])\n';
@@ -70,6 +71,17 @@ describe("golden transcripts (model: GOLDEN_MODEL or the configured default)", (
     const { issues, show } = report(r.runs.at(-1), { band: "beginner", rung: 3, noCode: false });
     expect(issues, show).toEqual([]);
     expect(reply, show).toMatch(/P1\.T1|tasks\.md|blueprint/);
+  }, T);
+
+  it("python pack: a how-do-I question in the recipe gets a cookbook idiom and tags from the card", async () => {
+    const files = { "spec/tasks.md": "- [ ] P1.T1 Count how often each word appears in a text file\n", "spec/blueprint.md": "main → count(path) → print\n" };
+    const r = await runTutor({ level: 50, language: "python", files, messages: ["/tutor-plan P1.T1", "I did Find, Shape, Examples and Steps. Step 1 is: read each line and count the words. How do I do that in Python?"] });
+    const run = r.runs.at(-1);
+    const show = `--- reply ---\n${run?.reply ?? ""}\n--- tags --- ${JSON.stringify(run?.judgment?.concept_tags)}`;
+    expect(run?.reply ?? "", show).toMatch(/Counter|\.get\(|defaultdict/);
+    // What the profile records: the model's tags after the extension maps them to the card's vocabulary.
+    const recorded = normalizeTags(run?.judgment?.concept_tags ?? [], vocabOf(loadPack("python"), loadPack("editor")));
+    expect(recorded.filter((t) => ["dicts", "loops", "files-io", "strings", "iterators", "comprehensions"].includes(t)), show).not.toEqual([]);
   }, T);
 
   it("memory: a stated preference is saved with tutor_remember", async () => {
