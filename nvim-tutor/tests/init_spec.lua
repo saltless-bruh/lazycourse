@@ -74,7 +74,7 @@ describe("tutor.init", function()
     local buf = tutor.state.term:bufnr()
     vim.wait(1000, function() return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "/tutor-exam medium dicts") end)
     assert.is_true(vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "/tutor-exam medium dicts"))
-    assert.same({ "small", "medium", "check", "off" }, vim.fn.getcompletion("TutorExam ", "cmdline"))
+    assert.same({ "small", "medium", "check", "off", "sandbox" }, vim.fn.getcompletion("TutorExam ", "cmdline"))
   end)
 
   it(":TutorSubmit and :TutorProgress type their slash commands (M8)", function()
