@@ -1104,6 +1104,40 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running({ started: Date.now() - 3_600_000 }) });
     expect(b.widgets["tutor"]?.[0]).toMatch(/exam 01 \+40:0\d late/);
   });
+  it("exam tests are sandboxed by default; /tutor-exam sandbox off is saved and turns it off (plan 2026-10-16)", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    const calls: [string, string[]][] = [];
+    b.pi.exec = (async (c: string, a: string[], o: { cwd: string; timeout: number }) => { calls.push([c, a]); return realExec(c, a, o); }) as never;
+    // The exam's test run, wrapped or not (the language card's version checks also use pi.exec).
+    const testRuns = () => calls.filter(([c, a]) => c === "timeout" || a.includes("unittest"));
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/exam 01-word-frequency/);
+    expect(testRuns().length).toBeGreaterThan(0);
+    expect(testRuns().every(([c]) => c === "bwrap")).toBe(true); // the hidden check ran sandboxed
+    await b.commands["tutor-exam"].handler("sandbox off", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/exam sandbox: off.*run as you/);
+    calls.length = 0;
+    await b.commands["tutor-exam"].handler("check", b.ctx);
+    expect(testRuns().length).toBeGreaterThan(0);
+    expect(calls.map(([c]) => c)).not.toContain("bwrap");
+    expect(b.notes.at(-1)).toMatch(/examples fail/);
+    const again = await boot({ cwd }); // a new session reads the saved choice
+    await again.commands["tutor-exam"].handler("sandbox", again.ctx);
+    expect(again.notes.at(-1)).toMatch(/^exam sandbox: off/);
+  }, 60_000);
+  it("/tutor-exam sandbox reports whether bubblewrap can start; a bad word gets the usage", async () => {
+    const b = await boot({ cwd: await projectDir("python") });
+    b.execOut["bwrap"] = { stdout: "", stderr: "bwrap: setting up uid map: Permission denied", code: 1 };
+    await b.commands["tutor-exam"].handler("sandbox", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/exam sandbox: on.*bubblewrap cannot start/);
+    b.execOut["bwrap"] = { stdout: "", stderr: "", code: 0 };
+    await b.commands["tutor-exam"].handler("sandbox", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/exam sandbox: on \(bubblewrap ready\)/);
+    await b.commands["tutor-exam"].handler("sandbox maybe", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/usage: \/tutor-exam .*sandbox \[on\|off\]/);
+  });
   it("off abandons the exam; check runs the examples without a model call", async () => {
     const cwd = await projectDir("python");
     const b = await boot({ cwd });
@@ -1161,7 +1195,7 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     mkdir(pjoin(cwd, "exam", "01-word-frequency"), { recursive: true });
     wfile(pjoin(cwd, "exam", "01-word-frequency", "solution.py"), "def count_words(t):\n    while True: pass\n");
     wfile(pjoin(cwd, "exam", "01-word-frequency", "brief.md"), "# Exam\n\n## Requirements\n\n- **R1** a\n- **R2** b\n");
-    b.pi.exec = (async (_c: string, a: string[]) => (a.includes("--version") ? { stdout: "1", stderr: "", code: 0, killed: false } : { stdout: "", stderr: "", code: 143, killed: true })) as never;
+    b.pi.exec = (async (c: string, a: string[]) => (a.includes("--version") || (c === "bwrap" && a.at(-1) === "true") ? { stdout: "1", stderr: "", code: 0, killed: false } : { stdout: "", stderr: "", code: 143, killed: true })) as never;
     b.replies.push(JSON.stringify({ requirements: [{ id: "R1", met: false, evidence: "solution.py:2 — loops forever" }, { id: "R2", met: false, evidence: "solution.py:2 — loops forever" }], idioms: [], next_fixes: ["a", "b", "c"], in_short: "It never returns." }));
     await b.commands["tutor-submit"].handler("", b.ctx);
     expect(readFileSync(pjoin(cwd, "exam", "01-word-frequency", "grade.md"), "utf8")).toContain("timed out after 120 s");
@@ -1171,7 +1205,7 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     const b = await boot({ cwd, branch: running() });
     mkdir(pjoin(cwd, "exam", "01-word-frequency"), { recursive: true });
     wfile(pjoin(cwd, "exam", "01-word-frequency", "brief.md"), "# Exam\n\n## Requirements\n\n- **R1** a\n- **R2** b\n");
-    b.pi.exec = (async () => ({ stdout: "", stderr: "", code: 1, killed: false })) as never;
+    b.pi.exec = (async (c: string, a: string[]) => ({ stdout: "", stderr: "", code: c === "bwrap" && a.at(-1) === "true" ? 0 : 1, killed: false })) as never; // bubblewrap starts; python3 does not
     await b.commands["tutor-exam"].handler("check", b.ctx);
     expect(b.notes.at(-1)).toMatch(/could not run python3/);
     await b.commands["tutor-submit"].handler("", b.ctx);

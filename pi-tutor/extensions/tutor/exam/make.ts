@@ -14,10 +14,16 @@ export const LIMIT_MIN: Record<ExamSize, number> = { small: 20, medium: 45 };
 
 export interface ExamSpec { title: string; task: string; requirements: { id: string; text: string }[]; examples: string; concepts: string[]; stub: string; tests: string }
 
-export function parseExamArgs(args: string): { kind: "start"; size: ExamSize; topic: string | null } | { kind: "check" } | { kind: "off" } {
+export type ExamArgs = { kind: "start"; size: ExamSize; topic: string | null } | { kind: "check" } | { kind: "off" } | { kind: "sandbox"; mode: "on" | "off" | null } | { kind: "usage" };
+
+export function parseExamArgs(args: string): ExamArgs {
   const a = args.trim();
   if (a === "check" || a === "off") return { kind: a };
   const [first, ...rest] = a.split(/\s+/);
+  if (first === "sandbox") {
+    const mode = rest.join(" ");
+    return mode === "" ? { kind: "sandbox", mode: null } : mode === "on" || mode === "off" ? { kind: "sandbox", mode } : { kind: "usage" };
+  }
   const size: ExamSize = first === "medium" || first === "small" ? first : "small";
   const topic = (size === first ? rest.join(" ") : a).trim();
   return { kind: "start", size, topic: topic || null };

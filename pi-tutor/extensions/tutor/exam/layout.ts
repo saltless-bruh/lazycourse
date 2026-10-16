@@ -91,7 +91,9 @@ export async function runExamTests(exec: RunExec, language: string, dir: string,
     return { code: 1, out: SANDBOX_MISSING, killed: false, broken: false, missing: SANDBOX_MISSING };
   }
   // Review Focus #5: bind and chdir the real folder, not a symlink to it.
-  const prefix = sb ? sandboxArgv(realpathSync(dir), language, toolBinds([l.version[0], l.command[0], "timeout"], sb), sb) : null;
+  let real = dir;
+  try { real = realpathSync(dir); } catch { /* a missing folder: bwrap cannot bind it, so the version check reports it */ }
+  const prefix = sb ? sandboxArgv(real, language, toolBinds([l.version[0], l.command[0], "timeout"], sb), sb) : null;
   const run = (c: string, a: string[], timeout: number) => (prefix ? exec("bwrap", [...prefix, c, ...a], { cwd: dir, timeout }) : exec(c, a, { cwd: dir, timeout }));
   const tool = await run(l.version[0], l.version[1], 10_000);
   if (tool.code !== 0) {

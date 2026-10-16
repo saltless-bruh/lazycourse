@@ -29,6 +29,7 @@ import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
 import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakConcepts, type IndexEntry } from "./packs.js";
 import { layout, runExamTests } from "./exam/layout.js";
+import { BWRAP_PROBE, type SandboxHost } from "./exam/sandbox.js";
 import { parseExamArgs, examPrompt, makeExam, LIMIT_MIN } from "./exam/make.js";
 import { restoreExam, examLabel, formatExamContext, type ExamState } from "./exam/state.js";
 import { learnerFiles, checkGrade, score, gradePrompt, renderGrade, type Grade } from "./exam/grade.js";
@@ -171,6 +172,10 @@ export default function (pi: ExtensionAPI): void {
   let paneWidth: number | undefined;
   /** Thinking visibility (learner setting, kept in the profile): auto hides it only at the pro band. */
   let thinking: ThinkingMode = "auto";
+  // Plan 2026-10-16 S1: model-written exam tests run in bubblewrap unless the learner turns it off.
+  let examSandbox: "on" | "off" = "on";
+  const sandboxHost = (): SandboxHost | null => (examSandbox === "off" ? null
+    : { env: process.env, home: homedir(), cacheDir: join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "lazycourse") });
   /** Toolchain per language+root (spec §5.1): versions re-checked every few minutes, the constraint every turn. */
   const toolchainOf = toolchainCache((command, args, options) => pi.exec(command, args, options));
   /** Active role (spec 2026-10-13 §3), persisted as `tutor_role` entries. */
@@ -370,7 +375,7 @@ export default function (pi: ExtensionAPI): void {
     if (proj) state.language = proj.language;
     // M2 #14: a new session (/new) without a project keeps the level this Pi already has.
     state.level = restoreLevel(ctx) ?? (proj ? profile?.language(proj.language)?.level : undefined) ?? state.level ?? DEFAULT_LEVEL;
-    if (profile) { const p = profile; profileWrite(() => { thinking = parseThinkingMode(p.setting("thinking") ?? "") ?? "auto"; }); }
+    if (profile) { const p = profile; profileWrite(() => { thinking = parseThinkingMode(p.setting("thinking") ?? "") ?? "auto"; examSandbox = p.setting("exam_sandbox") === "off" ? "off" : "on"; }); }
     memoryNote = null;
     if (profile) { const p = profile; profileWrite(() => { memoryNote = memorySnapshot(p.memories({ language: project?.language ?? null, limit: 40 })); }); }
     feedbackHistory = [];
@@ -662,9 +667,23 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-exam", {
-    description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons",
+    description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons; sandbox on|off",
     handler: (args, ctx) => exclusive(ctx, async () => {
       const a = parseExamArgs(args);
+      if (a.kind === "usage") { ctx.ui.notify("usage: /tutor-exam [small|medium] [topic] | check | off | sandbox [on|off]", "warning"); return; }
+      if (a.kind === "sandbox") {
+        if (a.mode === null) {
+          if (examSandbox === "off") { ctx.ui.notify("exam sandbox: off — exam tests run as you, with your files and network", "info"); return; }
+          const ok = (await pi.exec(BWRAP_PROBE[0], BWRAP_PROBE[1], { cwd: project?.path ?? process.cwd(), timeout: 10_000 })).code === 0;
+          ctx.ui.notify(ok ? "exam sandbox: on (bubblewrap ready)" : "exam sandbox: on, but bubblewrap cannot start: install bubblewrap (Arch: pacman -S bubblewrap) or /tutor-exam sandbox off", ok ? "info" : "warning");
+          return;
+        }
+        examSandbox = a.mode;
+        if (profile) { const p = profile, mode = a.mode; profileWrite(() => p.setSetting("exam_sandbox", mode)); }
+        const keep = profile ? "" : "; this session only: the profile is unavailable";
+        ctx.ui.notify(a.mode === "off" ? `exam sandbox: off — exam tests now run as you, with your files and network${keep}` : `exam sandbox: on — exam tests run in bubblewrap${keep}`, a.mode === "off" ? "warning" : "info");
+        return;
+      }
       if (a.kind === "off") {
         if (!exam) { ctx.ui.notify("no exam is running", "info"); return; }
         saveExam({ ...exam, abandoned: Date.now() });
@@ -675,7 +694,7 @@ export default function (pi: ExtensionAPI): void {
       if (a.kind === "check") {
         if (!exam || !project) { ctx.ui.notify("no exam is running", "info"); return; }
         ctx.ui.notify("running the example tests…", "info");
-        const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir), { sandbox: null });
+        const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir), { sandbox: sandboxHost() });
         if (r.missing) { ctx.ui.notify(r.missing, "warning"); return; }
         ctx.ui.notify(r.killed ? "examples timed out after 120 s: a loop that never ends?" : r.code === 0 ? "all examples pass; :TutorSubmit when you are ready" : `examples fail (exit ${r.code}): ${r.out.split("\n").slice(-6).join("\n")}`, r.code === 0 ? "info" : "warning");
         return;
@@ -697,7 +716,7 @@ export default function (pi: ExtensionAPI): void {
           exec: (c, a2, o) => pi.exec(c, a2, o),
           system: `${rolePrompt(roleNamed("exam-maker"))}\n\n${systemText("exam-make")}`,
           prompt: examPrompt({ language: lang, level: lvl, band: bandFor(lvl), size: a.size, topic: a.topic, weak, card: (await languageCard(lang, proj.path)) ?? "", naming: lay.naming }),
-          language: lang, root: proj.path, vocab, size: a.size, topic: a.topic,
+          language: lang, root: proj.path, vocab, size: a.size, topic: a.topic, sandbox: sandboxHost(),
         });
         setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
         exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts };
@@ -727,7 +746,7 @@ export default function (pi: ExtensionAPI): void {
       try { brief = readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
       const ids = briefIds(brief);
       ctx.ui.notify("running the example tests…", "info");
-      const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir, { sandbox: null });
+      const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir, { sandbox: sandboxHost() });
       if (test.missing) { ctx.ui.notify(`${test.missing} The exam stays open.`, "warning"); return; }
       const files = learnerFiles(dir, e.language);
       const minutes = Math.round((Date.now() - e.started) / 6000) / 10;

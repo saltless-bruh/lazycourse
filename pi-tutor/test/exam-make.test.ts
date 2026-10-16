@@ -11,6 +11,12 @@ import { PY_EXAM } from "./exam-fixtures.js";
 const vocab = vocabOf(loadPack("python"));
 
 describe("parseExamArgs", () => {
+  it("parses the sandbox switch", () => {
+    expect(parseExamArgs("sandbox")).toEqual({ kind: "sandbox", mode: null });
+    expect(parseExamArgs("sandbox off")).toEqual({ kind: "sandbox", mode: "off" });
+    expect(parseExamArgs(" sandbox  on ")).toEqual({ kind: "sandbox", mode: "on" });
+    expect(parseExamArgs("sandbox maybe")).toEqual({ kind: "usage" });
+  });
   it("defaults to small; a size word, then a topic; check and off", () => {
     expect(parseExamArgs("")).toEqual({ kind: "start", size: "small", topic: null });
     expect(parseExamArgs("medium")).toEqual({ kind: "start", size: "medium", topic: null });
