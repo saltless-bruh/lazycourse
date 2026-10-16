@@ -1,5 +1,8 @@
 // Exam folders (spec 2026-10-13 §6, M8 D2): each is a small project of its own, so its tests run
 // inside any parent project. The model writes the stub and the tests; the rest is ours.
+import { realpathSync } from "node:fs";
+import { BWRAP_PROBE, SANDBOX_MISSING, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
+
 export type RunExec = (command: string, args: string[], options: { cwd: string; timeout: number }) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>;
 /** `version`: a cheap command that fails when the toolchain is not installed (final review I1: pi.exec never rejects). */
 export interface Layout { stub: string; tests: string; extras: [string, string][]; command: [string, string[]]; version: [string, string[]]; broken(out: string): boolean; naming: string }
@@ -76,18 +79,31 @@ export interface TestRun { code: number; out: string; killed: boolean; broken: b
  * Final review I2: Pi's exec kills only its direct child, so cargo's and go's test binaries outlived a
  * hang. coreutils `timeout` runs the command in its own process group and kills the whole group.
  */
-export async function runExamTests(exec: RunExec, language: string, dir: string, limitSec = EXAM_TIMEOUT_MS / 1000): Promise<TestRun> {
+export interface ExamRunOptions { limitSec?: number; sandbox?: SandboxHost | null }
+
+export async function runExamTests(exec: RunExec, language: string, dir: string, opts: ExamRunOptions = {}): Promise<TestRun> {
   const l = LAYOUTS[language];
   if (!l) throw new Error(`no exams for ${language} yet`);
-  const tool = await exec(l.version[0], l.version[1], { cwd: dir, timeout: 10_000 });
+  const limitSec = opts.limitSec ?? EXAM_TIMEOUT_MS / 1000;
+  const sb = opts.sandbox ?? null;
+  // Plan 2026-10-16 S2: no usable bwrap means no run at all, never a silent run outside the sandbox.
+  if (sb && (await exec(BWRAP_PROBE[0], BWRAP_PROBE[1], { cwd: dir, timeout: 10_000 })).code !== 0) {
+    return { code: 1, out: SANDBOX_MISSING, killed: false, broken: false, missing: SANDBOX_MISSING };
+  }
+  // Review Focus #5: bind and chdir the real folder, not a symlink to it.
+  const prefix = sb ? sandboxArgv(realpathSync(dir), language, toolBinds([l.version[0], l.command[0], "timeout"], sb), sb) : null;
+  const run = (c: string, a: string[], timeout: number) => (prefix ? exec("bwrap", [...prefix, c, ...a], { cwd: dir, timeout }) : exec(c, a, { cwd: dir, timeout }));
+  const tool = await run(l.version[0], l.version[1], 10_000);
   if (tool.code !== 0) {
-    const missing = `could not run ${l.version[0]}: is it installed and on the PATH Pi was started with?`;
+    const missing = sb
+      ? `could not run ${l.version[0]} inside the exam sandbox: is it installed and on the PATH Pi was started with? (/tutor-exam sandbox off runs it without one)`
+      : `could not run ${l.version[0]}: is it installed and on the PATH Pi was started with?`;
     return { code: tool.code, out: missing, killed: false, broken: false, missing };
   }
-  const group = (await exec("timeout", ["--version"], { cwd: dir, timeout: 10_000 })).code === 0;
+  const group = (await run("timeout", ["--version"], 10_000)).code === 0;
   const r = group
-    ? await exec("timeout", ["-k", "5", String(limitSec), l.command[0], ...l.command[1]], { cwd: dir, timeout: (limitSec + 15) * 1000 })
-    : await exec(l.command[0], l.command[1], { cwd: dir, timeout: limitSec * 1000 });
+    ? await run("timeout", ["-k", "5", String(limitSec), l.command[0], ...l.command[1]], (limitSec + 15) * 1000)
+    : await run(l.command[0], l.command[1], limitSec * 1000);
   const killed = r.killed || (group && (r.code === 124 || r.code === 137));
   const out = `${r.stdout}\n${r.stderr}`.trim();
   return { code: r.code, out, killed, broken: !killed && r.code !== 0 && l.broken(out) };

@@ -675,7 +675,7 @@ export default function (pi: ExtensionAPI): void {
       if (a.kind === "check") {
         if (!exam || !project) { ctx.ui.notify("no exam is running", "info"); return; }
         ctx.ui.notify("running the example tests…", "info");
-        const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir));
+        const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir), { sandbox: null });
         if (r.missing) { ctx.ui.notify(r.missing, "warning"); return; }
         ctx.ui.notify(r.killed ? "examples timed out after 120 s: a loop that never ends?" : r.code === 0 ? "all examples pass; :TutorSubmit when you are ready" : `examples fail (exit ${r.code}): ${r.out.split("\n").slice(-6).join("\n")}`, r.code === 0 ? "info" : "warning");
         return;
@@ -727,7 +727,7 @@ export default function (pi: ExtensionAPI): void {
       try { brief = readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
       const ids = briefIds(brief);
       ctx.ui.notify("running the example tests…", "info");
-      const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir);
+      const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir, { sandbox: null });
       if (test.missing) { ctx.ui.notify(`${test.missing} The exam stays open.`, "warning"); return; }
       const files = learnerFiles(dir, e.language);
       const minutes = Math.round((Date.now() - e.started) / 6000) / 10;

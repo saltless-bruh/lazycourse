@@ -6,6 +6,7 @@ import { normalizeTags, type Vocab } from "../packs.js";
 import { slugify } from "../scaffold.js";
 import { writeInRoot } from "../files.js";
 import { layout, examFiles, runExamTests, type RunExec } from "./layout.js";
+import type { SandboxHost } from "./sandbox.js";
 
 // Exam-maker (spec 2026-10-13 §6): one JSON call → exam/<id>/{brief.md, stub, tests}, probed before use (D5).
 export type ExamSize = "small" | "medium";
@@ -100,7 +101,7 @@ function unwrite(paths: string[], root: string, dir: string) {
   }
 }
 
-export async function makeExam(d: { complete: Complete; exec: RunExec; system: string; prompt: string; language: string; root: string; vocab: Vocab | null; size: ExamSize; topic: string | null }): Promise<Made> {
+export async function makeExam(d: { complete: Complete; exec: RunExec; system: string; prompt: string; language: string; root: string; vocab: Vocab | null; size: ExamSize; topic: string | null; sandbox?: SandboxHost | null }): Promise<Made> {
   let reason = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const user = attempt === 0 ? d.prompt : `${d.prompt}\n\nYour previous exam was rejected: ${reason}. Reply with only the corrected JSON object.`;
@@ -111,7 +112,7 @@ export async function makeExam(d: { complete: Complete; exec: RunExec; system: s
     const written: string[] = [];
     try {
       for (const [rel, t] of files) written.push(writeInRoot(d.root, `${dir}/${rel}`, t, { exclusive: true }));
-      const r = await runExamTests(d.exec, d.language, join(d.root, dir));
+      const r = await runExamTests(d.exec, d.language, join(d.root, dir), { sandbox: d.sandbox });
       if (r.missing) throw new Error(r.missing); // not the model's fault: no retry (final review I1)
       if (r.killed) reason = "the example tests did not finish within 120 s against the stub";
       else if (r.broken) reason = `the example tests do not compile or load: ${r.out.slice(-1500)}`;

@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { createServer, type AddressInfo } from "node:net";
+import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { layout, examFiles, runExamTests, EXAM_TIMEOUT_MS } from "../extensions/tutor/exam/layout.js";
 import { realExec } from "./fake-pi.js";
+import { SANDBOX_MISSING, type SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 
 const has = (cmd: string) => spawnSync(cmd, ["--version"]).status === 0 || spawnSync(cmd, ["version"]).status === 0 || spawnSync(cmd, ["-v"]).status === 0;
 const CASES: Record<string, { tool: string; stub: string; solved: string; tests: string; badTests: string }> = {
@@ -92,7 +95,7 @@ describe("exam layouts run with the real toolchains (M8 D2, D5)", () => {
   it.skipIf(!has("go") || spawnSync("timeout", ["--version"]).status !== 0)("a solution that loops forever is stopped with every process it started (final review I2)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "exam-hang-"));
     writeAll(dir, examFiles("go", "package exam\n\nfunc CountWords(text string) map[string]int {\n\tfor {\n\t}\n}\n", CASES.go.tests));
-    const r = await runExamTests(realExec, "go", dir, 3);
+    const r = await runExamTests(realExec, "go", dir, { limitSec: 3 });
     expect(r.killed).toBe(true);
     await new Promise((res) => setTimeout(res, 500));
     const left = execFileSync("ps", ["-eo", "comm"], { encoding: "utf8" }).split("\n").filter((c) => c === "exam.test");
@@ -103,5 +106,90 @@ describe("exam layouts run with the real toolchains (M8 D2, D5)", () => {
     writeAll(join(root, "exam", "01-x"), examFiles(lang, CASES[lang].stub, CASES[lang].tests));
     const out = spawnSync("node", ["--test"], { cwd: root, encoding: "utf8" });
     expect(`${out.stdout}${out.stderr}`).not.toMatch(/r1 counts/);
+  });
+});
+
+const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0;
+const realHost = (): SandboxHost => ({ env: process.env, home: homedir(), cacheDir: mkdtempSync(join(tmpdir(), "sbx-cache-")) });
+
+describe("exam tests inside the sandbox (plan 2026-10-16)", () => {
+  for (const [lang, c] of Object.entries(CASES)) {
+    it.skipIf(!bwrapReady || !has(c.tool))(`${lang}: stub fails cleanly and a solution passes inside the sandbox`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), `sbx-${lang}-`));
+      writeAll(dir, examFiles(lang, c.stub, c.tests));
+      const stub = await runExamTests(realExec, lang, dir, { sandbox: realHost() });
+      expect(stub.missing, stub.out).toBeUndefined();
+      expect(stub.code).not.toBe(0);
+      expect(stub.broken, stub.out).toBe(false);
+      writeAll(dir, examFiles(lang, c.solved, c.tests));
+      const solved = await runExamTests(realExec, lang, dir, { sandbox: realHost() });
+      expect(solved.code, solved.out).toBe(0);
+    }, 90_000);
+  }
+
+  it.skipIf(!bwrapReady || !has("python3"))("a test file cannot write outside, read home or secrets, or reach a port or socket (Review Focus #1)", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "sbx-outside-"));
+    const home = mkdtempSync(join(tmpdir(), "sbx-fakehome-"));
+    writeFileSync(join(home, "id_secret"), "k");
+    process.env.LAZY_SANDBOX_SECRET = "s3cr3t-value";
+    const server = createServer().listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as AddressInfo).port;
+    const sock = join(outside, "nvim.sock");
+    const unix = createServer().listen(sock);
+    await once(unix, "listening");
+    const probe = [
+      "import os, socket, unittest",
+      "class T(unittest.TestCase):",
+      "    def test_escape(self):",
+      `        try: open(${JSON.stringify(join(outside, "escaped"))}, "w").write("x")`,
+      "        except OSError: pass",
+      "        print('HOME', sorted(os.listdir(os.path.expanduser('~'))))",
+      "        print('ENV', os.environ.get('LAZY_SANDBOX_SECRET'))",
+      "        for fam, addr, tag in ((socket.AF_INET, ('127.0.0.1', " + port + "), 'tcp'), (socket.AF_UNIX, " + JSON.stringify(sock) + ", 'unix')):",
+      "            s = socket.socket(fam)",
+      "            try: s.connect(addr); print(tag, 'reached')",
+      "            except OSError: print(tag, 'blocked')",
+      "        self.fail('done')",
+    ].join("\n");
+    const dir = mkdtempSync(join(tmpdir(), "sbx-escape-"));
+    writeAll(dir, [["solution.py", "\n"], ["test_examples.py", probe]]);
+    try {
+      const r = await runExamTests(realExec, "python", dir, { sandbox: { env: process.env, home, cacheDir: outside } });
+      expect(existsSync(join(outside, "escaped"))).toBe(false);
+      expect(r.out).toContain("HOME []");
+      expect(r.out).toContain("ENV None");
+      expect(r.out).toContain("tcp blocked");
+      expect(r.out).toContain("unix blocked");
+    } finally {
+      delete process.env.LAZY_SANDBOX_SECRET;
+      server.close(); unix.close();
+    }
+  }, 60_000);
+
+  it.skipIf(!bwrapReady || !has("go"))("a looping solution is still stopped with every process it started (Review Focus #2)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbx-hang-"));
+    writeAll(dir, examFiles("go", "package exam\n\nfunc CountWords(text string) map[string]int {\n\tfor {\n\t}\n}\n", CASES.go.tests));
+    const r = await runExamTests(realExec, "go", dir, { limitSec: 3, sandbox: realHost() });
+    expect(r.killed).toBe(true);
+    await new Promise((res) => setTimeout(res, 500));
+    expect(execFileSync("ps", ["-eo", "comm"], { encoding: "utf8" }).split("\n").filter((c) => c === "exam.test")).toEqual([]);
+  }, 90_000);
+
+  it("bwrap that cannot start is reported as missing with the fix, and nothing else runs (Review Focus #3)", async () => {
+    const ran: string[] = [];
+    const exec = async (c: string) => { ran.push(c); return { stdout: "", stderr: "", code: c === "bwrap" ? 1 : 0, killed: false }; };
+    const dir = mkdtempSync(join(tmpdir(), "sbx-nobwrap-"));
+    const r = await runExamTests(exec, "python", dir, { sandbox: realHost() });
+    expect(r.missing).toBe(SANDBOX_MISSING);
+    expect(r.broken).toBe(false);
+    expect(ran).toEqual(["bwrap"]);
+  });
+
+  it("a toolchain the sandbox cannot see says so", async () => {
+    const exec = async (c: string, a: string[]) => ({ stdout: "", stderr: "", code: c === "bwrap" && a.includes("--version") ? 1 : 0, killed: false });
+    const dir = mkdtempSync(join(tmpdir(), "sbx-notool-"));
+    const r = await runExamTests(exec, "rust", dir, { sandbox: realHost() });
+    expect(r.missing).toMatch(/could not run cargo inside the exam sandbox/);
   });
 });

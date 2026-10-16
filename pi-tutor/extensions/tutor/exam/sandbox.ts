@@ -52,7 +52,8 @@ export function toolBinds(cmds: string[], host: SandboxHost): string[] {
 export function sandboxArgv(dir: string, language: string, binds: string[], host: SandboxHost): string[] {
   const a = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
   for (const h of HIDDEN) a.push("--tmpfs", h);
-  if (!HIDDEN.some((h) => under(host.home, h))) a.push("--tmpfs", host.home);
+  // Always an empty, writable home: tools that look at ~ find it, and nothing of the real one shows.
+  a.push("--tmpfs", host.home);
   for (const b of binds) a.push("--ro-bind", b, b);
   a.push("--clearenv", "--setenv", "PATH", host.env.PATH ?? "/usr/bin:/bin", "--setenv", "HOME", host.home, "--setenv", "LANG", host.env.LANG ?? "C.UTF-8");
   for (const k of KEEP_ENV) { const v = host.env[k]; if (v) a.push("--setenv", k, v); }

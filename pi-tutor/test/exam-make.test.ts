@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { parseExamArgs, checkExam, renderBrief, nextExamId, makeExam, LIMIT_MIN } from "../extensions/tutor/exam/make.js";
 import { loadPack, vocabOf } from "../extensions/tutor/packs.js";
 import { realExec } from "./fake-pi.js";
+import { BWRAP_PROBE, SANDBOX_MISSING } from "../extensions/tutor/exam/sandbox.js";
 import { PY_EXAM } from "./exam-fixtures.js";
 
 const vocab = vocabOf(loadPack("python"));
@@ -86,5 +87,12 @@ describe("makeExam (D5: the tests must fail, not break, against the stub)", () =
     await expect(makeExam(d)).rejects.toThrow(/could not run python3/);
     expect(calls).toBe(1);
     expect(existsSync(join(d.root, "exam"))).toBe(false);
+  });
+  it("hands the sandbox to the probe run: bwrap is checked first (plan 2026-10-16)", async () => {
+    const ran: [string, string[]][] = [];
+    const exec = async (c: string, a: string[]) => { ran.push([c, a]); return { stdout: "", stderr: "", code: 1, killed: false }; };
+    const d = { ...deps([JSON.stringify(PY_EXAM)]), exec, sandbox: { env: process.env, home: "/home/nobody", cacheDir: mkdtempSync(join(tmpdir(), "sbx-cache-")) } };
+    await expect(makeExam(d)).rejects.toThrow(SANDBOX_MISSING);
+    expect(ran[0]).toEqual(BWRAP_PROBE);
   });
 });

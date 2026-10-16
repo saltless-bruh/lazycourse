@@ -63,7 +63,8 @@ describe("exam sandbox: the bwrap arguments (plan S3, S5, S6)", () => {
     expect(set).not.toContain("NVIM");
     expect(argv.join(" ")).not.toContain("/run/user/1000/nvim.1");
   });
-  it("a home outside /home is hidden too", () => {
+  it("home is always an empty folder, inside /home or not", () => {
+    expect(pairs("--tmpfs")).toContain("/home/me");
     expect(sandboxArgv("/w", "python", [], { ...host, home: "/srv/me" })).toEqual(expect.arrayContaining(["--tmpfs", "/srv/me"]));
   });
   it("go gets one shared writable build cache and no toolchain downloads", () => {
