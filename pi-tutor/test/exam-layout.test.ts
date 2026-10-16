@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, lstatSync, readFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { createServer, type AddressInfo } from "node:net";
 import { once } from "node:events";
@@ -109,6 +109,7 @@ describe("exam layouts run with the real toolchains (M8 D2, D5)", () => {
   });
 });
 
+const lstatOk = (p: string) => { try { lstatSync(p); return true; } catch { return false; } };
 const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0;
 const realHost = (): SandboxHost => ({ env: process.env, home: homedir(), cacheDir: mkdtempSync(join(tmpdir(), "sbx-cache-")) });
 
@@ -146,7 +147,7 @@ describe("exam tests inside the sandbox (plan 2026-10-16)", () => {
       "        except OSError: pass",
       "        print('HOME', sorted(os.listdir(os.path.expanduser('~'))))",
       "        print('ENV', os.environ.get('LAZY_SANDBOX_SECRET'))",
-      "        for fam, addr, tag in ((socket.AF_INET, ('127.0.0.1', " + port + "), 'tcp'), (socket.AF_UNIX, " + JSON.stringify(sock) + ", 'unix')):",
+      "        for fam, addr, tag in ((socket.AF_INET, ('127.0.0.1', " + port + "), 'tcp'), (socket.AF_UNIX, " + JSON.stringify(sock) + ", 'unix'), (socket.AF_UNIX, '/run/dbus/system_bus_socket', 'sysbus'), (socket.AF_UNIX, '/run/docker.sock', 'docker')):",
       "            s = socket.socket(fam)",
       "            try: s.connect(addr); print(tag, 'reached')",
       "            except OSError: print(tag, 'blocked')",
@@ -161,10 +162,35 @@ describe("exam tests inside the sandbox (plan 2026-10-16)", () => {
       expect(r.out).toContain("ENV None");
       expect(r.out).toContain("tcp blocked");
       expect(r.out).toContain("unix blocked");
+      expect(r.out).not.toMatch(/sysbus reached|docker reached/); // final review C1: root-owned sockets in /run
     } finally {
       delete process.env.LAZY_SANDBOX_SECRET;
       server.close(); unix.close();
     }
+  }, 60_000);
+
+  it.skipIf(!bwrapReady || !has("python3"))("symlinks and files a test plants never reach the real exam folder (final review C2)", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "sbx-plant-"));
+    const dir = mkdtempSync(join(tmpdir(), "sbx-plantexam-"));
+    const plant = [
+      "import os, unittest",
+      "class T(unittest.TestCase):",
+      "    def test_plant(self):",
+      `        os.symlink(${JSON.stringify(join(outside, "planted.sh"))}, "grade.md")`,
+      "        os.remove('brief.md')",
+      `        os.symlink(${JSON.stringify(join(outside, "secret"))}, "brief.md")`,
+      "        open('planted.txt', 'w').write('x')",
+      "        open('solution.py', 'w').write('hacked = True')",
+      "        print('planted')",
+    ].join("\n");
+    writeAll(dir, [["solution.py", "\n"], ["brief.md", "# brief\n"], ["test_examples.py", plant]]);
+    const r = await runExamTests(realExec, "python", dir, { sandbox: realHost() });
+    expect(r.out).toContain("planted");
+    expect(lstatOk(join(dir, "grade.md"))).toBe(false);
+    expect(lstatSync(join(dir, "brief.md")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(dir, "brief.md"), "utf8")).toBe("# brief\n");
+    expect(readFileSync(join(dir, "solution.py"), "utf8")).toBe("\n");
+    expect(existsSync(join(dir, "planted.txt"))).toBe(false);
   }, 60_000);
 
   it.skipIf(!bwrapReady || !has("go"))("a looping solution is still stopped with every process it started (Review Focus #2)", async () => {

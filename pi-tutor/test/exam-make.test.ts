@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parseExamArgs, checkExam, renderBrief, nextExamId, makeExam, LIMIT_MIN } from "../extensions/tutor/exam/make.js";
 import { loadPack, vocabOf } from "../extensions/tutor/packs.js";
 import { realExec } from "./fake-pi.js";
-import { BWRAP_PROBE, SANDBOX_MISSING } from "../extensions/tutor/exam/sandbox.js";
+import { SANDBOX_MISSING } from "../extensions/tutor/exam/sandbox.js";
 import { PY_EXAM } from "./exam-fixtures.js";
 
 const vocab = vocabOf(loadPack("python"));
@@ -99,6 +99,9 @@ describe("makeExam (D5: the tests must fail, not break, against the stub)", () =
     const exec = async (c: string, a: string[]) => { ran.push([c, a]); return { stdout: "", stderr: "", code: 1, killed: false }; };
     const d = { ...deps([JSON.stringify(PY_EXAM)]), exec, sandbox: { env: process.env, home: "/home/nobody", cacheDir: mkdtempSync(join(tmpdir(), "sbx-cache-")) } };
     await expect(makeExam(d)).rejects.toThrow(SANDBOX_MISSING);
-    expect(ran[0]).toEqual(BWRAP_PROBE);
+    // Final review C2/M4: the probe uses the run's own mounts (overlay included), then runs `true`.
+    expect(ran[0][0]).toBe("bwrap");
+    expect(ran[0][1]).toEqual(expect.arrayContaining(["--tmp-overlay", "--unshare-all"]));
+    expect(ran[0][1].at(-1)).toBe("true");
   });
 });

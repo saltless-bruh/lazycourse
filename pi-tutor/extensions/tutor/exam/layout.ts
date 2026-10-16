@@ -1,7 +1,7 @@
 // Exam folders (spec 2026-10-13 §6, M8 D2): each is a small project of its own, so its tests run
 // inside any parent project. The model writes the stub and the tests; the rest is ours.
 import { realpathSync } from "node:fs";
-import { BWRAP_PROBE, SANDBOX_MISSING, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
+import { SANDBOX_MISSING, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
 
 export type RunExec = (command: string, args: string[], options: { cwd: string; timeout: number }) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>;
 /** `version`: a cheap command that fails when the toolchain is not installed (final review I1: pi.exec never rejects). */
@@ -86,14 +86,15 @@ export async function runExamTests(exec: RunExec, language: string, dir: string,
   if (!l) throw new Error(`no exams for ${language} yet`);
   const limitSec = opts.limitSec ?? EXAM_TIMEOUT_MS / 1000;
   const sb = opts.sandbox ?? null;
+  // Review Focus #5: mount and chdir the real folder, not a symlink to it.
+  let real = dir;
+  try { real = realpathSync(dir); } catch { /* a missing folder: bwrap cannot mount it, so the check below reports it */ }
+  const prefix = sb ? sandboxArgv(real, language, toolBinds([l.version[0], l.command[0], "timeout"], sb), sb) : null;
   // Plan 2026-10-16 S2: no usable bwrap means no run at all, never a silent run outside the sandbox.
-  if (sb && (await exec(BWRAP_PROBE[0], BWRAP_PROBE[1], { cwd: dir, timeout: 10_000 })).code !== 0) {
+  // Final review M4: the check uses the run's own mounts (overlay included), so a mount it cannot make is caught here.
+  if (prefix && (await exec("bwrap", [...prefix, "true"], { cwd: dir, timeout: 10_000 })).code !== 0) {
     return { code: 1, out: SANDBOX_MISSING, killed: false, broken: false, missing: SANDBOX_MISSING };
   }
-  // Review Focus #5: bind and chdir the real folder, not a symlink to it.
-  let real = dir;
-  try { real = realpathSync(dir); } catch { /* a missing folder: bwrap cannot bind it, so the version check reports it */ }
-  const prefix = sb ? sandboxArgv(real, language, toolBinds([l.version[0], l.command[0], "timeout"], sb), sb) : null;
   const run = (c: string, a: string[], timeout: number) => (prefix ? exec("bwrap", [...prefix, c, ...a], { cwd: dir, timeout }) : exec(c, a, { cwd: dir, timeout }));
   const tool = await run(l.version[0], l.version[1], 10_000);
   if (tool.code !== 0) {

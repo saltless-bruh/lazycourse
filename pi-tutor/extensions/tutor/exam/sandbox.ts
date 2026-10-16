@@ -10,7 +10,10 @@ export interface SandboxHost { env: NodeJS.ProcessEnv; home: string; cacheDir: s
 export const BWRAP_PROBE: [string, string[]] = ["bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--die-with-parent", "true"]];
 export const SANDBOX_MISSING = "exam tests run in a sandbox and bubblewrap (bwrap) cannot start here: install it (Arch: pacman -S bubblewrap) or run /tutor-exam sandbox off";
 
-const HIDDEN = ["/home", "/tmp", "/var/tmp", "/run/user"];
+// Final review C1: all of /run, not only /run/user (docker.sock, the system bus, varlink sockets).
+const HIDDEN = ["/home", "/tmp", "/var/tmp", "/run"];
+// Final review I3: mounted drives and served data, hidden when the folder exists (tmpfs needs a mount point).
+const HIDDEN_IF_PRESENT = ["/mnt", "/media", "/srv"];
 const KEEP_ENV = ["RUSTUP_HOME", "CARGO_HOME", "RUSTUP_TOOLCHAIN"];
 
 export function findOnPath(cmd: string, path: string): string | null {
@@ -26,24 +29,37 @@ const under = (p: string, dir: string) => p === dir || p.startsWith(`${dir}/`);
 const hidden = (p: string, home: string) => under(p, home) || HIDDEN.some((h) => under(p, h));
 const exists = (p: string) => { try { statSync(p); return true; } catch { return false; } };
 
-/** Read-only binds that make a toolchain installed under a hidden folder visible again (plan S4). */
+/** Home, a folder above it, or one level inside home or ~/.local: far more than a toolchain (keys, history). */
+const broad = (p: string, home: string) =>
+  under(home, p) || dirname(p) === home || dirname(p) === join(home, ".local");
+
+/**
+ * Read-only binds that make a toolchain installed under a hidden folder visible again (plan S4).
+ * Final review I1/I2/M3: a broad folder is never bound; the tool's files are bound instead.
+ */
 export function toolBinds(cmds: string[], host: SandboxHost): string[] {
   const out = new Set<string>();
+  const home = host.home;
+  const dirOr = (dir: string, files: string[]) => { if (broad(dir, home)) for (const f of files) out.add(f); else out.add(dir); };
   for (const c of cmds) {
     const found = findOnPath(c, host.env.PATH ?? "");
     if (!found) continue;
-    const real = realpathSync(found), bin = dirname(real);
-    if (hidden(dirname(found), host.home) && dirname(found) !== bin) out.add(dirname(found));
-    if (!hidden(real, host.home)) continue;
-    if (basename(real) === "rustup") {
-      out.add(bin);
-      const rh = host.env.RUSTUP_HOME ?? join(host.home, ".rustup");
+    const real = realpathSync(found), at = dirname(found), bin = dirname(real);
+    if (!hidden(found, home) && !hidden(real, home)) continue;
+    // rustup proxies are symlinks or hard links to rustup in the same folder; ~/.cargo itself holds credentials.toml.
+    if (basename(real) === "rustup" || exists(join(at, "rustup"))) {
+      dirOr(basename(real) === "rustup" ? bin : at, [found, real]);
+      const rh = host.env.RUSTUP_HOME ?? join(home, ".rustup");
       if (exists(rh)) out.add(rh);
       continue;
     }
+    // pyenv: the shim execs <root>/libexec/pyenv and runs <root>/versions/*.
+    if (basename(at) === "shims" && hidden(at, home) && dirname(at) !== home) { out.add(dirname(at)); continue; }
+    if (found !== real && hidden(found, home)) out.add(found);
+    if (!hidden(real, home)) continue;
     const root = dirname(bin);
-    // ~ and ~/.local hold far more than the tool (keyrings, history): expose only the bin folder.
-    out.add(basename(bin) === "bin" && root !== host.home && root !== join(host.home, ".local") ? root : bin);
+    if (basename(bin) === "bin" && !broad(root, home)) out.add(root);
+    else dirOr(bin, [real]);
   }
   return [...out];
 }
@@ -52,6 +68,7 @@ export function toolBinds(cmds: string[], host: SandboxHost): string[] {
 export function sandboxArgv(dir: string, language: string, binds: string[], host: SandboxHost): string[] {
   const a = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
   for (const h of HIDDEN) a.push("--tmpfs", h);
+  for (const h of HIDDEN_IF_PRESENT) if (exists(h)) a.push("--tmpfs", h);
   // Always an empty, writable home: tools that look at ~ find it, and nothing of the real one shows.
   a.push("--tmpfs", host.home);
   for (const b of binds) a.push("--ro-bind", b, b);
@@ -62,6 +79,8 @@ export function sandboxArgv(dir: string, language: string, binds: string[], host
     mkdirSync(cache, { recursive: true });
     a.push("--bind", cache, cache, "--setenv", "GOCACHE", cache, "--setenv", "GOTOOLCHAIN", "local", "--setenv", "GOPATH", "/tmp/go");
   }
-  a.push("--bind", dir, dir, "--chdir", dir, "--unshare-all", "--die-with-parent", "--new-session", "--");
+  // Final review C2: the test writes into a throwaway overlay of the exam folder, so files and symlinks it
+  // plants never reach the folder the extension later reads (brief.md), writes (grade.md) or cleans up.
+  a.push("--overlay-src", dir, "--tmp-overlay", dir, "--chdir", dir, "--unshare-all", "--die-with-parent", "--new-session", "--");
   return a;
 }

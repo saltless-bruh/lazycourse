@@ -134,8 +134,8 @@ The project language (from the profile) selects the card (injected) and tells th
 
 **Sandbox (2026-10-16, plan `2026-10-16-exam-sandbox.md`):** the extension runs the example tests itself (M8 D1). They are model-written code, so every run (the probe before the exam is shown, `check`, submit) goes through bubblewrap:
 - `/` is read-only;
-- `/home`, `$HOME`, `/tmp`, `/var/tmp` and `/run/user` are hidden; home is an empty tmpfs;
-- the exam folder is the only writable bind;
+- `/home`, `$HOME`, `/tmp`, `/var/tmp`, all of `/run`, and `/mnt`, `/media`, `/srv` when present are hidden; home is an empty tmpfs (final review C1/I3: `/run` held `docker.sock` and the system bus);
+- the exam folder is a throwaway overlay (`--overlay-src` + `--tmp-overlay`), so files and symlinks a test plants never reach the folder the extension later reads, writes or cleans up (final review C2);
 - there is no network (`--unshare-all`);
 - the environment is cleared apart from `PATH`, `HOME` and `LANG`;
 - toolchain folders under home are bound read-only;

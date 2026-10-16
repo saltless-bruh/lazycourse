@@ -100,10 +100,11 @@ Exams (Milestone 8):
 - `:TutorExam check` runs the example tests; `:TutorExam off` abandons the exam.
 - The model writes the example tests, so every run of them (the one before you see the exam,
   `check` and `:TutorSubmit`) happens in a [bubblewrap](https://github.com/containers/bubblewrap)
-  sandbox. Inside it the filesystem is read-only, apart from the exam folder; your home, `/tmp` and
-  your Neovim and agent sockets are hidden; there is no network; and only `PATH`, `HOME` and `LANG`
-  are passed through. Toolchains installed in your home (rustup, nvm, pyenv) stay visible
-  read-only. `:TutorExam sandbox` shows whether it can start. If bubblewrap is missing, install it
+  sandbox. Inside it the filesystem is read-only; the tests work on a throwaway copy of the exam
+  folder, so nothing they write or link reaches your files; your home, `/tmp`, `/run` (Neovim,
+  agent, Docker and system-bus sockets), `/mnt`, `/media` and `/srv` are hidden; there is no
+  network; and only `PATH`, `HOME` and `LANG` are passed through. Toolchains installed in your home
+  (rustup, nvm, pyenv) stay visible read-only. `:TutorExam sandbox` shows whether it can start. If bubblewrap is missing, install it
   (Arch: `pacman -S bubblewrap`) or run `:TutorExam sandbox off` to run exam tests as you; the
   choice is saved in your profile. `:TutorRun` runs your own commands, so it is never sandboxed.
 - `:TutorSubmit` runs the tests, has the model check each requirement against your code

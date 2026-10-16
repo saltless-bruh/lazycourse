@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, existsSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findOnPath, toolBinds, sandboxArgv } from "../extensions/tutor/exam/sandbox.js";
@@ -29,9 +29,27 @@ describe("exam sandbox: which toolchain folders stay visible (plan S4)", () => {
     const { home, host } = fakeHome();
     expect(toolBinds(["node"], host(`${home}/.nvm/versions/node/v22/bin`))).toEqual([`${home}/.nvm/versions/node/v22`]);
   });
-  it("~/.local/bin: only the bin folder, not ~/.local/share", () => {
+  it("~/.local/bin: only the tool file, not the folder's other scripts or ~/.local/share (final review M3)", () => {
     const { home, host } = fakeHome();
-    expect(toolBinds(["lua"], host(`${home}/.local/bin`))).toEqual([`${home}/.local/bin`]);
+    expect(toolBinds(["lua"], host(`${home}/.local/bin`))).toEqual([`${home}/.local/bin/lua`]);
+  });
+  it("never binds home itself: a tool linked to a file in ~, or found on a PATH entry that is ~ (final review I1)", () => {
+    const { home, host } = fakeHome();
+    exe(join(home, "mytool")); symlinkSync(join(home, "mytool"), join(home, ".local/bin/luajit"));
+    expect(toolBinds(["luajit"], host(`${home}/.local/bin`)).sort()).toEqual([`${home}/.local/bin/luajit`, `${home}/mytool`]);
+    expect(toolBinds(["mytool"], host(home))).toEqual([`${home}/mytool`]);
+  });
+  it("pyenv shims: the pyenv root, which holds the shim's libexec and versions (final review I2)", () => {
+    const { home, host } = fakeHome();
+    exe(join(home, ".pyenv/shims/python3")); mkdirSync(join(home, ".pyenv/libexec"), { recursive: true });
+    expect(toolBinds(["python3"], host(`${home}/.pyenv/shims`))).toEqual([`${home}/.pyenv`]);
+  });
+  it("hard-linked rustup proxies: still only the bin folder and RUSTUP_HOME, never ~/.cargo (final review I2)", () => {
+    const { home, host } = fakeHome();
+    const bin = join(home, ".cargo2/bin");
+    exe(join(bin, "rustup")); linkSync(join(bin, "rustup"), join(bin, "cargo"));
+    writeFileSync(join(home, ".cargo2/credentials.toml"), "token");
+    expect(toolBinds(["cargo"], host(bin)).sort()).toEqual([bin, `${home}/.rustup`]);
   });
   it("system tools need no bind", () => {
     const { host } = fakeHome();
@@ -48,11 +66,17 @@ describe("exam sandbox: the bwrap arguments (plan S3, S5, S6)", () => {
     for (const f of ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv"]) expect(argv).toContain(f);
     expect(argv.at(-1)).toBe("--");
   });
-  it("hides home, temp folders and user sockets", () => {
-    expect(pairs("--tmpfs")).toEqual(expect.arrayContaining(["/home", "/tmp", "/var/tmp", "/run/user"]));
+  it("hides home, temp folders and all of /run: user sockets, docker.sock, the system bus (final review C1)", () => {
+    expect(pairs("--tmpfs")).toEqual(expect.arrayContaining(["/home", "/tmp", "/var/tmp", "/run"]));
   });
-  it("only the exam folder is writable, and it is the working directory", () => {
-    expect(pairs("--bind")).toEqual(["/work/exam/01"]);
+  it("hides mounted drives and served data too (final review I3)", () => {
+    const want = ["/mnt", "/media", "/srv"].filter((d) => existsSync(d));
+    expect(pairs("--tmpfs")).toEqual(expect.arrayContaining(want));
+  });
+  it("the exam folder is a throwaway overlay: writable inside, nothing written reaches the real folder (final review C2)", () => {
+    expect(pairs("--bind")).toEqual([]);
+    expect(pairs("--overlay-src")).toEqual(["/work/exam/01"]);
+    expect(pairs("--tmp-overlay")).toEqual(["/work/exam/01"]);
     expect(pairs("--chdir")).toEqual(["/work/exam/01"]);
     expect(pairs("--ro-bind")).toContain("/home/me/.rustup");
   });
