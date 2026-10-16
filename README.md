@@ -98,6 +98,14 @@ Exams (Milestone 8):
   (`exam 01 18:55 left`); going over is recorded as late and still graded. Until you submit,
   hints stay at a question or a concept, never code.
 - `:TutorExam check` runs the example tests; `:TutorExam off` abandons the exam.
+- The model writes the example tests, so every run of them (the one before you see the exam,
+  `check` and `:TutorSubmit`) happens in a [bubblewrap](https://github.com/containers/bubblewrap)
+  sandbox. Inside it the filesystem is read-only, apart from the exam folder; your home, `/tmp` and
+  your Neovim and agent sockets are hidden; there is no network; and only `PATH`, `HOME` and `LANG`
+  are passed through. Toolchains installed in your home (rustup, nvm, pyenv) stay visible
+  read-only. `:TutorExam sandbox` shows whether it can start. If bubblewrap is missing, install it
+  (Arch: `pacman -S bubblewrap`) or run `:TutorExam sandbox off` to run exam tests as you; the
+  choice is saved in your profile. `:TutorRun` runs your own commands, so it is never sandboxed.
 - `:TutorSubmit` runs the tests, has the model check each requirement against your code
   (`file:line` evidence), and writes `grade.md`: score /100 (80 requirements, 20 idiomatic code),
   the test output, three next fixes and an "In short". The score goes into your profile.

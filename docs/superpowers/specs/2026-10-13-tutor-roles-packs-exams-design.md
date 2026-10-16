@@ -1,7 +1,7 @@
 # lazycourse: tutor roles, language packs, exams
 
 **Date:** 2026-10-13
-**Status:** design, approved section by section in conversation (2026-10-12/13). It extends `2026-10-07-nvim-tutor-design.md` (rev 7) and replaces its old M6 row with the milestones in §9.
+**Status:** design, approved section by section in conversation (2026-10-12/13); §6 exam sandbox added 2026-10-16. It extends `2026-10-07-nvim-tutor-design.md` (rev 7) and replaces its old M6 row with the milestones in §9.
 **Scope:** how the tutor teaches (structure and style), which roles it plays, how it turns written context into code with the learner, where language knowledge comes from (version-exact), and timed exams with grading.
 
 ## 1. Purpose and intent
@@ -131,6 +131,17 @@ The project language (from the profile) selects the card (injected) and tells th
                            · idiom checks · late? · three next fixes · "In short"
   → profile: exams(id, language, topic, score, minutes, late, concepts) → concept ease
 ```
+
+**Sandbox (2026-10-16, plan `2026-10-16-exam-sandbox.md`):** the extension runs the example tests itself (M8 D1). They are model-written code, so every run (the probe before the exam is shown, `check`, submit) goes through bubblewrap:
+- `/` is read-only;
+- `/home`, `$HOME`, `/tmp`, `/var/tmp` and `/run/user` are hidden; home is an empty tmpfs;
+- the exam folder is the only writable bind;
+- there is no network (`--unshare-all`);
+- the environment is cleared apart from `PATH`, `HOME` and `LANG`;
+- toolchain folders under home are bound read-only;
+- Go gets one shared cache in `~/.cache/lazycourse`.
+
+It is on by default for every level, and `/tutor-exam sandbox on|off` changes it (profile setting `exam_sandbox`). When bwrap cannot start, the run is refused with the fix rather than run unsandboxed.
 
 The timer is soft: going over is recorded as late and still graded. The example tests are exam material, not the learner's solution. `:TutorProgress` (gap #8) reports exam trends, rungs used over time and a concept map from the profile.
 
