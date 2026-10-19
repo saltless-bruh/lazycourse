@@ -207,6 +207,8 @@ Rules:
 
 ## 6. Profile, interview, project suggestion, scaffold
 
+> **Superseded in part (2026-10-19):** the interview, the three suggestions and the one-shot scaffold are replaced by the onboarding conversation and learn-first lessons in `2026-10-19-onboarding-conversation-design.md`. The profile and the scaffold layout below still hold.
+
 Profile: `~/.local/share/nvim-tutor/profile.sqlite`, opened by the
 extension with `node:sqlite` (Node 22+ built-in, no native deps).
 

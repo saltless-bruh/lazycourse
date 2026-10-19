@@ -86,6 +86,33 @@ search them with `tutor_recall`. Everything lives in your profile (`profile.sqli
   what is drawn: the model still thinks. While the tutor hides it, Pi's own click-to-expand on a
   thinking block does nothing; run `:TutorThinking show` to read it.
 
+Getting started and learn-first lessons (2026-10-19, spec `docs/superpowers/specs/2026-10-19-onboarding-conversation-design.md`):
+
+- `:TutorStart [language]` is a conversation with the tutor, not a form. It asks how long you have
+  been coding and what you know, recommends Python (with its reasons) if you know no language, or
+  asks you to rate yourself 1–10 in the language you named: below 5 it asks a couple of short
+  technical questions; 5 and above it gives a small task (`~/lazycourse/.checks/<language>/…`, open
+  it with `:e`, then `:TutorStart check`) whose real tests set your starting level, with no grade.
+  It tells you its read of you (you can correct the level), suggests one project (or something
+  else), makes the folder and moves the editor and tutor there, then asks: build now, or learn the
+  ideas first? The project plan (`spec/`) is written in the background meanwhile. A second
+  `:TutorStart` is a short check-in. `:TutorStart off` pauses; the next `:TutorStart` picks up
+  where you left off. If the model's replies go off track, the tutor asks the missing questions
+  itself after a few exchanges.
+- `:TutorLesson next|check|skip|review|off` drives the learn-first lessons: at most three concepts
+  per round, then a milestone of your project that uses only those, then the next round. `next`
+  writes the exercise into `learn/<concept>/`, `check` runs its tests in the sandbox (two failures
+  and the tutor takes a smaller step), `skip` marks a concept you know, `review` brings back a
+  concept that is due. What you learn is remembered with spaced repetition (FSRS), so concepts come
+  back for a quick review when you are about to forget them.
+- Lessons come from established, openly licensed courses, never written by the model: Exercism
+  (MIT) for every language, rustlings (MIT) for Rust, and for reading input and files, excerpts from
+  the Python tutorial (PSF), Go by Example (CC BY 3.0), the Node.js docs, the Rust Book and the Lua
+  manual, with our own tested exercises. Each `pi-tutor/lessons/<language>/SOURCES.md` lists the
+  sources, pinned commits, licences, and anything dropped or fixed. TypeScript and Lua lessons are
+  **thin**: neither has a beginner syllabus upstream (TypeScript reuses the JavaScript exercises,
+  which run as `.ts`; Lua has three concept lessons plus input and files).
+
 Exams (Milestone 8):
 
 - `:TutorRun` runs the project's `run:` command and `:TutorRun test` its `test:` command, both
@@ -120,7 +147,7 @@ the editor exited; either way it still shows the tutor's state and last judgment
 
 - **Level slider (0–100)** per language. Beginner (0–33) streams buffer snapshots, diagnostics, idle time and run output to the tutor and explains how code is structured. Intermediate (34–66) names concepts and points at docs. Pro (67–100) sends diagnostics, idle time and run output only, and gives hints, never code.
 - **Hint ladder.** When you're stuck, the tutor starts with a question. Each reply where you reason correctly unlocks a more concrete rung: concept, pointer to docs, pseudocode, and finally the line itself. Pro never reaches the last rung.
-- **Project suggestion.** A short interview per language builds a profile. The tutor proposes three projects targeting your weak or unknown concepts and scaffolds `spec/design.md`, `spec/tasks.md`, `spec/requirements.md` with stable task ids.
+- **Getting started.** A short conversation builds your profile (the model talks; the code keeps the checklist and makes the decisions). The tutor proposes one project targeting your weak or unknown concepts and writes `spec/design.md`, `spec/tasks.md`, `spec/requirements.md` with stable task ids, grouped into milestones when you learn first.
 - **Knowledge base.** Instructions, skills, and workflows map onto Pi's `AGENTS.md`, `SKILL.md`, and prompt templates. Official docs are fetched into skills per language; you can edit them, and `/tutor-learn` drafts a new skill from a finished stuck episode.
 - **Language packs** (Python, Rust, Go, TypeScript, Lua, JavaScript, plus the editor). Every turn carries a short
   language card: the version installed here and the project's constraint (`pyproject.toml`,
@@ -160,6 +187,13 @@ the editor exited; either way it still shows the tutor's state and last judgment
 - `cd pi-tutor && npm run cookbooks`: runs every cookbook example with the toolchains installed here
   (TypeScript examples are also type-checked, Lua ones also run on LuaJIT); a missing toolchain is
   skipped.
+- `cd pi-tutor && npm run lessons`: every lesson exercise and level task runs with the toolchains
+  installed here (in the sandbox when bubblewrap can start): its reference solution must pass and
+  its starter file must fail. Every lesson's text is checked for leftover markup and broken links,
+  and the Python excerpts we cut by hand run as doctests. Not part of `npm test`.
+- `cd pi-tutor && node scripts/vendor-lessons.ts <language>` re-vendors a language's lessons from
+  the pinned upstream commits (network); `python3 scripts/gap-lessons.py <sources> lessons` rewrites
+  the input and files lessons.
 - `cd pi-tutor && npm run upstream-diff`: compares the adapted expert skills with a
   fullstack-dev-skills checkout (default `~/.claude/plugins/marketplaces/fullstack-dev-skills`).
 - `cd pi-tutor && SKILL_EVAL_WORKSPACE=<dir>/iteration-N SKILL_EVAL_BASELINE=<checkout without the
@@ -182,7 +216,7 @@ return {
     name = "nvim-tutor",
     cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn",
             "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback", "TutorThinking",
-            "TutorExam", "TutorSubmit", "TutorProgress" },
+            "TutorExam", "TutorSubmit", "TutorProgress", "TutorLesson" },
     keys = {
       { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
       { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },
