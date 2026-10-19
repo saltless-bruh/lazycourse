@@ -73,7 +73,7 @@ export function isEmptyOrMissing(dir: string): boolean {
   return !existsSync(dir) || readdirSync(dir).length === 0;
 }
 
-function readme(s: ScaffoldSpec, m: ScaffoldMeta): string {
+export function readme(s: ScaffoldSpec, m: ScaffoldMeta): string {
   const test = LANGS[m.language]?.test;
   return `---\nrun: ${s.run_cmd}\n${test ? `test: ${test}\n` : ""}language: ${m.language}\n---\n# ${m.title}\n\n${m.summary}\n\n` +
     `## Run\n\n\`${s.run_cmd}\`\n\n## Working with the tutor\n\n` +
@@ -83,7 +83,7 @@ function readme(s: ScaffoldSpec, m: ScaffoldMeta): string {
     `- Change how much help you get with \`:TutorLevel <0-100>\`.\n`;
 }
 
-function agents(m: ScaffoldMeta): string {
+export function agents(m: ScaffoldMeta): string {
   return `# Tutor instructions for this project\n\n` +
     `- This is a ${m.language} learning project: ${m.title}. ${m.summary}\n` +
     `- The learner's level is ${m.level} (${m.band}). Coach; never write the solution.\n` +

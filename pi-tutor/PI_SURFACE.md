@@ -145,6 +145,14 @@ Re-verify every line when bumping versions.
   editor card, set every turn in `before_agent_start`). `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.
 
+## Onboarding (spec 2026-10-19 §6; verified in Pi 1.3.0 types.d.ts, 2026-10-19)
+- `ctx.ui.select(title, options)` (types.d.ts:74), `ctx.ui.confirm(title, message)` → `Promise<boolean>`
+  (types.d.ts:76), `ctx.ui.input(title, placeholder)` (types.d.ts:78): the fallback questions, the level
+  read-back and the project pick. Called from `agent_end`, after the run has finished, never inside `turn_end`.
+- `pi.on("agent_end", (event, ctx) => …)` (types.d.ts:1209, `AgentEndEvent` :748): the code-owned onboarding
+  step runs here once per run. The intake note is read in `message_end` from the original reply, because the
+  scrubbed reply (fence removed) is what `turn_end` and the session see.
+
 ## MCP (Pi 1.3.0, docs/mcp.md, verified 2026-10-19)
 - Servers come from `~/.pi/agent/mcp.json` (user) or `.pi/mcp.json` (project, after project trust).
   Tools are named `mcp__<server>__<tool>` with every character other than letters, digits and `_`

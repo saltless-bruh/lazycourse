@@ -1,136 +1,71 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readdirSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readFileSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runStart, LANGUAGES, type StartDeps } from "../extensions/tutor/start.js";
+import { suggestOne, createProject, defaultProjectDir, isLanguage, LANGUAGES } from "../extensions/tutor/start.js";
 import { Profile } from "../extensions/tutor/profile.js";
-
-const SUGGEST = JSON.stringify({ projects: [
-  { title: "Todo CLI", summary: "Track tasks.", size: "small", concepts: ["structs"] },
-  { title: "Word Count", summary: "Count words.", size: "small", concepts: ["iterators"] },
-  { title: "Pinger", summary: "Ping URLs.", size: "medium", concepts: ["async"] },
-] });
-const SCAFFOLD = JSON.stringify({
-  design_md: "# D\n", tasks_md: "- [ ] P1.T1 Parse args\n", requirements_md: "## P1.T1\n", entry_file: "src/main.rs", run_cmd: "cargo run",
-});
 
 let profile: Profile | undefined;
 afterEach(() => { profile?.close(); profile = undefined; });
+const ONE = JSON.stringify({ projects: [{ title: "Tip Calculator", summary: "Split a bill.", size: "small", concepts: ["numbers", "functions"] }] });
+const project = { title: "Tip Calculator", summary: "Split a bill.", size: "small" as const, concepts: ["numbers"] };
 
-function deps(answers: (string | undefined)[], replies: string[] = [SUGGEST, SCAFFOLD]) {
-  const home = mkdtempSync(join(tmpdir(), "pitutor-home-"));
-  profile = Profile.open(":memory:");
-  const notes: string[] = [];
-  const working: (string | undefined)[] = [];
-  const prompts: string[] = [];
-  const next = async (title: string) => { prompts.push(title); return answers.shift(); };
-  const d: StartDeps = {
-    ui: { select: (t) => next(t), input: (t) => next(t), notify: (m) => { notes.push(m); }, working: (m) => { working.push(m); } },
-    profile, home, now: () => 1000,
-    complete: async () => { const r = replies.shift(); if (r === undefined) throw new Error("no more replies"); return r; },
-  };
-  return { d, home, notes, working, prompts, profile };
-}
-const interview = ["1-3 years", "python", "tried it a little", "a CLI", "small (1-2 h)"];
-
-describe("runStart", () => {
-  it("new language: interview, suggest, pick, scaffold into the default folder, record profile", async () => {
-    const t = deps(["rust", ...interview, "1. Todo CLI (small) — Track tasks.", ""]);
-    const r = await runStart("", t.d);
-    const dir = join(t.home, "lazycourse", "rust-todo-cli");
-    expect(r).toEqual({ dir, language: "rust", level: 50, title: "Todo CLI", files: expect.arrayContaining(["spec/tasks.md", "AGENTS.md", "src/main.rs"]) });
-    expect(existsSync(join(dir, "spec", "requirements.md"))).toBe(true);
-    expect(t.profile.language("rust")).toMatchObject({ level: 50, interview: { goal: "a CLI" } });
-    expect(t.profile.projectAt(dir)).toMatchObject({ title: "Todo CLI", language: "rust" });
-    expect(t.working.at(-1)).toBeUndefined();
+describe("start building blocks (spec 2026-10-19 §5, Q4, Q23)", () => {
+  it("knows exactly the six languages, and nothing else (the pytutor-architect case)", () => {
+    expect(LANGUAGES).toEqual(["python", "rust", "go", "typescript", "lua", "javascript"]);
+    expect(isLanguage("python")).toBe(true);
+    expect(isLanguage("pytutor-architect")).toBe(false);
   });
-
-  it("known language skips the interview and uses the stored level; the argument picks the language", async () => {
-    const t = deps(["2. Word Count (small) — Count words.", "~/code/wc"]);
-    t.profile.saveLanguage("rust", 80, {}, 1);
-    const r = await runStart("Rust", t.d);
-    expect(r).toMatchObject({ language: "rust", level: 80, title: "Word Count", dir: join(t.home, "code", "wc") });
-    expect(t.prompts).toHaveLength(2);
+  it("suggests one project, telling the model what the conversation learned and what was already shown", async () => {
+    profile = Profile.open(":memory:");
+    const seen: string[] = [];
+    const s = await suggestOne({ profile, complete: async (_sys, user) => { seen.push(user); return ONE; } },
+      { language: "python", level: 10, about: { experience: "none yet", idea: "track my expenses" }, exclude: ["Expense Logger"] });
+    expect(s.title).toBe("Tip Calculator");
+    expect(seen[0]).toMatch(/projects wanted: 1/);
+    expect(seen[0]).toMatch(/do not suggest: Expense Logger/);
+    expect(seen[0]).toMatch(/idea: track my expenses/);
   });
-
-  it("weak concepts saved under old free-form tags reach the suggester under the vocabulary tag (M7 minor)", async () => {
-    const t = deps([undefined]);
-    t.profile.saveLanguage("python", 50, {}, 1);
-    t.profile.recordEpisode({ language: "python", project: null, concept_tags: ["keyerror", "dicts"], rungs_used: 3, turns: 2, opened: 1, closed: 2 }, 0.2);
-    let user = "";
-    const complete = t.d.complete;
-    t.d.complete = async (system, u) => { user ||= u; return complete(system, u); };
-    await runStart("python", t.d);
-    expect(user).toMatch(/weak concepts: dicts\n/);
+  it("rejects a reply with the wrong number of projects", async () => {
+    profile = Profile.open(":memory:");
+    const three = JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) });
+    const replies = [three, three];
+    await expect(suggestOne({ profile, complete: async () => replies.shift()! }, { language: "go", level: 50, about: {}, exclude: [] })).rejects.toThrow(/exactly 1/);
   });
-
-  it("offers the built-in languages plus profile languages and an 'other' entry", async () => {
-    const t = deps([undefined]);
-    t.profile.saveLanguage("zig", 30, {}, 1);
-    let options: string[] = [];
-    t.d.ui.select = async (_title, opts) => { options = opts; return undefined; };
-    expect(await runStart("", t.d)).toBeNull();
-    expect(options).toEqual([...LANGUAGES, "zig", "other…"]);
+  it("the default folder is ~/lazycourse/<language>-<slug>", () => {
+    expect(defaultProjectDir("/home/u", "python", "Tip Calculator!")).toBe("/home/u/lazycourse/python-tip-calculator");
   });
-
-  it("aborts cleanly at every cancel point: no files, no project row, no half interview", async () => {
-    for (let stop = 0; stop <= 7; stop++) {
-      const all = ["rust", ...interview, "1. Todo CLI (small) — Track tasks."];
-      const t = deps([...all.slice(0, stop), undefined]);
-      expect(await runStart("", t.d)).toBeNull();
-      expect(t.profile.projects("rust")).toEqual([]);
-      if (stop <= 5) expect(t.profile.language("rust")).toBeUndefined();
-      expect(existsSync(join(t.home, "lazycourse"))).toBe(false);
-      expect(t.working.at(-1)).toBeUndefined();
-    }
+  it("creates the project folder before any spec: README front matter, AGENTS.md, profile rows", () => {
+    profile = Profile.open(":memory:");
+    const dir = join(mkdtempSync(join(tmpdir(), "start-")), "python-tip");
+    const r = createProject(profile, { language: "python", level: 10, project, dir, about: { experience: "none yet" }, now: 5 });
+    expect(r.dir).toBe(realpathSync(dir));
+    const readme = readFileSync(join(dir, "README.md"), "utf8");
+    expect(readme).toMatch(/^---\n/);
+    expect(readme).toMatch(/language: python/);
+    expect(readme).toMatch(/test: python3 -m unittest/);
+    expect(readme).toContain("# Tip Calculator");
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toMatch(/never write the solution/i);
+    expect(profile.language("python")?.level).toBe(10);
+    expect(profile.projectAt(r.dir)?.title).toBe("Tip Calculator");
   });
-
-  it("refuses a non-empty folder before asking the model for the spec", async () => {
-    const t = deps(["1. Todo CLI (small) — Track tasks.", "~/busy"], [SUGGEST, SCAFFOLD]);
-    t.profile.saveLanguage("rust", 40, {}, 1);
-    const busy = join(t.home, "busy");
-    mkdirSync(busy);
-    writeFileSync(join(busy, "mine.txt"), "x");
-    expect(await runStart("rust", t.d)).toBeNull();
-    expect(t.notes.at(-1)).toMatch(/not empty/);
-    expect(readdirSync(busy)).toEqual(["mine.txt"]);
+  it("keeps an existing language level row, and refuses a non-empty folder", () => {
+    profile = Profile.open(":memory:");
+    profile.saveLanguage("python", 70, {}, 1);
+    const base = mkdtempSync(join(tmpdir(), "start-"));
+    createProject(profile, { language: "python", level: 30, project, dir: join(base, "a"), about: {}, now: 5 });
+    expect(profile.language("python")?.level).toBe(30);
+    mkdirSync(join(base, "b")); writeFileSync(join(base, "b", "x"), "");
+    expect(() => createProject(profile!, { language: "python", level: 30, project, dir: join(base, "b"), about: {}, now: 5 })).toThrow(/not empty/);
+    expect(existsSync(join(base, "b", "README.md"))).toBe(false);
   });
-
-  it("reports a model failure, writes nothing, and clears the working message", async () => {
-    const t = deps(["1. Todo CLI (small) — Track tasks.", ""], [SUGGEST, "garbage", "still garbage"]);
-    t.profile.saveLanguage("rust", 40, {}, 1);
-    expect(await runStart("rust", t.d)).toBeNull();
-    expect(t.notes.at(-1)).toMatch(/rejected twice/);
-    expect(existsSync(join(t.home, "lazycourse"))).toBe(false);
-    expect(t.working.at(-1)).toBeUndefined();
-  });
-
-  it("Esc during a model call cancels quietly: info notice, nothing written (final review I1)", async () => {
-    const { Cancelled } = await import("../extensions/tutor/progress.js");
-    const t = deps(["1. Todo CLI (small) — Track tasks.", ""]);
-    t.profile.saveLanguage("rust", 40, {}, 1);
-    const replies = [SUGGEST];
-    t.d.complete = async () => { const r = replies.shift(); if (r) return r; throw new Cancelled(); };
-    expect(await runStart("rust", t.d)).toBeNull();
-    expect(t.notes.at(-1)).toBe("tutor-start cancelled");
-    expect(existsSync(join(t.home, "lazycourse"))).toBe(false);
-  });
-
-  it("rejects an invalid language name", async () => {
-    const t = deps([]);
-    expect(await runStart("rm -rf /", t.d)).toBeNull();
-    expect(t.notes.at(-1)).toMatch(/language/);
-  });
-});
-
-describe("M6c: start under a symlinked folder (M4 #25)", () => {
-  it("records the project at its real path", async () => {
-    const t = deps(["2. Word Count (small) — Count words.", ""]);
-    t.profile.saveLanguage("rust", 80, {}, 1);
+  it("records the project at its real path under a symlinked parent (M4 #25)", () => {
+    profile = Profile.open(":memory:");
     const real = mkdtempSync(join(tmpdir(), "pitutor-real-"));
-    symlinkSync(real, join(t.home, "lazycourse"));
-    const r = await runStart("rust", t.d);
-    expect(r?.dir).toBe(join(realpathSync(real), "rust-word-count"));
-    expect(t.profile.projectAt(join(realpathSync(real), "rust-word-count"))).toBeDefined();
+    const home = mkdtempSync(join(tmpdir(), "pitutor-home-"));
+    symlinkSync(real, join(home, "lazycourse"));
+    const r = createProject(profile, { language: "rust", level: 50, project, dir: join(home, "lazycourse", "rust-tip"), about: {}, now: 5 });
+    expect(r.dir).toBe(join(realpathSync(real), "rust-tip"));
+    expect(profile.projectAt(r.dir)).toBeDefined();
   });
 });

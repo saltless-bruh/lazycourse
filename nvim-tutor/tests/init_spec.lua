@@ -75,6 +75,8 @@ describe("tutor.init", function()
     vim.wait(1000, function() return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "/tutor-exam medium dicts") end)
     assert.is_true(vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "/tutor-exam medium dicts"))
     assert.same({ "small", "medium", "check", "off", "sandbox" }, vim.fn.getcompletion("TutorExam ", "cmdline"))
+    -- Spec 2026-10-19: /tutor-start takes a language, `check` (the level task) or `off` (pause).
+    assert.same({ "python", "rust", "go", "typescript", "lua", "javascript", "check", "off" }, vim.fn.getcompletion("TutorStart ", "cmdline"))
   end)
 
   it(":TutorSubmit and :TutorProgress type their slash commands (M8)", function()

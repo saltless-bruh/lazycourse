@@ -5,7 +5,7 @@
 import { LANGUAGES } from "./start.js";
 import { EXPERIENCE } from "./interview.js";
 
-export type Field = "experience" | "known" | "target" | "selfScore" | "idea" | "path";
+export type Field = "experience" | "known" | "target" | "selfScore" | "probe" | "idea" | "path";
 export type Stage = "talk" | "check" | "read" | "project" | "choose" | "done";
 export interface Fields { experience: string; known: string[]; target: string; selfScore: number; confidence: string; idea: string | null; path: "build" | "learn" }
 export interface Onboarding {
@@ -21,6 +21,12 @@ export interface Onboarding {
   project: { title: string; summary: string; concepts: string[] } | null;
   shown: string[];
   stage: Stage;
+  /** Exchanges held since a self-score below 5 was known: two technical-question turns (Q7). */
+  probeTurns: number;
+  /** The stage whose model turn was started; its dialog follows when that run ends. */
+  presented: Stage | null;
+  /** Second /tutor-start for a language with a finished project (Q9): a short check-in. */
+  checkIn: { last: string; due: string[] } | null;
 }
 
 export const MAX_EXCHANGES = 6;
@@ -28,8 +34,15 @@ export const MAX_BAD_NOTES = 2;
 
 export function newOnboarding(language: string | null): Onboarding {
   const named = language !== null;
-  return { fields: named ? { target: language } : {}, named, targetByCode: false, exchanges: 0, badNotes: 0, levelCheck: null, level: null, project: null, shown: [], stage: "talk" };
+  return { fields: named ? { target: language } : {}, named, targetByCode: false, exchanges: 0, badNotes: 0, levelCheck: null, level: null, project: null, shown: [], stage: "talk", probeTurns: 0, presented: null, checkIn: null };
 }
+
+/** A check-in for a language the learner already worked in: only "what next" is asked (Q9). */
+export function checkInOnboarding(language: string, c: { level: number; known: string[]; last: string; due: string[] }): Onboarding {
+  return { ...newOnboarding(language), fields: { target: language, known: c.known }, level: c.level, checkIn: { last: c.last, due: c.due } };
+}
+
+const lowScore = (o: Onboarding) => o.fields.selfScore !== undefined && o.fields.selfScore < 5 && selfScoreNeeded(o);
 
 const NOTE = /(`{3,}|~{3,})tutor-intake[ \t]*\r?\n([\s\S]*?)\1/g;
 
@@ -65,6 +78,8 @@ export function parseIntake(text: string): Partial<Fields> | null {
 /** One reply: count it, merge what the note learned, and let the code pick Python for a newcomer (Q1). */
 export function applyTurn(o: Onboarding, note: Partial<Fields> | null): Onboarding {
   const next: Onboarding = { ...o, exchanges: o.exchanges + 1, badNotes: o.badNotes + (note === null ? 1 : 0), fields: { ...o.fields, ...(note ?? {}) } };
+  // A probe exchange counts only once the model has been told to ask (the score was known before this turn).
+  if (lowScore(o)) next.probeTurns = o.probeTurns + 1;
   if (next.fields.target === undefined && next.fields.known !== undefined && next.fields.known.length === 0) {
     next.fields.target = "python";
     next.targetByCode = true;
@@ -72,17 +87,18 @@ export function applyTurn(o: Onboarding, note: Partial<Fields> | null): Onboardi
   return next;
 }
 
-function selfScoreNeeded(o: Onboarding): boolean {
-  return o.fields.target !== undefined && !o.targetByCode && (o.named || (o.fields.known ?? []).length > 0);
+export function selfScoreNeeded(o: Onboarding): boolean {
+  return o.checkIn === null && o.fields.target !== undefined && !o.targetByCode && (o.named || (o.fields.known ?? []).length > 0);
 }
 
 /** Checklist items still unknown, in the order the tutor asks them; `path` belongs to the choose stage only. */
 export function missing(o: Onboarding): Field[] {
   const f = o.fields, out: Field[] = [];
-  if (f.experience === undefined) out.push("experience");
+  if (f.experience === undefined && o.checkIn === null) out.push("experience");
   if (f.known === undefined) out.push("known");
   if (f.target === undefined && (f.known === undefined || f.known.length > 0)) out.push("target");
   if (f.selfScore === undefined && selfScoreNeeded(o)) out.push("selfScore");
+  if (lowScore(o) && o.probeTurns < 2) out.push("probe");
   if (f.idea === undefined) out.push("idea");
   if (o.stage === "choose" && f.path === undefined) out.push("path");
   return out;
@@ -106,7 +122,7 @@ export function levelFrom(o: Onboarding): number {
 }
 
 const LABEL: Record<Field, string> = {
-  experience: "experience", known: "languages already known", target: "language to learn", selfScore: "self-score 1-10 in that language",
+  experience: "experience", known: "languages already known", target: "language to learn", selfScore: "self-score 1-10 in that language", probe: "a feel for their level from one or two short questions",
   idea: "an idea to build, or none", path: "build now or learn first",
 };
 
@@ -120,8 +136,10 @@ export function onboardPrompt(o: Onboarding): string {
     `known so far:\n${known.length ? known.join("\n") : "- nothing yet"}`,
     miss.length ? `still to find out: ${miss.map((m) => `${m} (${LABEL[m]})`).join("; ")}` : "the checklist is complete.",
   ];
+  if (o.checkIn) lines.push(`This is a check-in: the learner already worked in ${f.target}; their last project was "${o.checkIn.last}"${o.checkIn.due.length ? `, and these concepts are due for a quick review: ${o.checkIn.due.join(", ")}` : ""}. Ask how it went and what they want next (something harder, something different, or practice first). Do not repeat the first-meeting questions.`);
   if (o.targetByCode) lines.push("The learner knows no language: recommend Python and say why in two or three plain sentences tied to what they want to build (readable, instant feedback, used everywhere).");
   if (f.selfScore !== undefined && f.selfScore < 5 && selfScoreNeeded(o)) lines.push(`Their self-score is ${f.selfScore}/10: ask one or two short technical questions about ${f.target} to get a feel (frame it as "let me get a feel", never as a test), then move on.`);
+  if (o.stage === "check" && o.levelCheck) lines.push(`A small task is open in their editor (${o.levelCheck.task}): its instructions and a file to write in. Tell them it only sets where to start, there is no grade; when they are done they type /tutor-start check.`);
   if (o.stage === "read" && o.level !== null) lines.push(`Tell the learner your read of them in two or three sentences: level ${o.level}/100 and what it is based on; ask whether that sounds right.`);
   if (o.stage === "project" && o.project) lines.push(`Suggest this one project and say why it suits them: "${o.project.title}" — ${o.project.summary}. They can ask for something else.`);
   if (o.stage === "choose") lines.push("Ask whether they want to start building now, or learn the ideas the project needs first (short lessons with small exercises).");

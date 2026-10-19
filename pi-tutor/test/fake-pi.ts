@@ -69,6 +69,8 @@ export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
         notify: (m: string) => notes.push(m),
         select: async () => script.shift(),
         input: async () => script.shift(),
+        // A scripted "no" declines; anything else (or an empty script) accepts.
+        confirm: async () => script.shift() !== "no",
         editor: async (_title: string, prefill?: string) => { editorSeen.push(prefill ?? ""); return edits.length ? edits.shift() : prefill; },
       },
     },

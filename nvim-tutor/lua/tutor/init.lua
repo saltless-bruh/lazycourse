@@ -175,7 +175,8 @@ function M.setup(user_opts)
   cmd("TutorRestart", function() M.state.term:restart() end, {})
   cmd("TutorRun", function(a) M.run(a.args ~= "" and a.args or "run") end,
     { nargs = "?", complete = function() return { "run", "test" } end })
-  cmd("TutorStart", slash("/tutor-start"), {})
+  cmd("TutorStart", slash("/tutor-start"), { nargs = "?",
+    complete = function() return { "python", "rust", "go", "typescript", "lua", "javascript", "check", "off" } end })
   cmd("TutorLevel", slash("/tutor-level"), { nargs = "?" })
   cmd("TutorLearn", slash("/tutor-learn"), {})
   cmd("TutorDocs", slash("/tutor-docs"), { nargs = "?" })

@@ -9,6 +9,10 @@ const good = { projects: [
 ] };
 
 describe("checkSuggestions", () => {
+  it("accepts exactly the asked number of projects (one for onboarding, Q4)", () => {
+    expect(checkSuggestions({ projects: good.projects.slice(0, 1) }, 1).map((s) => s.title)).toEqual(["Todo CLI"]);
+    expect(() => checkSuggestions(good, 1)).toThrow(/exactly 1/);
+  });
   it("accepts exactly three well-formed projects", () => {
     expect(checkSuggestions(good).map((s) => s.title)).toEqual(["Todo CLI", "Markdown linter", "HTTP status checker"]);
   });
@@ -22,18 +26,18 @@ describe("checkSuggestions", () => {
 });
 
 describe("suggestPrompt", () => {
-  it("carries language, level, band, interview, weak concepts and finished projects", () => {
+  it("carries language, level, band, what the conversation learned, weak concepts, finished projects, count and exclusions", () => {
     const p = suggestPrompt({
-      language: "rust", level: 40, band: "intermediate",
-      interview: { experience: "1-3 years", known: "python", familiarity: "tried it a little", goal: "CLIs", size: "small" },
-      weakConcepts: ["borrow", "lifetimes"], done: ["Todo CLI"],
+      language: "rust", level: 40, band: "intermediate", about: { experience: "1-3 years", known: "python", idea: "CLIs" },
+      weakConcepts: ["borrow", "lifetimes"], done: ["Todo CLI"], count: 1, exclude: ["Pinger"],
     });
-    for (const s of ["rust", "level 40 (intermediate)", "python", "CLIs", "small", "borrow, lifetimes", "Todo CLI"]) expect(p).toContain(s);
+    for (const s of ["rust", "level 40 (intermediate)", "experience: 1-3 years", "known: python", "idea: CLIs", "borrow, lifetimes", "Todo CLI", "projects wanted: 1", "do not suggest: Pinger"]) expect(p).toContain(s);
   });
-  it("says 'none yet' for empty lists and no interview", () => {
-    const p = suggestPrompt({ language: "go", level: 80, band: "pro", interview: null, weakConcepts: [], done: [] });
+  it("says 'none yet' for empty lists", () => {
+    const p = suggestPrompt({ language: "go", level: 80, band: "pro", about: {}, weakConcepts: [], done: [], count: 3, exclude: [] });
     expect(p).toContain("weak concepts: none yet");
     expect(p).toContain("finished projects: none yet");
+    expect(p).not.toContain("do not suggest");
   });
 });
 

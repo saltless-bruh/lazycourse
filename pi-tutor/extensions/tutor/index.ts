@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -22,7 +22,10 @@ import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpi
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, feedbackRung, formatFeedback } from "./feedback.js";
-import { runStart } from "./start.js";
+import { suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, LANGUAGES } from "./start.js";
+import { newOnboarding, checkInOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, type Onboarding, type Fields } from "./onboard.js";
+import { EXPERIENCE } from "./interview.js";
+import { levelTasks, writeExercise } from "./lessons.js";
 import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
@@ -172,6 +175,13 @@ export default function (pi: ExtensionAPI): void {
   let paneWidth: number | undefined;
   /** Thinking visibility (learner setting, kept in the profile): auto hides it only at the pro band. */
   let thinking: ThinkingMode = "auto";
+  // Spec 2026-10-19 §5–6: /tutor-start as a conversation. The state lives in the profile (setting
+  // "onboarding") so it survives /new, a Pi restart and the move into the project folder.
+  let onboarding: Onboarding | null = null;
+  /** The current agent run is an onboarding exchange (no hint ladder, no judgment). */
+  let onboardRun = false;
+  /** The last intake note read from this run's replies; undefined when the run had no reply text. */
+  let intake: Partial<Fields> | null | undefined;
   // Plan 2026-10-16 S1: model-written exam tests run in bubblewrap unless the learner turns it off.
   let examSandbox: "on" | "off" = "on";
   const sandboxHost = (): SandboxHost | null => (examSandbox === "off" ? null
@@ -383,6 +393,7 @@ export default function (pi: ExtensionAPI): void {
     else for (const e of ctx.sessionManager.getBranch()) {
       if (e.type === "custom" && e.customType === "tutor_feedback") feedbackHistory.push((e.data as { kind: FeedbackKind }).kind);
     }
+    onboarding = loadOnboarding();
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
@@ -440,6 +451,17 @@ export default function (pi: ExtensionAPI): void {
 
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
+    if (onboardingActive()) {
+      // Spec 2026-10-19 §6: the onboarding rules replace the ladder prompt (no judgment block asked for).
+      event.systemPromptOptions.sections["tutor"] = systemText("onboard");
+      event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
+      if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
+      onboardRun = true;
+      intake = undefined;
+      run = { prompt: event.messageType === "user" ? event.prompt : "", rung: null, judged: true };
+      return;
+    }
+    onboardRun = false;
     const band = bandFor(level());
     const role = roleNamed(activeRole);
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
@@ -562,6 +584,11 @@ export default function (pi: ExtensionAPI): void {
   pi.on("message_end", (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
+    if (onboardRun) {
+      // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
+      const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+      if (text.trim()) intake = parseIntake(text);
+    }
     let changed = false;
     const content = m.content.map((c) => {
       if (c.type !== "text") return c;
@@ -577,6 +604,7 @@ export default function (pi: ExtensionAPI): void {
   pi.on("turn_end", async (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
+    if (onboardRun) return; // onboarding exchanges carry no judgment
     // Aborted, errored and truncated turns carry no judgment.
     if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
     const cur = run ?? (run = { prompt: "", rung: episode ? episode.rung : null, judged: false });
@@ -903,30 +931,175 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  // ---- /tutor-start as a conversation (spec 2026-10-19 §5, §6) ----
+  const onboardingActive = () => onboarding !== null && onboarding.stage !== "done";
+  function loadOnboarding(): Onboarding | null {
+    let o: Onboarding | null = null;
+    if (profile) { const p = profile; profileWrite(() => { const raw = p.setting("onboarding"); if (raw) { try { o = JSON.parse(raw) as Onboarding; } catch { o = null; } } }); }
+    return o;
+  }
+  function saveOnboarding(o: Onboarding | null) {
+    onboarding = o;
+    if (profile) { const p = profile; profileWrite(() => p.setSetting("onboarding", o ? JSON.stringify(o) : "")); }
+  }
+  /** Start the model's next onboarding turn (only the TUI may start a turn, as for /tutor-plan). */
+  function kick(ctx: ExtensionContext, what: string) {
+    if (ctx.hasUI) pi.sendUserMessage(`${TUTOR_PREFIX} onboarding: ${what}`, { deliverAs: "followUp" });
+    else ctx.ui.notify("send a message to continue", "info");
+  }
+  const checksRoot = (lang: string) => join(homedir(), "lazycourse", ".checks", lang);
+  const aboutOf = (o: Onboarding): Record<string, string> => ({
+    experience: o.fields.experience ?? "", known: (o.fields.known ?? []).join(", "), idea: o.fields.idea ?? "no idea yet", confidence: o.fields.confidence ?? "",
+  });
+
+  /** The safety net (Q6): the code asks each item still missing, one plain dialog each. */
+  async function askMissing(ctx: ExtensionContext, o: Onboarding): Promise<Onboarding> {
+    const got: Partial<Fields> = {};
+    let probed = false;
+    // Re-read what is missing after every answer: "no languages" makes the target the code's choice (Q1).
+    for (let m = missing(o)[0], guard = 0; m !== undefined && m !== "path" && guard < 8; m = missing(applyTurn(o, got)).filter((x) => x !== "probe" || !probed)[0], guard++) {
+      if (m === "experience") { const a = await ctx.ui.select("How long have you been programming?", [...EXPERIENCE]); if (a === undefined) break; got.experience = a; }
+      else if (m === "known") { const a = await ctx.ui.input("Which languages do you already know? (comma-separated; leave empty for none)", ""); if (a === undefined) break; got.known = a.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean); }
+      else if (m === "target") { const a = await ctx.ui.select("Which language do you want to learn?", [...LANGUAGES]); if (a === undefined) break; got.target = a; }
+      else if (m === "selfScore") { const a = await ctx.ui.select(`How would you rate yourself in ${o.fields.target}, 1 to 10?`, Array.from({ length: 10 }, (_, i) => String(i + 1))); if (a === undefined) break; got.selfScore = Number(a); }
+      else if (m === "idea") { const a = await ctx.ui.input("Anything you would like to build? (leave empty if you have no idea yet)", ""); if (a === undefined) break; got.idea = a.trim() || null; }
+      else if (m === "probe") probed = true; // a dialog cannot ask technical questions; the self-score stands
+    }
+    const next = applyTurn(o, got);
+    return { ...next, exchanges: o.exchanges, badNotes: o.badNotes, probeTurns: probed ? 2 : next.probeTurns };
+  }
+
+  /** The level task (Q7, Q13, Q20): a prepared exercise in a scratch folder; the self-score picks the rung of the ladder. */
+  function startLevelCheck(ctx: ExtensionContext, o: Onboarding): Onboarding {
+    const lang = o.fields.target!, tasks = levelTasks(lang), score = o.fields.selfScore ?? 5;
+    const ex = tasks[Math.min(tasks.length - 1, Math.max(0, score - 6))];
+    const root = checksRoot(lang);
+    mkdirSync(root, { recursive: true });
+    writeExercise(root, ex.id, lang, ex);
+    const lay = layout(lang)!;
+    // CLAUDE.md: the editor is only driven inside the project root; there is no project yet, so the learner opens it.
+    ctx.ui.notify(`a small task to see where to start: open ${join(root, ex.id, "instructions.md")} and write ${join(root, ex.id, lay.stub)} (:e <path>), then /tutor-start check`, "info");
+    return { ...o, stage: "check", levelCheck: { task: ex.id, passed: null } };
+  }
+
+  /** Everything after a run ends: the code, not the model, moves the onboarding on (spec §6). */
+  async function onboardStep(ctx: ExtensionContext): Promise<void> {
+    let o = onboarding;
+    if (!o || !profile) return;
+    if (o.stage === "talk") {
+      if (needsFallback(o) && missing(o).length) o = await askMissing(ctx, o);
+      if (missing(o).length) { saveOnboarding(o); return; }
+      if (selfScoreNeeded(o) && (o.fields.selfScore ?? 0) >= 5 && !o.levelCheck && levelTasks(o.fields.target!).length) {
+        saveOnboarding(startLevelCheck(ctx, o));
+        kick(ctx, "tell the learner about the small task");
+        return;
+      }
+      saveOnboarding({ ...o, stage: "read", level: o.level ?? levelFrom(o), presented: "read" });
+      kick(ctx, "give the learner your read of them");
+      return;
+    }
+    if (o.stage === "read" && o.presented === "read") {
+      const lvl = o.level ?? levelFrom(o);
+      ctx.ui.notify(`my read: level ${lvl}/100 (${bandFor(lvl)})`, "info");
+      let level = lvl;
+      if (!(await ctx.ui.confirm("Your starting level", `Level ${lvl}/100 (${bandFor(lvl)}). Does that sound right?`))) {
+        const a = await ctx.ui.input("What level feels right? (0-100)", String(lvl));
+        const n = Number(a);
+        if (a !== undefined && a.trim() !== "" && Number.isInteger(n) && n >= 0 && n <= 100) level = n;
+      }
+      o = { ...o, level, stage: "project", presented: null };
+    }
+    if (o.stage === "project" && !o.project) {
+      try {
+        const s = await suggestOne({ profile, complete: modelComplete(ctx, () => "tutor: finding a project for you…") }, { language: o.fields.target!, level: o.level ?? levelFrom(o), about: aboutOf(o), exclude: o.shown });
+        o = { ...o, project: { title: s.title, summary: s.summary, concepts: s.concepts }, shown: [...o.shown, s.title], presented: "project" };
+        saveOnboarding(o);
+        kick(ctx, "suggest the project");
+      } catch (e) {
+        saveOnboarding(o);
+        ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off" : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
+      }
+      return;
+    }
+    if (o.stage === "project" && o.project && o.presented === "project") {
+      const pick = await ctx.ui.select(`Project: ${o.project.title}`, ["Start this project", "Show me something else"]);
+      if (pick === undefined) { saveOnboarding(o); return; }
+      if (pick === "Show me something else") { onboarding = { ...o, project: null, presented: null }; return onboardStep(ctx); }
+      const lang = o.fields.target!, def = defaultProjectDir(homedir(), lang, o.project.title);
+      const answer = await ctx.ui.input(`Project folder (Enter for ${def})`, def);
+      if (answer === undefined) { saveOnboarding(o); return; }
+      let dir: string;
+      try {
+        dir = createProject(profile, { language: lang, level: o.level ?? levelFrom(o), project: { ...o.project, size: "small" }, dir: resolve(expandHome(answer.trim() || def, homedir())), about: aboutOf(o), now: Date.now() }).dir;
+      } catch (e) { saveOnboarding(o); ctx.ui.notify(e instanceof Error ? e.message : String(e), "warning"); return; }
+      saveOnboarding({ ...o, stage: "choose", presented: null });
+      await fetchDocs(ctx, lang, false); // the switched Pi loads the language's docs (spec §6 last step)
+      if (link) {
+        ctx.ui.notify(`made ${o.project.title} in ${dir}; moving the editor and tutor there…`, "info");
+        await link.switchProject(dir, "README.md");
+      } else ctx.ui.notify(`made ${o.project.title} in ${dir}. Continue with: cd ${dir} && pi`, "info");
+    }
+  }
+
+  /** `/tutor-start check`: run the level task in the sandbox; passing or not only sets the level (Q13). */
+  async function onboardCheck(ctx: ExtensionContext): Promise<void> {
+    const o = onboarding ?? loadOnboarding();
+    if (!o || o.stage !== "check" || !o.levelCheck) { ctx.ui.notify("no level task is waiting; /tutor-start begins", "info"); return; }
+    const lang = o.fields.target!;
+    ctx.ui.notify("running the task's tests…", "info");
+    const r = await runExamTests((c, a, opt) => pi.exec(c, a, opt), lang, join(checksRoot(lang), o.levelCheck.task), { sandbox: sandboxHost() });
+    if (r.missing) { ctx.ui.notify(r.missing, "warning"); return; }
+    const passed = r.code === 0 && !r.killed;
+    const next: Onboarding = { ...o, levelCheck: { ...o.levelCheck, passed }, stage: "read", presented: "read" };
+    next.level = levelFrom(next);
+    saveOnboarding(next);
+    ctx.ui.notify(passed ? `all tests pass; I'd start you at level ${next.level}` : `some tests fail, which is fine: it only tells me where to start (level ${next.level})`, "info");
+    kick(ctx, "give the learner your read of them");
+  }
+
+  pi.on("agent_end", async (_event, ctx) => {
+    if (!onboardRun) return;
+    onboardRun = false;
+    if (!onboarding) return;
+    const note = intake;
+    intake = undefined;
+    saveOnboarding(applyTurn(onboarding, note === undefined ? null : note));
+    try { await onboardStep(ctx); } catch (e) { ctx.ui.notify(`onboarding: ${e instanceof Error ? e.message : String(e)}`, "error"); }
+    paint();
+  });
+
   pi.registerCommand("tutor-start", {
-    description: "Pick a language, get three project ideas, scaffold one (spec/ + AGENTS.md)",
+    description: "Meet the tutor: a short conversation, one project, then build or learn first; check runs the level task; off pauses",
     handler: async (args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
-      let label = "tutor: asking the model…";
-      const r = await runStart(args, {
-        ui: {
-          select: (t, o) => ctx.ui.select(t, o),
-          input: (t, p) => ctx.ui.input(t, p),
-          notify: (m, l) => ctx.ui.notify(m, l),
-          working: (m) => { label = m ?? label; ctx.ui.setWorkingMessage(m); },
-        },
-        profile, complete: modelComplete(ctx, () => label), now: Date.now, home: homedir(),
-      });
-      if (!r) return;
-      // Spec §6 last step: fetch the language's knowledge if not cached; the switched Pi loads it.
-      await fetchDocs(ctx, r.language, false); // cached unless missing or a newer DevDocs build
-      if (link) {
-        ctx.ui.notify(`scaffolded ${r.title} in ${r.dir}; switching the editor and tutor there…`, "info");
-        await link.switchProject(r.dir, "spec/tasks.md");
-      } else {
-        ctx.ui.notify(`scaffolded ${r.title} in ${r.dir}. Continue with: cd ${r.dir} && pi`, "info");
+      const a = args.trim().toLowerCase();
+      if (a === "off") {
+        if (!onboardingActive()) { ctx.ui.notify("no onboarding in progress", "info"); return; }
+        onboarding = null; // kept in the profile: the next /tutor-start resumes
+        ctx.ui.notify("paused; /tutor-start picks up where we left off", "info");
+        return;
       }
+      if (a === "check") { await onboardCheck(ctx); return; }
+      if (a && !isLanguage(a)) { ctx.ui.notify(`pick one of: ${LANGUAGES.join(", ")}`, "warning"); return; }
+      const saved = onboarding ?? loadOnboarding();
+      if (saved && saved.stage !== "done" && (!a || saved.fields.target === a)) {
+        onboarding = saved;
+        ctx.ui.notify("picking up where we left off", "info");
+        kick(ctx, "continue the conversation");
+        return;
+      }
+      // Q9: a language with a project already is a check-in, not a first meeting.
+      const p = profile;
+      let o: Onboarding = newOnboarding(a || null);
+      profileWrite(() => {
+        const recent = (a ? [a] : p.languages()).flatMap((l) => p.projects(l)).sort((x, y) => y.created - x.created)[0];
+        const row = recent ? p.language(recent.language) : undefined;
+        if (recent && row) o = checkInOnboarding(recent.language, { level: row.level, known: p.languages(), last: recent.title, due: p.dueConcepts(recent.language, Date.now()) });
+      });
+      saveOnboarding(o);
+      kick(ctx, o.checkIn ? "check in with the learner" : "start the conversation");
+      paint();
     },
   });
 

@@ -1,95 +1,58 @@
-import { realpathSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { bandFor } from "./policy.js";
 import type { Profile } from "./profile.js";
-import { runInterview, initialLevel, type Ask, type InterviewAnswers } from "./interview.js";
 import { completeJson, type Complete } from "./llm.js";
-import { Cancelled } from "./progress.js";
 import { systemText } from "./prompts.js";
 import { loadPack, vocabOf, weakConcepts } from "./packs.js";
-import { suggestPrompt, checkSuggestions, suggestionLabel } from "./suggest.js";
-import { scaffoldPrompt, checkScaffold, writeScaffold, slugify, isEmptyOrMissing } from "./scaffold.js";
+import { suggestPrompt, checkSuggestions, type Suggestion } from "./suggest.js";
+import { agents, slugify, isEmptyOrMissing } from "./scaffold.js";
+import { LANGS } from "./knowledge/versions.js";
 
-// /tutor-start (spec §6): language → interview if new → 3 suggestions → folder → scaffold. Every dependency injected.
+// /tutor-start building blocks (spec 2026-10-19 §5): the conversation lives in index.ts and onboard.ts;
+// these make the one project suggestion and the project folder. The spec is written later (Task 7).
 export const LANGUAGES = ["python", "rust", "go", "typescript", "lua", "javascript"] as const;
-const OTHER = "other…";
-const NAME = /^[a-z][a-z0-9+#.-]{0,30}$/;
+export type Language = (typeof LANGUAGES)[number];
 
-export interface StartUi extends Ask {
-  notify(msg: string, level: "info" | "warning" | "error"): void;
-  working(msg?: string): void;
-}
-export interface StartDeps { ui: StartUi; profile: Profile; complete: Complete; now: () => number; home: string }
-export interface StartResult { dir: string; language: string; level: number; title: string; files: string[] }
-
-async function pickLanguage(arg: string, d: StartDeps): Promise<string | null> {
-  let name = arg.trim();
-  if (!name) {
-    const extra = d.profile.languages().filter((l) => !(LANGUAGES as readonly string[]).includes(l));
-    const choice = await d.ui.select("Which language?", [...LANGUAGES, ...extra, OTHER]);
-    if (choice === undefined) return null;
-    name = choice === OTHER ? ((await d.ui.input("Language name", "e.g. zig")) ?? "") : choice;
-    if (!name.trim()) return null;
-  }
-  name = name.trim().toLowerCase();
-  if (!NAME.test(name)) { d.ui.notify(`"${name}" is not a language name I can use`, "warning"); return null; }
-  return name;
+export function isLanguage(s: string): s is Language {
+  return (LANGUAGES as readonly string[]).includes(s);
 }
 
-function expandHome(p: string, home: string): string {
+/** One project for this learner (Q4), never one already shown. */
+export async function suggestOne(d: { profile: Profile; complete: Complete }, i: { language: string; level: number; about: Record<string, string>; exclude: string[] }): Promise<Suggestion> {
+  const [s] = await completeJson(d.complete, systemText("suggest"), suggestPrompt({
+    language: i.language, level: i.level, band: bandFor(i.level), about: i.about,
+    // M7 minor: old free-form rows read under the pack vocabulary's tag.
+    weakConcepts: weakConcepts(d.profile.concepts(i.language), vocabOf(loadPack(i.language), loadPack("editor"))),
+    done: d.profile.projects(i.language).map((p) => p.title), count: 1, exclude: i.exclude,
+  }), (v) => checkSuggestions(v, 1));
+  return s;
+}
+
+export function expandHome(p: string, home: string): string {
   return p === "~" ? home : p.startsWith("~/") ? join(home, p.slice(2)) : p;
 }
 
-export async function runStart(arg: string, d: StartDeps): Promise<StartResult | null> {
-  const language = await pickLanguage(arg, d);
-  if (!language) return null;
+export function defaultProjectDir(home: string, language: string, title: string): string {
+  return join(home, "lazycourse", `${language}-${slugify(title)}`);
+}
 
-  let interview: InterviewAnswers | null = null;
-  let level: number;
-  const row = d.profile.language(language);
-  if (row) {
-    level = row.level;
-  } else {
-    interview = await runInterview(language, d.ui);
-    if (!interview) return null;
-    level = initialLevel(interview);
-  }
-  const band = bandFor(level);
-
-  try {
-    d.ui.working("tutor: suggesting projects…");
-    const suggestions = await completeJson(d.complete, systemText("suggest"), suggestPrompt({
-      language, level, band, interview,
-      // M7 minor: old free-form rows read under the pack vocabulary's tag.
-      weakConcepts: weakConcepts(d.profile.concepts(language), vocabOf(loadPack(language), loadPack("editor"))),
-      done: d.profile.projects(language).map((p) => p.title),
-    }), checkSuggestions);
-    d.ui.working();
-
-    const labels = suggestions.map(suggestionLabel);
-    const picked = await d.ui.select("Pick a project", labels);
-    if (picked === undefined) return null;
-    const project = suggestions[labels.indexOf(picked)];
-
-    const fallback = `~/lazycourse/${language}-${slugify(project.title)}`;
-    const answer = await d.ui.input("Project folder", fallback);
-    if (answer === undefined) return null;
-    const dir = resolve(expandHome(answer.trim() || fallback, d.home));
-    if (!isEmptyOrMissing(dir)) { d.ui.notify(`${dir} is not empty; pick another folder`, "warning"); return null; }
-
-    d.ui.working("tutor: writing the spec…");
-    const spec = await completeJson(d.complete, systemText("scaffold"), scaffoldPrompt({ language, level, band, project, interview }), checkScaffold);
-    const files = writeScaffold(dir, spec, { language, level, band, title: project.title, summary: project.summary });
-    // M4 #25: the tutor finds its project by realpath(cwd); a symlinked parent must not hide it.
-    const real = realpathSync(dir);
-    if (interview) d.profile.saveLanguage(language, level, interview as unknown as Record<string, string>, d.now());
-    d.profile.addProject(language, real, project.title, d.now());
-    return { dir: real, language, level, title: project.title, files };
-  } catch (e) {
-    if (e instanceof Cancelled) d.ui.notify("tutor-start cancelled", "info");
-    else d.ui.notify(`tutor-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
-    return null;
-  } finally {
-    d.ui.working();
-  }
+/**
+ * The project folder before any spec (Q23): README front matter (language, test), AGENTS.md, and the
+ * profile rows, so the Pi that restarts there finds its project. Refuses a non-empty folder.
+ */
+export function createProject(profile: Profile, i: { language: string; level: number; project: Suggestion; dir: string; about: Record<string, string>; now: number }): { dir: string } {
+  const dir = resolve(i.dir);
+  if (!isEmptyOrMissing(dir)) throw new Error(`${dir} is not empty; pick another folder`);
+  mkdirSync(dir, { recursive: true });
+  const test = LANGS[i.language]?.test;
+  const meta = { language: i.language, level: i.level, band: bandFor(i.level), title: i.project.title, summary: i.project.summary };
+  writeFileSync(join(dir, "README.md"), `---\n${test ? `test: ${test}\n` : ""}language: ${i.language}\n---\n# ${i.project.title}\n\n${i.project.summary}\n\nThe plan arrives in \`spec/\` shortly; the tutor is writing it.\n`, { flag: "wx" });
+  writeFileSync(join(dir, "AGENTS.md"), agents(meta), { flag: "wx" });
+  // M4 #25: the tutor finds its project by realpath(cwd); a symlinked parent must not hide it.
+  const real = realpathSync(dir);
+  if (profile.language(i.language)) profile.setLevel(i.language, i.level);
+  else profile.saveLanguage(i.language, i.level, i.about, i.now);
+  profile.addProject(i.language, real, i.project.title, i.now);
+  return { dir: real };
 }

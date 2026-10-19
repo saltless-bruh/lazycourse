@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, type Onboarding } from "../extensions/tutor/onboard.js";
+import { newOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, checkInOnboarding, type Onboarding } from "../extensions/tutor/onboard.js";
 import { scrubInternals } from "../extensions/tutor/compliance.js";
 
 const fence = (o: object) => "Nice to meet you! What would you like to build?\n\n```tutor-intake\n" + JSON.stringify(o) + "\n```\n";
@@ -83,5 +83,34 @@ describe("onboarding state (spec 2026-10-19 §5, §6, Q1, Q6)", () => {
     expect(onboardPrompt(low)).toMatch(/one or two short technical questions/i);
     const high = applyTurn(newOnboarding("rust"), { experience: "1-3 years", known: ["rust"], selfScore: 7 });
     expect(onboardPrompt(high)).not.toMatch(/technical questions/i);
+  });
+});
+
+describe("onboarding, Task 6 additions (Q7, Q9)", () => {
+  it("a self-score below 5 keeps the talk open for two exchanges of technical questions", () => {
+    let o = applyTurn(newOnboarding("rust"), { experience: "under a year", known: ["rust"], selfScore: 3, idea: null });
+    expect(missing(o)).toEqual(["probe"]);
+    o = applyTurn(o, {});
+    expect(missing(o)).toEqual(["probe"]);
+    o = applyTurn(o, {});
+    expect(missing(o)).toEqual([]);
+  });
+  it("a learner at 5 or above has no probe; the level task replaces it", () => {
+    const o = applyTurn(newOnboarding("rust"), { experience: "1-3 years", known: ["rust"], selfScore: 6, idea: null });
+    expect(missing(o)).toEqual([]);
+    expect(selfScoreNeeded(o)).toBe(true);
+  });
+  it("a check-in (second /tutor-start) asks only for what to do next", () => {
+    const o = checkInOnboarding("python", { level: 40, known: ["python"], last: "Monthly Expense Logger", due: ["loops"] });
+    expect(missing(o)).toEqual(["idea"]);
+    expect(o.level).toBe(40);
+    const s = onboardPrompt(o);
+    expect(s).toMatch(/check-in/i);
+    expect(s).toContain("Monthly Expense Logger");
+    expect(s).toContain("loops");
+  });
+  it("the check stage tells the model where the task is and how to run it", () => {
+    const o = { ...applyTurn(newOnboarding("rust"), { experience: "1-3 years", known: ["rust"], selfScore: 7, idea: null }), stage: "check" as const, levelCheck: { task: "2-raindrops", passed: null } };
+    expect(onboardPrompt(o)).toMatch(/\/tutor-start check/);
   });
 });

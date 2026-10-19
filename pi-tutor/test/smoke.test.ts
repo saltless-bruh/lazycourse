@@ -186,22 +186,6 @@ describe("M4 profile and /tutor-start", () => {
     expect(Object.keys(commands)).toContain("tutor-start");
   });
 
-  it("/tutor-start scaffolds through the real model call path and says how to continue when detached", async () => {
-    const { mkdtempSync, existsSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const root = mkdtempSync(join(tmpdir(), "pitutor-smoke-"));
-    const b = await boot({ cwd: root });
-    b.replies.push(
-      JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
-      JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.py", run_cmd: "python src/main.py" }),
-    );
-    b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
-    await b.commands["tutor-start"].handler("python", b.ctx);
-    expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
-    expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
-  });
-
   it("/tutor-start without a model says so and does nothing", async () => {
     const b = await boot();
     (b.ctx as { model?: unknown }).model = undefined;
@@ -286,40 +270,6 @@ describe("M4 review fixes", () => {
       if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
     }
   }, 15000);
-
-  it("/tutor-start shows Pi's cancellable loader during each model call and passes its signal (final review I1)", async () => {
-    const { mkdtempSync, existsSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const root = mkdtempSync(join(tmpdir(), "pitutor-loader-"));
-    const { initTheme } = await import("@earendil-works/pi-coding-agent");
-    initTheme(undefined, false); // Pi does this at startup; BorderedLoader needs it
-    const b = await boot({ cwd: root });
-    const shown: unknown[] = [];
-    const signals: unknown[] = [];
-    const tui = { requestRender() {} };
-    const theme = { fg: (_c: string, s: string) => s };
-    const ctx = b.ctx as unknown as { ui: Record<string, unknown>; modelRegistry: Record<string, unknown> };
-    ctx.ui.custom = (factory: (t: unknown, th: unknown, kb: unknown, done: (r: unknown) => void) => unknown) =>
-      new Promise((resolve) => { shown.push(factory(tui, theme, {}, resolve)); });
-    const replies = [
-      JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
-      JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.py", run_cmd: "python src/main.py" }),
-    ];
-    ctx.modelRegistry.complete = async (_m: unknown, _c: unknown, opts: { signal?: AbortSignal }) => {
-      signals.push(opts?.signal);
-      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() }] };
-    };
-    b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
-    await b.commands["tutor-start"].handler("python", b.ctx);
-    const { BorderedLoader } = await import("@earendil-works/pi-coding-agent");
-    expect(shown).toHaveLength(3); // suggest + scaffold model calls, then the DevDocs fetch (M5-finish)
-    for (const c of shown) expect(c).toBeInstanceOf(BorderedLoader);
-    expect(signals.length).toBe(2);
-    expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
-    for (const c of shown) (c as { dispose(): void }).dispose();
-    expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
-  });
 });
 
 describe("M5 skill reads", () => {
@@ -422,6 +372,19 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
     return { server, base: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
   }
 
+  /** The conversation to the point where the project folder is made (spec 2026-10-19 §5), answers scripted. */
+  async function toProject(b: Awaited<ReturnType<typeof boot>>, lang: string, folder: string) {
+    const run = async (text: string) => { await turn(b.events, b.ctx, "[tutor] onboarding", assistant(text)); await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx); };
+    await b.commands["tutor-start"].handler(lang, b.ctx);
+    await run("hi");
+    b.script.push("none yet", "", "3", "");          // fallback: experience, known, self-score, idea
+    await run("hello");
+    b.replies.push(JSON.stringify({ projects: [{ title: "P1", summary: "s.", size: "small", concepts: [] }] }));
+    await run("my read");                             // read confirmed → one project
+    b.script.push("Start this project", folder);
+    await run("how about P1?");
+  }
+
   it("/tutor-docs detects the installed version, writes tutor-python-ref, reloads Pi", async () => {
     const { existsSync } = await import("node:fs");
     const { join } = await import("node:path");
@@ -451,12 +414,7 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
       b.execOut["python3"] = { stdout: "Python 3.14.8\n", stderr: "", code: 0 };
       await b.commands["tutor-docs"].handler("python", b.ctx); // docs on disk
       process.env.PI_TUTOR_DEVDOCS = "http://127.0.0.1:9"; // refused: offline
-      b.replies.push(
-        JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
-        JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.py", run_cmd: "python3 src/main.py" }),
-      );
-      b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
-      await b.commands["tutor-start"].handler("python", b.ctx);
+      await toProject(b, "python", join(root, "p1"));
       const docs = b.notes.filter((n) => /^python docs/.test(n));
       expect(docs.at(-1)).toMatch(/offline.*docs on disk/);
       expect(b.notes.some((n) => /already current/.test(n))).toBe(false);
@@ -475,13 +433,8 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
     const { join } = await import("node:path");
     const root = mkdtempSync(join(tmpdir(), "pitutor-startdocs-"));
     const b = await boot({ cwd: root });
-    b.replies.push(
-      JSON.stringify({ projects: [1, 2, 3].map((n) => ({ title: `P${n}`, summary: "s.", size: "small", concepts: [] })) }),
-      JSON.stringify({ design_md: "# D", tasks_md: "- [ ] P1.T1 x", requirements_md: "## P1.T1", entry_file: "src/main.go", run_cmd: "go run ./src" }),
-    );
-    b.script.push("none yet", "", "never used it", "", "small (1-2 h)", "1. P1 (small) — s.", join(root, "p1"));
-    await b.commands["tutor-start"].handler("go", b.ctx);
-    expect(existsSync(join(root, "p1", "spec", "tasks.md"))).toBe(true);
+    await toProject(b, "go", join(root, "p1"));
+    expect(existsSync(join(root, "p1", "README.md"))).toBe(true);
     expect(b.notes.some((n) => /go docs fetch failed/.test(n))).toBe(true);
     expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
   });
@@ -1292,5 +1245,175 @@ describe("Pi 1.2+: before_agent_start also fires for custom-message runs (messag
     // The learner's next real message still opens its episode as before.
     await turn(b.events, b.ctx, "how do I start?", judged("none"));
     expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "chat" } });
+  });
+});
+
+
+describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
+  let savedProfile: string | undefined, savedHome: string | undefined, home: string;
+  beforeEach(() => {
+    savedProfile = process.env.PI_TUTOR_PROFILE; savedHome = process.env.HOME;
+    home = mkd(pjoin(tmp(), "onb-home-"));
+    process.env.PI_TUTOR_PROFILE = pjoin(home, "p.sqlite"); process.env.HOME = home;
+  });
+  afterEach(() => {
+    if (savedProfile === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = savedProfile;
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+  });
+  const note = (o: object, words = "Nice to meet you. What would you like to build?") => assistant(`${words}\n\n\`\`\`tutor-intake\n${JSON.stringify(o)}\n\`\`\`\n`);
+  /** One onboarding exchange: the run (prompt, reply) and its end, where the code takes its next step. */
+  async function exchange(b: Awaited<ReturnType<typeof boot>>, reply: unknown) {
+    const t = await turn(b.events, b.ctx, "[tutor] onboarding", reply);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    return t;
+  }
+  async function saved() {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const raw = p.setting("onboarding"); p.close();
+    return raw ? JSON.parse(raw) : null;
+  }
+  const ONE = JSON.stringify({ projects: [{ title: "Tip Calculator", summary: "Split a bill.", size: "small", concepts: ["numbers"] }] });
+
+  it("starts a conversation: a kickoff turn, the onboarding rules instead of the ladder, and no hint episode", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\]/), opts: { deliverAs: "followUp" } });
+    const t = await exchange(b, note({ experience: "none yet", known: [] }));
+    expect(t.sections["tutor"]).toMatch(/first meeting/i);
+    expect(t.sections["tutor"]).not.toMatch(/tutor-judgment/);
+    expect(t.sections["tutor_onboard"]).toMatch(/\[onboarding\]/);
+    expect((await saved()).fields).toMatchObject({ experience: "none yet", known: [], target: "python" });
+    expect(episodes(b.entries)).toEqual([]);
+  });
+  it("the learner never sees the note", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    const reply = note({ experience: "none yet" });
+    await exchange(b, reply);
+    const text = (reply as { content: { text: string }[] }).content[0].text;
+    expect(text).not.toMatch(/tutor-intake|"experience"/);
+    expect(text).toMatch(/Nice to meet you/);
+  });
+  it("refuses a language that is not one of the six (the pytutor-architect case)", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("pytutor-architect", b.ctx);
+    expect(b.notes.at(-1)).toBe("pick one of: python, rust, go, typescript, lua, javascript");
+    expect(await saved()).toBeNull();
+    expect(b.sent).toEqual([]);
+  });
+  it("after two replies without a note the code asks the missing items itself, then moves on (Review Focus #1)", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await exchange(b, assistant("Hi! Tell me about yourself."));
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("What do you want to build?"));
+    const s = await saved();
+    expect(s.fields).toMatchObject({ experience: "none yet", known: [], target: "python", idea: null });
+    expect(s.stage).toBe("read");
+    expect(typeof s.level).toBe("number");
+    expect(b.sent.length).toBe(2); // the kickoff, then the turn where the tutor gives its read
+  });
+  it("a named language and a self-score of 7: a level task in the editor, run by /tutor-start check (Q7, Q20)", async () => {
+    const { existsSync } = await import("node:fs");
+    const b = await boot({ cwd: home });
+    b.pi.exec = realExec as never;
+    await b.commands["tutor-start"].handler("python", b.ctx);
+    await exchange(b, note({ experience: "1-3 years", known: ["python"], selfScore: 7, idea: null }));
+    const task = pjoin(home, "lazycourse", ".checks", "python", "2-raindrops");
+    expect(existsSync(pjoin(task, "solution.py"))).toBe(true);
+    expect(existsSync(pjoin(task, ".exemplar"))).toBe(false);
+    expect((await saved()).stage).toBe("check");
+    await b.commands["tutor-start"].handler("check", b.ctx);
+    const s = await saved();
+    expect(s.levelCheck).toEqual({ task: "2-raindrops", passed: false });
+    expect(s.stage).toBe("read");
+    expect(b.notes.some((n) => /level \d+/.test(n))).toBe(true);
+  }, 60_000);
+  it("a self-score of 3: no task; the tutor asks a couple of technical questions first (Q7)", async () => {
+    const { existsSync } = await import("node:fs");
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("rust", b.ctx);
+    await exchange(b, note({ experience: "under a year", known: ["rust"], selfScore: 3, idea: null }));
+    expect(existsSync(pjoin(home, "lazycourse", ".checks"))).toBe(false);
+    expect((await saved()).stage).toBe("talk");
+    const t = await exchange(b, note({}));
+    expect(t.sections["tutor_onboard"]).toMatch(/technical questions/i);
+  });
+  it("picks up where it left off after Pi restarts (Review Focus #2)", async () => {
+    const a = await boot({ cwd: home });
+    await a.commands["tutor-start"].handler("", a.ctx);
+    await exchange(a, note({ experience: "under a year", known: ["lua"] }));
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/picking up where we left off/i);
+    expect((await saved()).fields).toMatchObject({ experience: "under a year", known: ["lua"] });
+  });
+  it("read → one project → folder → the project is created and the tutor moves there (Q4, Q23)", async () => {
+    const { existsSync } = await import("node:fs");
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello")); // fallback fills the checklist → stage read, its turn starts
+    b.replies.push(ONE);
+    await exchange(b, assistant("Here is my read: you are just starting.")); // read confirmed (empty script = yes) → one project
+    expect((await saved()).project).toMatchObject({ title: "Tip Calculator" });
+    b.script.push("Start this project", "");
+    await exchange(b, assistant("How about a tip calculator?"));
+    const dir = pjoin(home, "lazycourse", "python-tip-calculator");
+    expect(existsSync(pjoin(dir, "README.md"))).toBe(true);
+    const s = await saved();
+    expect(s.stage).toBe("choose");
+    expect(b.notes.some((n) => n.includes(`cd ${dir} && pi`))).toBe(true);
+  });
+  it("'show me something else' asks for another project, never one already shown", async () => {
+    const b = await boot({ cwd: home });
+    const seen: string[] = [];
+    (b.ctx as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { messages: { content: { text: string }[] }[] }) => {
+      seen.push(c.messages.map((m) => m.content.map((x) => x.text).join("")).join("\n"));
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: seen.length === 1 ? ONE : JSON.stringify({ projects: [{ title: "Word Count", summary: "Count words.", size: "small", concepts: [] }] }) }] };
+    };
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello"));
+    await exchange(b, assistant("my read"));
+    b.script.push("Show me something else");
+    await exchange(b, assistant("tip calculator?"));
+    expect(seen[1]).toMatch(/do not suggest: Tip Calculator/);
+    expect((await saved()).project).toMatchObject({ title: "Word Count" });
+  });
+  it("a second /tutor-start for a language with a project is a check-in (Q9)", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    p.saveLanguage("python", 30, {}, 1); p.addProject("python", pjoin(home, "old"), "Monthly Expense Logger", 1); p.close();
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    const t = await exchange(b, note({}));
+    expect(t.sections["tutor_onboard"]).toMatch(/check-in/i);
+    expect(t.sections["tutor_onboard"]).toContain("Monthly Expense Logger");
+  });
+  it("the project suggestion shows Pi's cancellable loader and passes its signal (final review I1)", async () => {
+    const { initTheme, BorderedLoader } = await import("@earendil-works/pi-coding-agent");
+    initTheme(undefined, false);
+    const b = await boot({ cwd: home });
+    const shown: unknown[] = [], signals: unknown[] = [];
+    const ctx = b.ctx as unknown as { ui: Record<string, unknown>; modelRegistry: Record<string, unknown> };
+    ctx.ui.custom = (factory: (t: unknown, th: unknown, kb: unknown, done: (r: unknown) => void) => unknown) =>
+      new Promise((resolve) => { shown.push(factory({ requestRender() {} }, { fg: (_c: string, s: string) => s }, {}, resolve)); });
+    ctx.modelRegistry.complete = async (_m: unknown, _c: unknown, opts: { signal?: AbortSignal }) => {
+      signals.push(opts?.signal);
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: ONE }] };
+    };
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello"));
+    await exchange(b, assistant("my read"));
+    expect(shown.length).toBeGreaterThan(0);
+    for (const c of shown) expect(c).toBeInstanceOf(BorderedLoader);
+    expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
+    for (const c of shown) (c as { dispose(): void }).dispose();
   });
 });

@@ -1,9 +1,10 @@
 import type { Band } from "./policy.js";
-import type { InterviewAnswers, Size } from "./interview.js";
+import type { Size } from "./interview.js";
 
-// Project suggester (spec §6): three projects biased toward weak concepts, as JSON.
+// Project suggester (spec §6; 2026-10-19 Q4): `count` projects biased toward weak concepts, as JSON.
 export interface Suggestion { title: string; summary: string; size: Size; concepts: string[] }
-export interface SuggestInput { language: string; level: number; band: Band; interview: InterviewAnswers | null; weakConcepts: string[]; done: string[] }
+/** `about`: what the onboarding conversation learned (experience, known, idea…); `exclude`: titles already shown. */
+export interface SuggestInput { language: string; level: number; band: Band; about: Record<string, string>; weakConcepts: string[]; done: string[]; count: number; exclude: string[] }
 
 const SIZES: readonly string[] = ["small", "medium", "large"];
 const list = (xs: string[]) => (xs.length ? xs.join(", ") : "none yet");
@@ -13,15 +14,11 @@ export function suggestPrompt(i: SuggestInput): string {
     `language: ${i.language}`,
     `learner: level ${i.level} (${i.band})`,
   ];
-  if (i.interview) {
-    lines.push(`programming experience: ${i.interview.experience}`);
-    lines.push(`languages known: ${i.interview.known || "not given"}`);
-    lines.push(`familiarity with ${i.language}: ${i.interview.familiarity}`);
-    lines.push(`goal: ${i.interview.goal || "not given"}`);
-    lines.push(`preferred size: ${i.interview.size}`);
-  }
+  for (const [k, v] of Object.entries(i.about)) if (v) lines.push(`${k}: ${v}`);
   lines.push(`weak concepts: ${list(i.weakConcepts)}`);
   lines.push(`finished projects: ${list(i.done)}`);
+  lines.push(`projects wanted: ${i.count}`);
+  if (i.exclude.length) lines.push(`do not suggest: ${i.exclude.join(", ")}`);
   return lines.join("\n");
 }
 
@@ -30,10 +27,10 @@ function text(v: unknown, field: string, n: number): string {
   return v.trim();
 }
 
-export function checkSuggestions(v: unknown): Suggestion[] {
+export function checkSuggestions(v: unknown, count = 3): Suggestion[] {
   const projects = (v as { projects?: unknown } | null)?.projects;
   if (!Array.isArray(projects)) throw new Error('reply must be {"projects":[…]}');
-  if (projects.length !== 3) throw new Error(`need exactly 3 projects, got ${projects.length}`);
+  if (projects.length !== count) throw new Error(`need exactly ${count} project${count === 1 ? "" : "s"}, got ${projects.length}`);
   return projects.map((p, idx) => {
     const n = idx + 1;
     const o = (p ?? {}) as Record<string, unknown>;
