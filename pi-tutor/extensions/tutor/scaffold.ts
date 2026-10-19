@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, rmdirSync } 
 import { dirname, extname, join, normalize, isAbsolute } from "node:path";
 import type { Band } from "./policy.js";
 import { LANGS } from "./knowledge/versions.js";
-import type { InterviewAnswers } from "./interview.js";
 import type { Suggestion } from "./suggest.js";
 
 // Scaffold writer (spec §6): one structured call → spec/{design,tasks,requirements}.md, plus local templates.
@@ -30,7 +29,8 @@ function field(o: Record<string, unknown>, k: keyof ScaffoldSpec): string {
   return v;
 }
 
-export function checkScaffold(v: unknown): ScaffoldSpec {
+/** `rounds`: the learn-first lesson rounds (Q22); when there are any, tasks_md must carry one milestone heading each. */
+export function checkScaffold(v: unknown, rounds: string[][] = []): ScaffoldSpec {
   if (typeof v !== "object" || v === null) throw new Error("reply must be a JSON object");
   const o = v as Record<string, unknown>;
   const s: ScaffoldSpec = {
@@ -40,6 +40,7 @@ export function checkScaffold(v: unknown): ScaffoldSpec {
   const ids = taskIds(s.tasks_md);
   if (ids.length === 0) throw new Error("tasks_md has no task ids like P1.T1");
   if (!s.tasks_md.includes("[ ]")) throw new Error("tasks_md tasks need [ ] checkboxes");
+  for (let k = 1; k <= rounds.length; k++) if (!new RegExp(`^## Milestone ${k}:`, "m").test(s.tasks_md)) throw new Error(`tasks_md needs a "## Milestone ${k}: …" heading for lesson round ${k}`);
   const missing = ids.filter((id) => !new RegExp(`\\b${id.replace(/\./g, "\\.")}\\b`).test(s.requirements_md));
   if (missing.length) throw new Error(`requirements_md is missing sections for ${missing.join(", ")}`);
   const entry = normalize(s.entry_file);
@@ -49,16 +50,22 @@ export function checkScaffold(v: unknown): ScaffoldSpec {
   return s;
 }
 
-export function scaffoldPrompt(i: { language: string; level: number; band: Band; project: Suggestion; interview: InterviewAnswers | null }): string {
-  return [
+/** `about`: what the onboarding conversation learned; `rounds`: learn-first lesson rounds, one milestone each (Q22). */
+export function scaffoldPrompt(i: { language: string; level: number; band: Band; project: Suggestion; about: Record<string, string>; rounds: string[][] }): string {
+  const lines = [
     `language: ${i.language}`,
     `learner: level ${i.level} (${i.band})`,
     `project: ${i.project.title} — ${i.project.summary}`,
     `size: ${i.project.size}`,
     `concepts to exercise: ${i.project.concepts.join(", ") || "any"}`,
-    ...(i.interview?.goal ? [`learner goal: ${i.interview.goal}`] : []),
+    ...Object.entries(i.about).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`),
     DETAIL[i.band],
-  ].join("\n");
+  ];
+  if (i.rounds.length) {
+    lines.push("The learner learns the concepts in rounds before building. Group tasks_md into milestones, one per round, with these exact headings; a milestone's tasks may use only the concepts of its round and the rounds before it:");
+    i.rounds.forEach((r, k) => lines.push(`## Milestone ${k + 1}: ${r.join(", ")}`));
+  }
+  return lines.join("\n");
 }
 
 export function slugify(title: string): string {
@@ -91,8 +98,13 @@ export function agents(m: ScaffoldMeta): string {
     `- The plan is spec/design.md, spec/tasks.md and spec/requirements.md. Refer to tasks by id (P1.T2.S3) and cite \`path:line\`.\n`;
 }
 
-export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta): string[] {
-  if (!isEmptyOrMissing(dir)) throw new Error(`${dir} is not empty`);
+/**
+ * `existing`: the folder /tutor-start already made (Q23): README.md and AGENTS.md are replaced, everything
+ * else the learner has there (learn/) is kept, and a spec or source file already present is never overwritten.
+ */
+export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta, opts: { existing?: boolean } = {}): string[] {
+  if (!opts.existing && !isEmptyOrMissing(dir)) throw new Error(`${dir} is not empty`);
+  const replace = new Set(opts.existing ? ["README.md", "AGENTS.md"] : []);
   const entry = normalize(s.entry_file);
   const first = taskIds(s.tasks_md)[0];
   const files: [string, string][] = [
@@ -111,8 +123,8 @@ export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta):
       const abs = join(dir, rel);
       for (let d = dirname(abs); d !== dir && !existsSync(d); d = dirname(d)) madeDirs.unshift(d);
       mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, text, { flag: "wx" });
-      made.push(abs);
+      writeFileSync(abs, text, { flag: replace.has(rel) ? "w" : "wx" });
+      if (!replace.has(rel)) made.push(abs);
     }
   } catch (e) {
     // M4 #26: never touch files this call did not create; remove ours, then our now-empty folders.

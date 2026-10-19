@@ -299,3 +299,14 @@ describe("profile v5: FSRS cards (spec 2026-10-19 §7b)", () => {
     p.close();
   });
 });
+
+describe("known concepts (spec 2026-10-19 §7b, Task 7)", () => {
+  it("a concept is known while its card is not yet due", () => {
+    const p = Profile.open(":memory:");
+    const t = Date.UTC(2026, 9, 19), day = 86_400_000;
+    p.rateConcept("python", "loops", 1, t);
+    p.rateConcept("python", "dicts", 0.1, t);
+    expect(p.knownConcepts("python", t + day)).toEqual(["loops"]);
+    p.close();
+  });
+});

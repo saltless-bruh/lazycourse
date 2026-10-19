@@ -154,6 +154,11 @@ export class Profile {
       ON CONFLICT(language, tag) DO UPDATE SET card = excluded.card, due = excluded.due`).run(language, tag, JSON.stringify(next), next.due);
   }
 
+  /** Concepts whose card is not due at `now`: learned recently enough to skip in a lesson plan. */
+  knownConcepts(language: string, now: number): string[] {
+    return (this.db.prepare("SELECT tag FROM cards WHERE language = ? AND due > ? ORDER BY tag").all(language, now) as Row[]).map((r) => String(r.tag));
+  }
+
   /** Concepts due for review at `now`, longest overdue first. */
   dueConcepts(language: string, now: number, limit = 3): string[] {
     return (this.db.prepare("SELECT tag FROM cards WHERE language = ? AND due <= ? ORDER BY due, tag LIMIT ?").all(language, now, limit) as Row[])

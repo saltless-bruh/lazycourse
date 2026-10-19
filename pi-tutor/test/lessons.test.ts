@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFil
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { loadLessons, levelTasks, writeExercise, checkExercise, textProblems } from "../extensions/tutor/lessons.js";
+import { loadLessons, levelTasks, writeExercise, checkExercise, textProblems, planRounds, type Lesson } from "../extensions/tutor/lessons.js";
 import { realExec } from "./fake-pi.js";
 
 const has = (cmd: string) => spawnSync(cmd, ["--version"]).status === 0;
@@ -99,5 +99,28 @@ describe("lesson text checks (side-agent note 2026-10-19: the text, not only the
   });
   it("clean Markdown with code fences has no problems", () => {
     expect(textProblems("Text with `code`.\n\n```python\n>>> 1 + 1\n2\n```\n")).toEqual([]);
+  });
+});
+
+describe("lesson rounds (spec 2026-10-19 Q14, Q15)", () => {
+  const L = (concept: string, order: number, tags: string[] = [concept]): Lesson => ({ language: "python", concept, title: concept, tags, source: "", order, checked: null, text: "", exercises: [] });
+  const lessons = ["basics", "bools", "numbers", "conditionals", "strings", "lists", "loops", "dicts", "functions"].map((c, i) => L(c, i + 1));
+  it("only concepts with a lesson that the learner does not know, weak ones first, three per round", () => {
+    const r = planRounds(["numbers", "conditionals", "strings", "lists", "loops", "dicts", "functions", "bools", "async"], new Set(["bools"]), ["dicts", "loops"], lessons);
+    expect(r.map((x) => x.length)).toEqual([3, 3, 1]);
+    expect(r.flat()).not.toContain("bools");
+    expect(r.flat()).not.toContain("async");
+    expect(r[0].slice(0, 2)).toEqual(["dicts", "loops"]);
+  });
+  it("a concept matches a lesson by its tags too (variables → basics)", () => {
+    expect(planRounds(["variables"], new Set(), [], [L("basics", 1, ["variables"])])).toEqual([["basics"]]);
+  });
+  it("a beginner also gets the lessons that come before the project's concepts, in course order", () => {
+    const r = planRounds(["lists"], new Set(), [], lessons, { beginner: true });
+    expect(r.flat()).toEqual(["basics", "bools", "numbers", "conditionals", "strings", "lists"]);
+    expect(r.map((x) => x.length)).toEqual([3, 3]);
+  });
+  it("nothing to learn gives no rounds", () => {
+    expect(planRounds(["async"], new Set(), [], lessons)).toEqual([]);
   });
 });

@@ -51,8 +51,8 @@ describe("helpers", () => {
   });
   it("puts the band's detail level into the scaffold prompt", () => {
     const project = { title: "Todo CLI", summary: "s", size: "small" as const, concepts: ["structs"] };
-    expect(scaffoldPrompt({ language: "rust", level: 10, band: "beginner", project, interview: null })).toMatch(/takes X and returns Y/);
-    expect(scaffoldPrompt({ language: "rust", level: 90, band: "pro", project, interview: null })).toMatch(/no subtasks/);
+    expect(scaffoldPrompt({ language: "rust", level: 10, band: "beginner", project, about: {}, rounds: [] })).toMatch(/takes X and returns Y/);
+    expect(scaffoldPrompt({ language: "rust", level: 90, band: "pro", project, about: {}, rounds: [] })).toMatch(/no subtasks/);
     expect(systemText("scaffold")).toContain('"tasks_md"');
   });
 });
@@ -106,5 +106,40 @@ describe("M6c: scaffold cleanup (M4 #26)", () => {
     expect(() => writeScaffold(dir, spec({ entry_file: "spec/design.md" }), meta)).toThrow(); // collides with a file written earlier
     expect(readdirSync(dir)).toEqual([]);
     expect(writeScaffold(dir, spec(), meta)).toContain("spec/tasks.md");
+  });
+});
+
+describe("build or learn: milestones and the existing project folder (spec 2026-10-19 Q22, Q23)", () => {
+  const project = { title: "Todo CLI", summary: "Track tasks.", size: "small" as const, concepts: ["structs"] };
+  it("the prompt asks for one milestone per lesson round, each using only the concepts taught so far", () => {
+    const p = scaffoldPrompt({ language: "python", level: 10, band: "beginner", project, about: { idea: "a todo list" }, rounds: [["basics", "functions"], ["lists"]] });
+    expect(p).toMatch(/## Milestone 1: basics, functions/);
+    expect(p).toMatch(/## Milestone 2: lists/);
+    expect(p).toContain("idea: a todo list");
+    expect(scaffoldPrompt({ language: "python", level: 10, band: "beginner", project, about: {}, rounds: [] })).not.toMatch(/Milestone/);
+  });
+  it("a learn-first spec must carry the milestone headings", () => {
+    expect(() => checkScaffold(spec(), [["basics"]])).toThrow(/## Milestone 1/);
+    const withMilestones = spec({ tasks_md: "## Milestone 1: basics\n- [ ] P1.T1 Parse args\n  - [ ] P1.T1.S1 Define a function\n- [ ] P1.T2 Save tasks\n" });
+    expect(checkScaffold(withMilestones, [["basics"]]).tasks_md).toContain("## Milestone 1:");
+  });
+  it("writes into the folder /tutor-start already made: README and AGENTS replaced, the learner's learn/ kept", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeFileSync(join(dir, "README.md"), "---\nlanguage: rust\n---\n# Todo CLI\n");
+    writeFileSync(join(dir, "AGENTS.md"), "old");
+    mkdirSync(join(dir, "learn", "basics"), { recursive: true });
+    writeFileSync(join(dir, "learn", "basics", "solution.py"), "mine");
+    writeScaffold(dir, spec(), meta, { existing: true });
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/run: cargo run/);
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).not.toBe("old");
+    expect(readFileSync(join(dir, "learn", "basics", "solution.py"), "utf8")).toBe("mine");
+    expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
+  });
+  it("into an existing folder it still never overwrites a spec or source file that is already there", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    mkdirSync(join(dir, "spec"));
+    writeFileSync(join(dir, "spec", "tasks.md"), "mine");
+    expect(() => writeScaffold(dir, spec(), meta, { existing: true })).toThrow();
+    expect(readFileSync(join(dir, "spec", "tasks.md"), "utf8")).toBe("mine");
   });
 });

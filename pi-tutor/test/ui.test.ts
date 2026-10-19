@@ -57,3 +57,14 @@ describe("renderStatus", () => {
     expect(renderStatus({ state: "idle", connected: true })).toBe("tutor");
   });
 });
+
+describe("lesson label (spec 2026-10-19 Q15)", () => {
+  it("comes first on line 1, after an exam timer, so clipping never hides it", () => {
+    const [l1] = renderWidget({ lesson: "lesson: basics 1/2", language: "python", level: 10, rung: 3, state: "idle", connected: true });
+    expect(l1.startsWith("tutor  lesson: basics 1/2 · python")).toBe(true);
+  });
+  it("the spec status fits beside the outside-nvim prefix", () => {
+    const [, l2] = renderWidget({ state: "spec error: /tutor-start spec", connected: false });
+    expect(l2).toBe("outside nvim · spec error: /tutor-start spec");
+  });
+});

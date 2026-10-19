@@ -4,6 +4,8 @@ import { bandFor } from "./policy.js";
 export interface TutorState {
   /** Exam timer label (M8): first on line 1 so clipping never hides it. */
   exam?: string;
+  /** Lesson or milestone label (spec 2026-10-19 Q15): first after the exam timer, so clipping never hides it. */
+  lesson?: string;
   /** Active role when it is not the default coding tutor (spec 2026-10-13 §3). */
   role?: string;
   language?: string; level?: number; rung?: number; task?: string;
@@ -32,6 +34,7 @@ function clip(s: string, max = MAX): string {
 export function renderWidget(s: TutorState): string[] {
   const parts: string[] = [];
   if (s.exam) parts.push(s.exam);
+  if (s.lesson) parts.push(s.lesson);
   if (s.role) parts.push(s.role);
   if (s.language) parts.push(s.language);
   if (s.level !== undefined) parts.push(`lvl ${s.level}`);

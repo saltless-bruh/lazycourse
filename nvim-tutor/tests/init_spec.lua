@@ -76,7 +76,10 @@ describe("tutor.init", function()
     assert.is_true(vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "/tutor-exam medium dicts"))
     assert.same({ "small", "medium", "check", "off", "sandbox" }, vim.fn.getcompletion("TutorExam ", "cmdline"))
     -- Spec 2026-10-19: /tutor-start takes a language, `check` (the level task) or `off` (pause).
-    assert.same({ "python", "rust", "go", "typescript", "lua", "javascript", "check", "off" }, vim.fn.getcompletion("TutorStart ", "cmdline"))
+    assert.same({ "python", "rust", "go", "typescript", "lua", "javascript", "check", "off", "spec" }, vim.fn.getcompletion("TutorStart ", "cmdline"))
+    -- Spec 2026-10-19 §7: learn-first lessons.
+    assert.equals(2, vim.fn.exists(":TutorLesson"))
+    assert.same({ "next", "check", "skip", "review", "off" }, vim.fn.getcompletion("TutorLesson ", "cmdline"))
   end)
 
   it(":TutorSubmit and :TutorProgress type their slash commands (M8)", function()

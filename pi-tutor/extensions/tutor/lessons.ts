@@ -99,3 +99,50 @@ export function textProblems(text: string): string[] {
   if (/\bXXX\b/.test(prose)) out.push("an XXX note from the source's comments");
   return out;
 }
+
+const matches = (l: Lesson, c: string) => l.concept === c || l.tags.includes(c);
+
+/**
+ * Lesson rounds for a project (Q14, Q15): the project's concepts that have a lesson and are not known,
+ * weak ones first, then in course order, at most 3 per round. A beginner also gets every lesson that
+ * comes before the project's last needed one in course order (variables before lists).
+ */
+export function planRounds(project: string[], known: Set<string>, weak: string[], lessons: Lesson[], opts: { beginner?: boolean } = {}): string[][] {
+  const isKnown = (l: Lesson) => known.has(l.concept) || l.tags.some((t) => known.has(t));
+  const needed = new Set<Lesson>();
+  for (const c of project) for (const l of lessons) if (matches(l, c) && !isKnown(l)) needed.add(l);
+  if (opts.beginner && needed.size) {
+    const last = Math.max(...[...needed].map((l) => l.order));
+    for (const l of lessons) if (l.order <= last && !isKnown(l)) needed.add(l);
+  }
+  const rank = (l: Lesson) => { const w = weak.findIndex((c) => matches(l, c)); return w < 0 ? Number.MAX_SAFE_INTEGER : w; };
+  const order = [...needed].sort((a, b) => rank(a) - rank(b) || a.order - b.order).map((l) => l.concept);
+  const rounds: string[][] = [];
+  for (let i = 0; i < order.length; i += 3) rounds.push(order.slice(i, i + 3));
+  return rounds;
+}
+
+/** Where the learner is in their lesson rounds (saved per project). `building`: a round is done; its milestone is being built. */
+export interface LessonState {
+  rounds: string[][]; round: number; concept: string; exercise: number; fails: number; stepBack: boolean; building: boolean;
+  /** A review exercise interrupted the plan here (`/tutor-lesson review`); a pass returns to it. */
+  resume: { round: number; concept: string; exercise: number } | null;
+}
+
+export function startLessons(rounds: string[][]): LessonState | null {
+  return rounds.length && rounds[0].length ? { rounds, round: 0, concept: rounds[0][0], exercise: 0, fails: 0, stepBack: false, building: false, resume: null } : null;
+}
+
+/** The concept after the current one: the next in its round, or the round's end (`building`). */
+export function nextConcept(s: LessonState): LessonState {
+  const round = s.rounds[s.round] ?? [];
+  const i = round.indexOf(s.concept);
+  const base = { ...s, exercise: 0, fails: 0, stepBack: false };
+  return i >= 0 && i + 1 < round.length ? { ...base, concept: round[i + 1] } : { ...base, building: true };
+}
+
+/** After a round's milestone: the first concept of the next round, or null when every round is done. */
+export function nextRound(s: LessonState): LessonState | null {
+  const r = s.round + 1;
+  return r < s.rounds.length ? { ...s, round: r, concept: s.rounds[r][0], exercise: 0, fails: 0, stepBack: false, building: false } : null;
+}

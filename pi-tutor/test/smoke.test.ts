@@ -1417,3 +1417,128 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     for (const c of shown) (c as { dispose(): void }).dispose();
   });
 });
+
+describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
+  let savedProfile: string | undefined, savedHome: string | undefined, home: string, dir: string, file: string;
+  const SPEC = (milestones: string[]) => JSON.stringify({
+    design_md: "# D\n", requirements_md: "## P1.T1\n## P1.T2\n", entry_file: "src/main.py", run_cmd: "python3 src/main.py",
+    tasks_md: `${milestones.map((m, i) => `## Milestone ${i + 1}: ${m}\n- [ ] P1.T${i + 1} do ${m}\n`).join("")}${milestones.length ? "" : "- [ ] P1.T1 do it\n- [ ] P1.T2 more\n"}`,
+  });
+  beforeEach(async () => {
+    savedProfile = process.env.PI_TUTOR_PROFILE; savedHome = process.env.HOME;
+    home = mkd(pjoin(tmp(), "bl-home-"));
+    process.env.HOME = home;
+    file = pjoin(home, "p.sqlite");
+    process.env.PI_TUTOR_PROFILE = file;
+    const { realpathSync } = await import("node:fs");
+    dir = realpathSync(mkd(pjoin(home, "tip-")));
+    wfile(pjoin(dir, "README.md"), "---\nlanguage: python\n---\n# Tip Calculator\n");
+    wfile(pjoin(dir, "AGENTS.md"), "x");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { newOnboarding } = await import("../extensions/tutor/onboard.js");
+    const p = Profile.open(file);
+    p.saveLanguage("python", 10, {}, 1); p.addProject("python", dir, "Tip Calculator", 1);
+    p.setSetting("onboarding", JSON.stringify({ ...newOnboarding(null), targetByCode: true, level: 10, stage: "choose",
+      fields: { experience: "none yet", known: [], target: "python", idea: null },
+      project: { title: "Tip Calculator", summary: "Split a bill.", concepts: ["numbers", "functions"] } }));
+    p.close();
+  });
+  afterEach(() => {
+    if (savedProfile === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = savedProfile;
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+  });
+  const note = (o: object) => assistant(`Build now or learn first?\n\n\`\`\`tutor-intake\n${JSON.stringify(o)}\n\`\`\`\n`);
+  async function exchange(b: Awaited<ReturnType<typeof boot>>, reply: unknown) {
+    const t = await turn(b.events, b.ctx, "[tutor] onboarding", reply);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    return t;
+  }
+  async function setting(key: string) {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(file); const v = p.setting(key); p.close();
+    return v ? JSON.parse(v) : null;
+  }
+  const waitFor = async (ok: () => boolean) => { for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10)); expect(ok()).toBe(true); };
+
+  it("the new project session asks build-or-learn at once", async () => {
+    const b = await boot({ cwd: dir });
+    expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { deliverAs: "followUp" } });
+  });
+  it("learn first: lesson rounds start (a beginner gets the earlier lessons too) and the spec is written in milestones in the background", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    await exchange(b, note({ path: "learn" }));
+    const lesson = await setting(`lesson:${dir}`);
+    expect(lesson.rounds).toEqual([["basics", "functions", "bools"], ["numbers"]]);
+    expect(lesson.concept).toBe("basics");
+    expect(await setting("onboarding")).toBeNull();
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+    expect(readFileSync(pjoin(dir, "spec", "tasks.md"), "utf8")).toMatch(/## Milestone 1:/);
+    expect(readFileSync(pjoin(dir, "README.md"), "utf8")).toMatch(/run: python3 src\/main\.py/);
+    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] lesson/);
+  });
+  it("build now: only the spec, no lessons", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push(SPEC([]));
+    await exchange(b, note({ path: "build" }));
+    expect(await setting(`lesson:${dir}`)).toBeNull();
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+  });
+  it("no answer in the note: the code asks with a dialog", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push(SPEC([]));
+    b.script.push("Build it now");
+    await exchange(b, assistant("What would you like to do?"));
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+  });
+  it("a spec job that fails says so in the widget; lessons still work; /tutor-start spec retries (Review Focus #4)", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push("not json", "still not json");
+    await exchange(b, note({ path: "learn" }));
+    await waitFor(() => /spec error/.test(b.widgets["tutor"]?.[1] ?? ""));
+    expect(b.widgets["tutor"]?.[1]).toMatch(/spec error: \/tutor-start spec/);
+    expect(b.notes.some((n) => /could not be written.*\/tutor-start spec retries/.test(n))).toBe(true);
+    await b.commands["tutor-lesson"].handler("next", b.ctx);
+    expect(existsSync(pjoin(dir, "learn", "basics", "1-guidos-gorgeous-lasagna", "solution.py"))).toBe(true);
+    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    await b.commands["tutor-start"].handler("spec", b.ctx);
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+  });
+  it("lesson exercises: never the exemplar; two fails step back; a pass rates the concept and moves on; skip marks it known", async () => {
+    const b = await boot({ cwd: dir });
+    b.pi.exec = realExec as never;
+    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    await exchange(b, note({ path: "learn" }));
+    await b.commands["tutor-lesson"].handler("next", b.ctx);
+    const ex = pjoin(dir, "learn", "basics", "1-guidos-gorgeous-lasagna");
+    expect(existsSync(pjoin(ex, "lasagna.py")) || existsSync(pjoin(ex, "solution.py"))).toBe(true);
+    expect(existsSync(pjoin(ex, ".exemplar"))).toBe(false);
+    expect(b.widgets["tutor"]?.[0]).toMatch(/lesson: basics 1\/1/);
+    await b.commands["tutor-lesson"].handler("check", b.ctx);
+    await b.commands["tutor-lesson"].handler("check", b.ctx);
+    expect((await setting(`lesson:${dir}`)).stepBack).toBe(true);
+    const t = await turn(b.events, b.ctx, "I'm lost", judged("none"));
+    expect(t.sections["tutor_lesson"]).toMatch(/smaller step/i);
+    expect(t.sections["tutor_lesson"]).toMatch(/ask the learner a question before explaining/i);
+    const { loadLessons } = await import("../extensions/tutor/lessons.js");
+    wfile(pjoin(ex, "solution.py"), loadLessons("python").find((l) => l.concept === "basics")!.exercises[0].exemplar);
+    await b.commands["tutor-lesson"].handler("check", b.ctx);
+    expect((await setting(`lesson:${dir}`))).toMatchObject({ concept: "functions", stepBack: false, fails: 0 });
+    await b.commands["tutor-lesson"].handler("skip", b.ctx);
+    expect((await setting(`lesson:${dir}`)).concept).toBe("bools");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(file);
+    expect(p.knownConcepts("python", Date.now() + 1000)).toEqual(expect.arrayContaining(["variables", "functions"]));
+    p.close();
+  }, 60_000);
+  it("the last concept of a round turns to building that milestone; next starts the following round", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    await exchange(b, note({ path: "learn" }));
+    for (let i = 0; i < 3; i++) await b.commands["tutor-lesson"].handler("skip", b.ctx);
+    expect((await setting(`lesson:${dir}`)).building).toBe(true);
+    expect(b.widgets["tutor"]?.[0]).toMatch(/build: milestone 1/);
+    await b.commands["tutor-lesson"].handler("next", b.ctx);
+    expect((await setting(`lesson:${dir}`))).toMatchObject({ round: 1, concept: "numbers", building: false });
+  });
+});
