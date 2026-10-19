@@ -1,0 +1,130 @@
+// Onboarding as a conversation (spec 2026-10-19 §5, §6): the model talks; this module owns the checklist,
+// reads the hidden `tutor-intake` note each reply ends with, and makes every decision (language for a
+// newcomer, the level, when to stop talking and ask directly). It holds with a weak model: a missing or
+// broken note only counts toward the fallback.
+import { LANGUAGES } from "./start.js";
+import { EXPERIENCE } from "./interview.js";
+
+export type Field = "experience" | "known" | "target" | "selfScore" | "idea" | "path";
+export type Stage = "talk" | "check" | "read" | "project" | "choose" | "done";
+export interface Fields { experience: string; known: string[]; target: string; selfScore: number; confidence: string; idea: string | null; path: "build" | "learn" }
+export interface Onboarding {
+  fields: Partial<Fields>;
+  /** The language came from `/tutor-start <language>`: a self-score is asked even for a newcomer. */
+  named: boolean;
+  /** The code chose the target (Python for someone who knows no language, Q1); no self-score then. */
+  targetByCode: boolean;
+  exchanges: number;
+  badNotes: number;
+  levelCheck: { task: string; passed: boolean | null } | null;
+  level: number | null;
+  project: { title: string; summary: string; concepts: string[] } | null;
+  shown: string[];
+  stage: Stage;
+}
+
+export const MAX_EXCHANGES = 6;
+export const MAX_BAD_NOTES = 2;
+
+export function newOnboarding(language: string | null): Onboarding {
+  const named = language !== null;
+  return { fields: named ? { target: language } : {}, named, targetByCode: false, exchanges: 0, badNotes: 0, levelCheck: null, level: null, project: null, shown: [], stage: "talk" };
+}
+
+const NOTE = /(`{3,}|~{3,})tutor-intake[ \t]*\r?\n([\s\S]*?)\1/g;
+
+/** Free text onto the four experience bands; null when it cannot tell. */
+function experienceBand(s: string): string | null {
+  const t = s.toLowerCase();
+  if ((EXPERIENCE as readonly string[]).includes(t)) return t;
+  if (/\b(none|never|no experience|not yet|zero)\b/.test(t)) return "none yet";
+  if (/\b(months?|weeks?|under a year|less than a year|few days)\b/.test(t)) return "under a year";
+  if (/\b(over|more than)\b|\b([4-9]|\d\d) ?years?\b/.test(t)) return "over 3 years";
+  if (/\b([1-3]|one|two|three|a) ?(-|to)? ?(\d )?years?\b|1-3/.test(t)) return "1-3 years";
+  return null;
+}
+
+/** The last `tutor-intake` fence as validated fields; null when there is no fence or its JSON is broken. */
+export function parseIntake(text: string): Partial<Fields> | null {
+  const notes = [...text.matchAll(NOTE)];
+  if (!notes.length) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(notes[notes.length - 1][2]); } catch { return null; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as Record<string, unknown>, out: Partial<Fields> = {};
+  if (typeof v.experience === "string") { const b = experienceBand(v.experience); if (b) out.experience = b; }
+  if (Array.isArray(v.known)) out.known = v.known.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (typeof v.target === "string" && (LANGUAGES as readonly string[]).includes(v.target.trim().toLowerCase())) out.target = v.target.trim().toLowerCase();
+  if (typeof v.selfScore === "number" && Number.isInteger(v.selfScore) && v.selfScore >= 1 && v.selfScore <= 10) out.selfScore = v.selfScore;
+  if (typeof v.confidence === "string" && v.confidence.trim()) out.confidence = v.confidence.trim();
+  if (v.idea === null || (typeof v.idea === "string" && v.idea.trim())) out.idea = v.idea === null ? null : (v.idea as string).trim();
+  if (v.path === "build" || v.path === "learn") out.path = v.path;
+  return out;
+}
+
+/** One reply: count it, merge what the note learned, and let the code pick Python for a newcomer (Q1). */
+export function applyTurn(o: Onboarding, note: Partial<Fields> | null): Onboarding {
+  const next: Onboarding = { ...o, exchanges: o.exchanges + 1, badNotes: o.badNotes + (note === null ? 1 : 0), fields: { ...o.fields, ...(note ?? {}) } };
+  if (next.fields.target === undefined && next.fields.known !== undefined && next.fields.known.length === 0) {
+    next.fields.target = "python";
+    next.targetByCode = true;
+  } else if (note?.target !== undefined) next.targetByCode = false;
+  return next;
+}
+
+function selfScoreNeeded(o: Onboarding): boolean {
+  return o.fields.target !== undefined && !o.targetByCode && (o.named || (o.fields.known ?? []).length > 0);
+}
+
+/** Checklist items still unknown, in the order the tutor asks them; `path` belongs to the choose stage only. */
+export function missing(o: Onboarding): Field[] {
+  const f = o.fields, out: Field[] = [];
+  if (f.experience === undefined) out.push("experience");
+  if (f.known === undefined) out.push("known");
+  if (f.target === undefined && (f.known === undefined || f.known.length > 0)) out.push("target");
+  if (f.selfScore === undefined && selfScoreNeeded(o)) out.push("selfScore");
+  if (f.idea === undefined) out.push("idea");
+  if (o.stage === "choose" && f.path === undefined) out.push("path");
+  return out;
+}
+
+export function needsFallback(o: Onboarding): boolean {
+  return o.exchanges >= MAX_EXCHANGES || o.badNotes >= MAX_BAD_NOTES;
+}
+
+/**
+ * The 0–100 level. Experience sets a base (none 5, under a year 25, 1–3 years 45, over 3 years 65); a
+ * self-score pulls it halfway toward score × 10; the level task adds 10 when passed and takes 10 when
+ * failed. Monotonic in each input, clamped to 0–100.
+ */
+export function levelFrom(o: Onboarding): number {
+  const base = ({ "none yet": 5, "under a year": 25, "1-3 years": 45, "over 3 years": 65 } as Record<string, number>)[o.fields.experience ?? ""] ?? 25;
+  let level = o.fields.selfScore === undefined ? base : (base + o.fields.selfScore * 10) / 2;
+  if (o.levelCheck?.passed === true) level += 10;
+  if (o.levelCheck?.passed === false) level -= 10;
+  return Math.max(0, Math.min(100, Math.round(level)));
+}
+
+const LABEL: Record<Field, string> = {
+  experience: "experience", known: "languages already known", target: "language to learn", selfScore: "self-score 1-10 in that language",
+  idea: "an idea to build, or none", path: "build now or learn first",
+};
+
+/** The hidden per-turn section: what is known, what is missing, what this stage asks, and the note format. */
+export function onboardPrompt(o: Onboarding): string {
+  const f = o.fields;
+  const known = Object.entries(f).map(([k, v]) => `- ${k}: ${Array.isArray(v) ? v.join(", ") || "(none)" : v === null ? "(no idea yet)" : v}`);
+  const miss = missing(o);
+  const lines = [
+    "[onboarding] You are meeting this learner for the first time. Talk like a tutor at a first meeting: one question at a time, short, friendly; never write code.",
+    `known so far:\n${known.length ? known.join("\n") : "- nothing yet"}`,
+    miss.length ? `still to find out: ${miss.map((m) => `${m} (${LABEL[m]})`).join("; ")}` : "the checklist is complete.",
+  ];
+  if (o.targetByCode) lines.push("The learner knows no language: recommend Python and say why in two or three plain sentences tied to what they want to build (readable, instant feedback, used everywhere).");
+  if (f.selfScore !== undefined && f.selfScore < 5 && selfScoreNeeded(o)) lines.push(`Their self-score is ${f.selfScore}/10: ask one or two short technical questions about ${f.target} to get a feel (frame it as "let me get a feel", never as a test), then move on.`);
+  if (o.stage === "read" && o.level !== null) lines.push(`Tell the learner your read of them in two or three sentences: level ${o.level}/100 and what it is based on; ask whether that sounds right.`);
+  if (o.stage === "project" && o.project) lines.push(`Suggest this one project and say why it suits them: "${o.project.title}" — ${o.project.summary}. They can ask for something else.`);
+  if (o.stage === "choose") lines.push("Ask whether they want to start building now, or learn the ideas the project needs first (short lessons with small exercises).");
+  lines.push("End every reply with a fenced note the learner never sees, holding only what you learned this turn, for example:\n```tutor-intake\n{\"experience\":\"none yet\",\"known\":[],\"target\":\"python\",\"selfScore\":6,\"confidence\":\"unsure\",\"idea\":null,\"path\":\"learn\"}\n```\nexperience is one of: none yet, under a year, 1-3 years, over 3 years. idea is null when they have no idea yet.");
+  return lines.join("\n");
+}

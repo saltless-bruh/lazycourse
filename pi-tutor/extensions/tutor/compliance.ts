@@ -138,6 +138,8 @@ export function scrubInternals(text: string): string {
   let out = "", last = 0;
   for (const m of text.matchAll(FENCES)) {
     out += prose(text.slice(last, m.index));
+    // Spec 2026-10-19 §6: the onboarding note is for the extension only; the learner never sees it.
+    if (m[2].trim().toLowerCase() === "tutor-intake") { last = m.index + m[0].length; continue; }
     if (QUOTES.has(m[2].trim().toLowerCase())) {
       const open = m[0].slice(0, m[0].indexOf("\n") + 1);
       out += open + scrubInternals(m[3]) + m[0].slice(open.length + m[3].length);
