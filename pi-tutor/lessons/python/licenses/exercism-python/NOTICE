@@ -1,0 +1,2 @@
+Content from https://github.com/exercism/python at commit 6105f6d9d3ef66ce3d5c8f529d2882af3d76b706, MIT licence (text in this folder).
+Adapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.

@@ -25,8 +25,9 @@ for (const lang of LANGUAGES) {
         const r = await checkExercise(realExec, lang, ex, sandbox);
         expect(r.exemplar.missing, `${name}: ${r.exemplar.missing}`).toBeUndefined();
         expect(r.exemplar.code, `${name} exemplar:\n${r.exemplar.out.slice(-1500)}`).toBe(0);
+        // The exemplar passing proves the tests load and are right; a stub may fail by not loading at all, as
+        // Exercism's first exercises do on purpose ("MISSING FUNCTION --> … did you forget to define it?").
         expect(r.stub.code, `${name}: the stub already passes`).not.toBe(0);
-        expect(r.stub.broken, `${name} stub does not compile or load:\n${r.stub.out.slice(-1500)}`).toBe(false);
       });
     }
   });
