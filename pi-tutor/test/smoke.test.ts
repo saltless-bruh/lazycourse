@@ -1634,6 +1634,27 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     await exchange(b, note({ path: "build" }));
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
+  async function failingPlan(errorMessage: string) {
+    const { PROVIDER_RETRY } = await import("../extensions/tutor/progress.js");
+    const base = PROVIDER_RETRY.baseDelayMs;
+    PROVIDER_RETRY.baseDelayMs = 1;
+    try {
+      const b = await boot({ cwd: dir });
+      let calls = 0;
+      (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => (++calls === 1
+        ? { role: "assistant", stopReason: "error", errorMessage, content: [] }
+        : { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] });
+      await exchange(b, note({ path: "build" }));
+      await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")) || b.notes.some((n) => /could not be written/.test(n)));
+      return { calls, written: existsSync(pjoin(dir, "spec", "tasks.md")) };
+    } finally { PROVIDER_RETRY.baseDelayMs = base; }
+  }
+  it("a provider hiccup in the plan job is retried, as Pi retries its own turns (live check 2026-10-20)", async () => {
+    expect(await failingPlan("Request timed out.")).toEqual({ calls: 2, written: true });
+  });
+  it("a quota error in the plan job is not retried", async () => {
+    expect(await failingPlan("insufficient_quota")).toEqual({ calls: 1, written: false });
+  });
   it("the last concept of a round turns to building that milestone; next starts the following round", async () => {
     const b = await boot({ cwd: dir });
     b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));

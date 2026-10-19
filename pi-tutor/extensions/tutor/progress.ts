@@ -9,6 +9,12 @@
 export const MODEL_TIMEOUT_MS = 600_000;
 /** The background plan job (spec 2026-10-19 Q10): nobody waits on it, and a slow provider needed over 10 minutes. */
 export const SPEC_JOB_TIMEOUT_MS = 30 * 60_000;
+/**
+ * Retries for our own model calls on transient provider errors (timeouts, 5xx, overload), as Pi's
+ * settings.retry does for its turns; quota and billing errors fail at once (pi-ai isRetryableAssistantError).
+ * Live check 2026-10-20: the NVIDIA endpoint timed out once and the whole plan was lost.
+ */
+export const PROVIDER_RETRY = { enabled: true, maxRetries: 3, baseDelayMs: 2_000 };
 
 export interface LoaderLike { readonly signal: AbortSignal; onAbort?: () => void }
 
