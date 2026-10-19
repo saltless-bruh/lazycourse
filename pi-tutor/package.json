@@ -21,6 +21,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "golden": "vitest run --config vitest.golden.config.ts",
+    "lessons": "vitest run --config vitest.lessons.config.ts",
     "cookbooks": "node scripts/run-cookbooks.mjs",
     "upstream-diff": "node scripts/upstream-diff.mjs",
     "skill-evals": "vitest run --config vitest.skilleval.config.ts"

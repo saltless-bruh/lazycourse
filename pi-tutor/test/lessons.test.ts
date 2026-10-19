@@ -1,0 +1,74 @@
+import { describe, it, expect } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { loadLessons, levelTasks, writeExercise, checkExercise } from "../extensions/tutor/lessons.js";
+import { realExec } from "./fake-pi.js";
+
+const has = (cmd: string) => spawnSync(cmd, ["--version"]).status === 0;
+function put(root: string, rel: string, text: string) { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), text); }
+const STUB = "def leap(year):\n    raise NotImplementedError('write leap')\n";
+const GOOD = "def leap(year):\n    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)\n";
+const TESTS = "import unittest\nfrom solution import leap\n\nclass T(unittest.TestCase):\n    def test_2000(self):\n        self.assertTrue(leap(2000))\n    def test_1900(self):\n        self.assertFalse(leap(1900))\n";
+function exercise(root: string, rel: string) {
+  put(root, `${rel}/instructions.md`, "# Leap\nReturn whether a year is a leap year.\n");
+  put(root, `${rel}/solution.py`, STUB);
+  put(root, `${rel}/test_examples.py`, TESTS);
+  put(root, `${rel}/.exemplar/solution.py`, GOOD);
+}
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "lessons-"));
+  put(root, "python/loops/lesson.md", "---\nconcept: loops\ntitle: Loops\ntags: [loops]\nsource: exercism/python\norder: 2\n---\nA loop repeats.\n");
+  put(root, "python/basics/lesson.md", "---\nconcept: basics\ntitle: Basics\ntags: [variables]\nsource: exercism/python\norder: 1\n---\nValues have names.\n");
+  exercise(root, "python/loops/1-count");
+  put(root, "python/loops/2-broken/instructions.md", "no exemplar here\n");
+  put(root, "python/loops/2-broken/solution.py", STUB);
+  put(root, "python/loops/2-broken/test_examples.py", TESTS);
+  exercise(root, "python/_levels/1-leap");
+  return root;
+}
+
+describe("lessons (spec 2026-10-19 §7, §7a)", () => {
+  it("loads lessons in their order, with front matter parsed and text kept", () => {
+    const ls = loadLessons("python", fixture());
+    expect(ls.map((l) => l.concept)).toEqual(["basics", "loops"]);
+    expect(ls[1]).toMatchObject({ title: "Loops", tags: ["loops"], source: "exercism/python", order: 2 });
+    expect(ls[1].text).toContain("A loop repeats.");
+  });
+  it("skips an exercise missing its exemplar (Review Focus #3)", () => {
+    const loops = loadLessons("python", fixture()).find((l) => l.concept === "loops")!;
+    expect(loops.exercises.map((e) => e.id)).toEqual(["1-count"]);
+  });
+  it("the level ladder is separate from the lessons", () => {
+    const root = fixture();
+    expect(levelTasks("python", root).map((e) => e.id)).toEqual(["1-leap"]);
+    expect(loadLessons("python", root).map((l) => l.concept)).not.toContain("_levels");
+  });
+  it("an unknown language has no lessons", () => {
+    expect(loadLessons("cobol", fixture())).toEqual([]);
+  });
+  it("writes the exercise for the learner without the exemplar, and never outside the root", () => {
+    const root = fixture();
+    const ex = levelTasks("python", root)[0];
+    const proj = mkdtempSync(join(tmpdir(), "proj-"));
+    const written = writeExercise(proj, "learn/leap/1-leap", "python", ex);
+    expect(written.map((p) => p.replace(proj + "/", "")).sort()).toEqual(["learn/leap/1-leap/instructions.md", "learn/leap/1-leap/solution.py", "learn/leap/1-leap/test_examples.py"]);
+    expect(readFileSync(join(proj, "learn/leap/1-leap/solution.py"), "utf8")).toBe(STUB);
+    expect(existsSync(join(proj, "learn/leap/1-leap/.exemplar"))).toBe(false);
+    expect(() => writeExercise(proj, "../escape", "python", ex)).toThrow();
+  });
+  it("writes the layout's extra files (go.mod for go)", () => {
+    const proj = mkdtempSync(join(tmpdir(), "proj-"));
+    const ex = { id: "1-x", dir: "/nowhere", instructions: "# x\n", stub: "package exam\n", tests: "package exam\n", exemplar: "package exam\n" };
+    writeExercise(proj, "learn/x/1-x", "go", ex);
+    expect(readdirSync(join(proj, "learn/x/1-x")).sort()).toEqual(["examples_test.go", "go.mod", "instructions.md", "solution.go"]);
+  });
+  it.skipIf(!has("python3"))("checks an exercise: the exemplar passes and the stub fails", async () => {
+    const ex = levelTasks("python", fixture())[0];
+    const r = await checkExercise(realExec, "python", ex, null);
+    expect(r.exemplar.code, r.exemplar.out).toBe(0);
+    expect(r.stub.code).not.toBe(0);
+    expect(r.stub.broken).toBe(false);
+  }, 30_000);
+});
