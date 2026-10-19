@@ -1341,6 +1341,18 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     const t = await exchange(b, note({}));
     expect(t.sections["tutor_onboard"]).toMatch(/technical questions/i);
   });
+  it("/tutor-start off pauses it for good: a restart stays normal tutoring until /tutor-start (final review I4)", async () => {
+    const a = await boot({ cwd: home });
+    await a.commands["tutor-start"].handler("", a.ctx);
+    await exchange(a, note({ experience: "under a year", known: ["lua"] }));
+    await a.commands["tutor-start"].handler("off", a.ctx);
+    const b = await boot({ cwd: home });
+    const t = await turn(b.events, b.ctx, "hello", judged("none"));
+    expect(t.sections["tutor_onboard"]).toBeUndefined();
+    await b.commands["tutor-start"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/picking up where we left off/i);
+    expect((await saved()).paused).toBeFalsy();
+  });
   it("picks up where it left off after Pi restarts (Review Focus #2)", async () => {
     const a = await boot({ cwd: home });
     await a.commands["tutor-start"].handler("", a.ctx);
@@ -1471,7 +1483,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     const { newOnboarding } = await import("../extensions/tutor/onboard.js");
     const p = Profile.open(file);
     p.saveLanguage("python", 10, {}, 1); p.addProject("python", dir, "Tip Calculator", 1);
-    p.setSetting("onboarding", JSON.stringify({ ...newOnboarding(null), targetByCode: true, level: 10, stage: "choose",
+    p.setSetting("onboarding", JSON.stringify({ ...newOnboarding(null), targetByCode: true, level: 10, stage: "choose", dir,
       fields: { experience: "none yet", known: [], target: "python", idea: null },
       project: { title: "Tip Calculator", summary: "Split a bill.", concepts: ["numbers", "functions"] } }));
     p.close();
@@ -1566,6 +1578,62 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(p.knownConcepts("python", Date.now() + 1000)).toEqual(expect.arrayContaining(["variables", "functions"]));
     p.close();
   }, 60_000);
+  it("a pending choice stays with its project: another project's Pi is untouched and its README kept (final review C1)", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { realpathSync } = await import("node:fs");
+    const other = realpathSync(mkd(pjoin(home, "older-")));
+    wfile(pjoin(other, "README.md"), "my own readme");
+    const p = Profile.open(file); p.addProject("python", other, "Older", 2); p.close();
+    const b = await boot({ cwd: other });
+    expect(b.sent).toEqual([]);
+    expect(b.notes.some((n) => n.includes(dir))).toBe(true); // where to go to continue
+    b.replies.push(SPEC([]));
+    const t = await exchange(b, note({ path: "build" }));
+    expect(t.sections["tutor_onboard"]).toBeUndefined();
+    expect(readFileSync(pjoin(other, "README.md"), "utf8")).toBe("my own readme");
+    expect((await setting("onboarding")).stage).toBe("choose");
+  });
+  it("build now: the tutor talks through the project while the plan is written (final review I5, Q10)", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push(SPEC([]));
+    await exchange(b, note({ path: "build" }));
+    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] project: .*Tip Calculator/);
+  });
+  it("a review returns the learner to where they were (final review I1)", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(file); p.rateConcept("python", "loops", 0.1, Date.now() - 40 * 86_400_000); p.close();
+    const b = await boot({ cwd: dir });
+    b.pi.exec = realExec as never;
+    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    await exchange(b, note({ path: "learn" }));
+    await b.commands["tutor-lesson"].handler("review", b.ctx);
+    expect((await setting(`lesson:${dir}`)).concept).toBe("loops");
+    await b.commands["tutor-lesson"].handler("review", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/already reviewing/);
+    await b.commands["tutor-lesson"].handler("next", b.ctx);
+    const { loadLessons } = await import("../extensions/tutor/lessons.js");
+    const loops = loadLessons("python").find((l) => l.concept === "loops")!;
+    wfile(pjoin(dir, "learn", "loops", loops.exercises[0].id, "solution.py"), loops.exercises[0].exemplar);
+    await b.commands["tutor-lesson"].handler("check", b.ctx);
+    expect(await setting(`lesson:${dir}`)).toMatchObject({ concept: "basics", round: 0, building: false, resume: null });
+  }, 60_000);
+  it("a plan job left over from a quit is reported at startup (final review I2, Review Focus #4)", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(file);
+    p.setSetting(`specjob:${dir}`, JSON.stringify({ rounds: [], about: {}, level: 10, project: { title: "Tip Calculator", summary: "s.", concepts: [] } }));
+    p.setSetting("onboarding", "");
+    p.close();
+    const b = await boot({ cwd: dir });
+    expect(b.widgets["tutor"]?.[1]).toMatch(/spec error: \/tutor-start spec/);
+  });
+  it("the plan job keeps the model it started with, even if this session's ctx goes stale (final review I2)", async () => {
+    const b = await boot({ cwd: dir });
+    const ctx = b.ctx as unknown as { model?: unknown; modelRegistry: { complete: unknown } };
+    const replies = ["not json", SPEC([])];
+    ctx.modelRegistry.complete = async () => { ctx.model = undefined; return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() }] }; };
+    await exchange(b, note({ path: "build" }));
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+  });
   it("the last concept of a round turns to building that milestone; next starts the following round", async () => {
     const b = await boot({ cwd: dir });
     b.replies.push(SPEC(["basics, functions, bools", "numbers"]));

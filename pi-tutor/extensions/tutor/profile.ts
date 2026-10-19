@@ -156,7 +156,10 @@ export class Profile {
 
   /** Concepts whose card is not due at `now`: learned recently enough to skip in a lesson plan. */
   knownConcepts(language: string, now: number): string[] {
-    return (this.db.prepare("SELECT tag FROM cards WHERE language = ? AND due > ? ORDER BY tag").all(language, now) as Row[]).map((r) => String(r.tag));
+    // Final review: a concept with an ease from before v5 and no card yet counts as known when its ease is ≥ 0.8.
+    return (this.db.prepare(`SELECT tag FROM cards WHERE language = ? AND due > ?
+      UNION SELECT c.tag FROM concepts c WHERE c.language = ? AND c.ease >= 0.8 AND NOT EXISTS (SELECT 1 FROM cards k WHERE k.language = c.language AND k.tag = c.tag)
+      ORDER BY tag`).all(language, now, language) as Row[]).map((r) => String(r.tag));
   }
 
   /** Concepts due for review at `now`, longest overdue first. */

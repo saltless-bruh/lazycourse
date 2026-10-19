@@ -310,3 +310,13 @@ describe("known concepts (spec 2026-10-19 §7b, Task 7)", () => {
     p.close();
   });
 });
+
+describe("final review: ease from before v5 (minor 7 → Important)", () => {
+  it("a concept mastered before cards existed counts as known until it is rated again", () => {
+    const p = Profile.open(":memory:");
+    p.recordEpisode({ language: "python", project: null, concept_tags: [], rungs_used: 1, turns: 1, opened: 1, closed: 1 }, null);
+    (p as unknown as { db: { prepare(s: string): { run(...a: unknown[]): void } } }).db.prepare("INSERT INTO concepts (language, tag, ease, episodes) VALUES ('python', 'loops', 0.9, 3), ('python', 'dicts', 0.3, 2)").run();
+    expect(p.knownConcepts("python", Date.now())).toEqual(["loops"]);
+    p.close();
+  });
+});

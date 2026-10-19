@@ -133,7 +133,7 @@ export function planRounds(project: string[], known: Set<string>, weak: string[]
 export interface LessonState {
   rounds: string[][]; round: number; concept: string; exercise: number; fails: number; stepBack: boolean; building: boolean;
   /** A review exercise interrupted the plan here (`/tutor-lesson review`); a pass returns to it. */
-  resume: { round: number; concept: string; exercise: number } | null;
+  resume: { round: number; concept: string; exercise: number; building: boolean } | null;
 }
 
 export function startLessons(rounds: string[][]): LessonState | null {

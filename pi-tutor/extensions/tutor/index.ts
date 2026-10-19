@@ -181,6 +181,12 @@ export default function (pi: ExtensionAPI): void {
   let onboarding: Onboarding | null = null;
   /** The last intake note read from this run's replies; undefined when the run had no reply text. */
   let intake: Partial<Fields> | null | undefined;
+  /** /tutor-start ran in this session: onboarding may run here even inside an unrelated project's folder. */
+  let onboardingHere = false;
+  /** Bumped at every session start; a background job only paints the session that started it (final review I2). */
+  let generation = 0;
+  /** Project paths whose plan job is running in this process (it outlives /new). */
+  const specRunning = new Set<string>();
   /** Learn-first lessons for this project (spec 2026-10-19 §7), saved as profile setting `lesson:<project path>`. */
   let lesson: LessonState | null = null;
   /** The background spec job (Q10): shown on the widget's second line while writing or after a failure. */
@@ -399,10 +405,22 @@ export default function (pi: ExtensionAPI): void {
       if (e.type === "custom" && e.customType === "tutor_feedback") feedbackHistory.push((e.data as { kind: FeedbackKind }).kind);
     }
     onboarding = loadOnboarding();
+    onboardingHere = false;
+    generation++;
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
     // Q23: the Pi that restarted in the new project folder carries the conversation on: build or learn.
-    if (onboarding?.stage === "choose" && project) kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises");
+    if (onboardingActive() && onboarding?.stage === "choose") kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises");
+    // Final review C1: a pending choice belongs to its folder; elsewhere the learner is only told where to go.
+    else if (onboarding?.stage === "choose" && !onboarding.paused && onboarding.dir) ctx.ui.notify(`your project "${onboarding.project?.title ?? "?"}" is waiting in ${onboarding.dir}: open it there to choose build now or learn first`, "info");
+    // Final review I2 / Review Focus #4: a plan job that did not finish (Pi quit) is reported, not forgotten.
+    specStatus = null;
+    if (project && profile) {
+      const p = profile, key = `specjob:${project.path}`;
+      let pending = false;
+      profileWrite(() => { pending = !!p.setting(key); });
+      if (pending) specStatus = specRunning.has(project.path) ? "writing" : "failed";
+    }
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
@@ -942,7 +960,16 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // ---- /tutor-start as a conversation (spec 2026-10-19 §5, §6) ----
-  const onboardingActive = () => onboarding !== null && onboarding.stage !== "done";
+  /**
+   * Final review C1/I4: onboarding runs where it belongs. The build-or-learn choice only in the folder it
+   * made; the earlier stages where no project is open, or after /tutor-start in this session; never paused.
+   */
+  const onboardingActive = () => {
+    const o = onboarding;
+    if (!o || o.stage === "done" || o.paused) return false;
+    if (o.stage === "choose") return !!project && project.path === o.dir;
+    return onboardingHere || !project;
+  };
   function loadOnboarding(): Onboarding | null {
     let o: Onboarding | null = null;
     if (profile) { const p = profile; profileWrite(() => { const raw = p.setting("onboarding"); if (raw) { try { o = JSON.parse(raw) as Onboarding; } catch { o = null; } } }); }
@@ -1064,7 +1091,7 @@ export default function (pi: ExtensionAPI): void {
       try {
         dir = createProject(profile, { language: lang, level: o.level ?? levelFrom(o), project: { ...o.project, size: "small" }, dir: resolve(expandHome(answer.trim() || def, homedir())), about: aboutOf(o), now: Date.now() }).dir;
       } catch (e) { saveOnboarding(o); ctx.ui.notify(e instanceof Error ? e.message : String(e), "warning"); return; }
-      saveOnboarding({ ...o, stage: "choose", presented: null });
+      saveOnboarding({ ...o, stage: "choose", presented: null, dir });
       await fetchDocs(ctx, lang, false); // the switched Pi loads the language's docs (spec §6 last step)
       if (link) {
         ctx.ui.notify(`made ${o.project.title} in ${dir}; moving the editor and tutor there…`, "info");
@@ -1120,31 +1147,41 @@ export default function (pi: ExtensionAPI): void {
   /** Q10/Q22: the spec is written in the background (no loader: the learner keeps working); a failure is shown, /tutor-start spec retries. */
   function startSpecJob(ctx: ExtensionContext, job: SpecJob) {
     if (!project || !profile) return;
-    const proj = project, p = profile, key = `specjob:${proj.path}`;
-    profileWrite(() => p.setSetting(key, JSON.stringify(job)));
+    const proj = project, key = `specjob:${proj.path}`, mine = generation;
+    { const p = profile; profileWrite(() => p.setSetting(key, JSON.stringify(job))); }
+    // Final review I2: the job may outlive this session (/new): keep the model it started with, write through the
+    // profile that is open when it ends, and paint only the session that started it.
+    const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
+    specRunning.add(proj.path);
     specStatus = "writing";
     paint();
     const meta = { language: proj.language, level: job.level, band: bandFor(job.level), title: job.project.title, summary: job.project.summary };
     void (async () => {
       try {
-        const spec = await completeJson(rawComplete(ctx, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
+        const spec = await completeJson(rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
           scaffoldPrompt({ language: proj.language, level: job.level, band: meta.band, project: { ...job.project, size: "small" }, about: job.about, rounds: job.rounds }),
           (v) => checkScaffold(v, job.rounds));
         writeScaffold(proj.path, spec, meta, { existing: true });
-        profileWrite(() => p.setSetting(key, ""));
-        specStatus = null;
-        ui?.notify("the project plan is ready: spec/tasks.md", "info");
+        if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
+        if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
       } catch (e) {
-        specStatus = "failed";
-        ui?.notify(`the project plan could not be written: ${e instanceof Error ? e.message : String(e)}; /tutor-start spec retries`, "warning");
+        if (generation === mine) {
+          specStatus = "failed";
+          ui?.notify(`the project plan could not be written: ${e instanceof Error ? e.message : String(e)}; /tutor-start spec retries`, "warning");
+        }
+      } finally {
+        specRunning.delete(proj.path);
       }
-      paint();
+      if (generation === mine) paint();
     })();
   }
 
   /** The learner's choice (Q22): the spec job always; lesson rounds too when they learn first. */
   async function startPath(ctx: ExtensionContext, o: Onboarding, path: "build" | "learn") {
-    if (!project || !profile || !o.project) { saveOnboarding({ ...o, stage: "done" }); return; }
+    if (!project || !profile || !o.project || project.path !== o.dir) {
+      ctx.ui.notify(`open ${o.dir ?? "the project folder"} to choose build now or learn first`, "info");
+      return;
+    }
     const lang = project.language, p = profile;
     let rounds: string[][] = [];
     if (path === "learn") {
@@ -1158,10 +1195,14 @@ export default function (pi: ExtensionAPI): void {
     const l = startLessons(rounds);
     saveLesson(l);
     if (l) lessonKick(ctx, `start the lesson on ${l.concept}`);
+    // Final review I5 (Q10): building now, the tutor talks the project through while the plan is written.
+    else if (path === "build" && ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} project: talk through what "${o.project.title}" involves (${o.project.summary}) and its first small step, while the plan is being written`);
     else if (path === "learn") ctx.ui.notify("no prepared lessons cover this project's ideas yet; we build and learn as we go", "info");
   }
 
   const exerciseDir = (l: LessonState, ex: { id: string }) => `learn/${l.concept}/${ex.id}`;
+  /** Final review I1: a finished review returns exactly to the saved place (it is not part of any round). */
+  const backFromReview = (l: LessonState): LessonState => ({ ...l, ...l.resume!, fails: 0, stepBack: false, resume: null });
 
   pi.registerCommand("tutor-lesson", {
     description: "Learn-first lessons: next (write the exercise / start the next round) | check | skip | review | off",
@@ -1170,12 +1211,13 @@ export default function (pi: ExtensionAPI): void {
       if (!project || !profile) { ctx.ui.notify("lessons run inside a project: /tutor-start makes one", "warning"); return; }
       const lang = project.language, p = profile, root = project.path;
       if (a === "review") {
+        if (lesson?.resume) { ctx.ui.notify(`already reviewing ${lesson.concept}: finish it with /tutor-lesson check or skip`, "info"); return; }
         let due: string[] = [];
         profileWrite(() => { due = p.dueConcepts(lang, Date.now(), 10); });
         const les = lessonsFor(lang).find((x) => x.exercises.length && x.tags.some((t) => due.includes(t)));
         if (!les) { ctx.ui.notify("nothing is due for review", "info"); return; }
         const base = lesson ?? { rounds: [[les.concept]], round: 0, concept: les.concept, exercise: 0, fails: 0, stepBack: false, building: false, resume: null };
-        saveLesson({ ...base, concept: les.concept, exercise: 0, fails: 0, stepBack: false, building: false, resume: lesson ? { round: lesson.round, concept: lesson.concept, exercise: lesson.exercise } : null });
+        saveLesson({ ...base, concept: les.concept, exercise: 0, fails: 0, stepBack: false, building: false, resume: lesson ? { round: lesson.round, concept: lesson.concept, exercise: lesson.exercise, building: lesson.building } : null });
         ctx.ui.notify(`quick review of ${les.concept}: /tutor-lesson next writes the exercise`, "info");
         return;
       }
@@ -1202,7 +1244,7 @@ export default function (pi: ExtensionAPI): void {
       }
       if (a === "skip") {
         profileWrite(() => { for (const t of les?.tags.length ? les.tags : [lesson!.concept]) p.rateConcept(lang, t, 0.9, Date.now()); });
-        const n = nextConcept(lesson);
+        const n = lesson.resume ? backFromReview(lesson) : nextConcept(lesson);
         saveLesson(n);
         ctx.ui.notify(n.building ? `round ${n.round + 1} done: build Milestone ${n.round + 1} in spec/tasks.md, then /tutor-lesson next` : `next: ${n.concept}`, "info");
         if (!n.building) lessonKick(ctx, `start the lesson on ${n.concept}`);
@@ -1216,9 +1258,9 @@ export default function (pi: ExtensionAPI): void {
         if (r.missing) { ctx.ui.notify(r.missing, "warning"); return; }
         if (r.code === 0 && !r.killed) {
           profileWrite(() => { for (const t of les!.tags.length ? les!.tags : [lesson!.concept]) p.rateConcept(lang, t, 1, Date.now()); });
-          let n: LessonState = lesson.exercise + 1 < les!.exercises.length ? { ...lesson, exercise: lesson.exercise + 1, fails: 0, stepBack: false } : nextConcept(lesson);
           const was = lesson.concept;
-          if (lesson.resume && n.concept !== was) n = { ...n, ...lesson.resume, fails: 0, stepBack: false, building: false, resume: null };
+          const n: LessonState = lesson.exercise + 1 < les!.exercises.length ? { ...lesson, exercise: lesson.exercise + 1, fails: 0, stepBack: false }
+            : lesson.resume ? backFromReview(lesson) : nextConcept(lesson);
           saveLesson(n);
           ctx.ui.notify(n.building ? `all pass! round ${n.round + 1} done: build Milestone ${n.round + 1} in spec/tasks.md, then /tutor-lesson next` : `all pass! next: ${n.concept === was ? `exercise ${n.exercise + 1}` : n.concept} (/tutor-lesson next)`, "info");
           return;
@@ -1259,7 +1301,7 @@ export default function (pi: ExtensionAPI): void {
       const a = args.trim().toLowerCase();
       if (a === "off") {
         if (!onboardingActive()) { ctx.ui.notify("no onboarding in progress", "info"); return; }
-        onboarding = null; // kept in the profile: the next /tutor-start resumes
+        saveOnboarding({ ...onboarding!, paused: true }); // the next /tutor-start resumes (final review I4)
         ctx.ui.notify("paused; /tutor-start picks up where we left off", "info");
         return;
       }
@@ -1268,7 +1310,8 @@ export default function (pi: ExtensionAPI): void {
       if (a && !isLanguage(a)) { ctx.ui.notify(`pick one of: ${LANGUAGES.join(", ")}`, "warning"); return; }
       const saved = onboarding ?? loadOnboarding();
       if (saved && saved.stage !== "done" && (!a || saved.fields.target === a)) {
-        onboarding = saved;
+        onboardingHere = true;
+        saveOnboarding({ ...saved, paused: false });
         ctx.ui.notify("picking up where we left off", "info");
         kick(ctx, "continue the conversation");
         return;
@@ -1281,6 +1324,7 @@ export default function (pi: ExtensionAPI): void {
         const row = recent ? p.language(recent.language) : undefined;
         if (recent && row) o = checkInOnboarding(recent.language, { level: row.level, known: p.languages(), last: recent.title, due: p.dueConcepts(recent.language, Date.now()) });
       });
+      onboardingHere = true;
       saveOnboarding(o);
       kick(ctx, o.checkIn ? "check in with the learner" : "start the conversation");
       paint();

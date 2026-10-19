@@ -157,3 +157,11 @@ describe("more note shapes from the live check (2026-10-19, round 3)", () => {
     expect(stripIntake("End every reply with the tutor-intake note.\n")).toBe("End every reply with the tutor-intake note.\n");
   });
 });
+
+describe("final review", () => {
+  it("'none' in the known list means no language (minor 2 → Important: Q1's Python pick)", () => {
+    for (const w of ["none", "nothing", "no", "n/a"]) expect(parseIntake(fence({ known: [w] }))).toEqual({ known: [] });
+    const o = applyTurn(newOnboarding(null), parseIntake(fence({ experience: "none yet", known: ["None"] })));
+    expect(o.fields.target).toBe("python");
+  });
+});

@@ -143,3 +143,24 @@ describe("build or learn: milestones and the existing project folder (spec 2026-
     expect(readFileSync(join(dir, "spec", "tasks.md"), "utf8")).toBe("mine");
   });
 });
+
+describe("final review: the existing project folder", () => {
+  it("a failed write leaves README.md and AGENTS.md as they were (C1)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeFileSync(join(dir, "README.md"), "mine");
+    writeFileSync(join(dir, "AGENTS.md"), "mine too");
+    mkdirSync(join(dir, "spec"));
+    writeFileSync(join(dir, "spec", "design.md"), "theirs");
+    expect(() => writeScaffold(dir, spec(), meta, { existing: true })).toThrow();
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toBe("mine");
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe("mine too");
+  });
+  it("an entry file the learner already started is kept, and the spec is still written (I3)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src", "main.rs"), "fn main() { /* mine */ }");
+    writeScaffold(dir, spec(), meta, { existing: true });
+    expect(readFileSync(join(dir, "src", "main.rs"), "utf8")).toContain("mine");
+    expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
+  });
+});

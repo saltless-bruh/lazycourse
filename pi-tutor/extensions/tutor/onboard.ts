@@ -27,8 +27,13 @@ export interface Onboarding {
   presented: Stage | null;
   /** Second /tutor-start for a language with a finished project (Q9): a short check-in. */
   checkIn: { last: string; due: string[] } | null;
+  /** The project folder onboarding made (final review C1): the build-or-learn choice runs only there. */
+  dir?: string;
+  /** `/tutor-start off` (final review I4): saved, so a restart stays normal tutoring until /tutor-start. */
+  paused?: boolean;
 }
 
+const NO_LANGUAGE = new Set(["none", "nothing", "no", "n/a", "na", "-", "none yet"]);
 export const MAX_EXCHANGES = 6;
 export const MAX_BAD_NOTES = 2;
 
@@ -116,7 +121,8 @@ export function parseIntake(text: string): Partial<Fields> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const v = raw as Record<string, unknown>, out: Partial<Fields> = {};
   if (typeof v.experience === "string") { const b = experienceBand(v.experience); if (b) out.experience = b; }
-  if (Array.isArray(v.known)) out.known = v.known.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  // Final review: a weak model writes "none" as a language; that means no language (Q1: Python is then the pick).
+  if (Array.isArray(v.known)) out.known = v.known.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()).filter((x) => x && !NO_LANGUAGE.has(x));
   if (typeof v.target === "string" && (LANGUAGES as readonly string[]).includes(v.target.trim().toLowerCase())) out.target = v.target.trim().toLowerCase();
   if (typeof v.selfScore === "number" && Number.isInteger(v.selfScore) && v.selfScore >= 1 && v.selfScore <= 10) out.selfScore = v.selfScore;
   if (typeof v.confidence === "string" && v.confidence.trim()) out.confidence = v.confidence.trim();

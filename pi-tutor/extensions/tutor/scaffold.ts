@@ -118,8 +118,11 @@ export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta, 
   ];
   const made: string[] = [];
   const madeDirs: string[] = [];
+  // Final review C1/I3: into an existing folder, README.md and AGENTS.md are replaced last (a failed write
+  // leaves them as they were), and a source file the learner already started is kept.
+  const order = opts.existing ? [...files.filter(([rel]) => !replace.has(rel) && !(rel === entry && existsSync(join(dir, rel)))), ...files.filter(([rel]) => replace.has(rel))] : files;
   try {
-    for (const [rel, text] of files) {
+    for (const [rel, text] of order) {
       const abs = join(dir, rel);
       for (let d = dirname(abs); d !== dir && !existsSync(d); d = dirname(d)) madeDirs.unshift(d);
       mkdirSync(dirname(abs), { recursive: true });
