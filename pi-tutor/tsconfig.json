@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["extensions", "test", "golden", "vitest.golden.config.ts"]
+  "include": ["extensions", "test", "golden", "scripts/*.ts", "vitest.golden.config.ts", "vitest.lessons.config.ts"]
 }

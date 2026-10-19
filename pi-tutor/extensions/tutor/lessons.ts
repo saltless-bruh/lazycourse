@@ -13,7 +13,8 @@ import { writeInRoot } from "./files.js";
 export const LESSONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "lessons");
 const LEVELS = "_levels";
 
-export interface Exercise { id: string; dir: string; instructions: string; stub: string; tests: string; exemplar: string }
+/** `extras`: helper files the source ships next to the stub (Exercism data modules), from `files/`. */
+export interface Exercise { id: string; dir: string; instructions: string; stub: string; tests: string; exemplar: string; extras: [string, string][] }
 export interface Lesson { language: string; concept: string; title: string; tags: string[]; source: string; order: number; text: string; exercises: Exercise[] }
 
 const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
@@ -28,7 +29,9 @@ function loadExercise(language: string, dir: string): Exercise | null {
   const tests = read(join(dir, l.tests));
   const exemplar = read(join(dir, ".exemplar", l.stub));
   if (instructions === null || stub === null || tests === null || exemplar === null) return null;
-  return { id: dir.split("/").pop()!, dir, instructions, stub, tests, exemplar };
+  const fdir = join(dir, "files");
+  const extras: [string, string][] = isDir(fdir) ? readdirSync(fdir).sort().filter((f) => !isDir(join(fdir, f))).map((f) => [f, readFileSync(join(fdir, f), "utf8")]) : [];
+  return { id: dir.split("/").pop()!, dir, instructions, stub, tests, exemplar, extras };
 }
 
 /** Exercise folders are `<n>-<slug>`, taken in numeric order. */
@@ -65,13 +68,13 @@ export function levelTasks(language: string, root = LESSONS_DIR): Exercise[] {
 /** The learner's copy: instructions, stub, tests and the layout's extras; never the exemplar. */
 export function writeExercise(projectRoot: string, rel: string, language: string, ex: Exercise): string[] {
   const out = [writeInRoot(projectRoot, `${rel}/instructions.md`, ex.instructions)];
-  for (const [file, text] of examFiles(language, ex.stub, ex.tests)) out.push(writeInRoot(projectRoot, `${rel}/${file}`, text));
+  for (const [file, text] of [...examFiles(language, ex.stub, ex.tests), ...ex.extras]) out.push(writeInRoot(projectRoot, `${rel}/${file}`, text));
   return out;
 }
 
-function runIn(exec: RunExec, language: string, stub: string, tests: string, sandbox: SandboxHost | null): Promise<TestRun> {
+function runIn(exec: RunExec, language: string, stub: string, ex: Exercise, sandbox: SandboxHost | null): Promise<TestRun> {
   const dir = mkdtempSync(join(tmpdir(), "lesson-check-"));
-  for (const [file, text] of examFiles(language, stub, tests)) {
+  for (const [file, text] of [...examFiles(language, stub, ex.tests), ...ex.extras]) {
     mkdirSync(dirname(join(dir, file)), { recursive: true });
     writeFileSync(join(dir, file), text);
   }
@@ -80,5 +83,5 @@ function runIn(exec: RunExec, language: string, stub: string, tests: string, san
 
 /** Trust check (spec §7a): the exemplar must pass and the stub must fail, each in a fresh folder. */
 export async function checkExercise(exec: RunExec, language: string, ex: Exercise, sandbox: SandboxHost | null): Promise<{ exemplar: TestRun; stub: TestRun }> {
-  return { exemplar: await runIn(exec, language, ex.exemplar, ex.tests, sandbox), stub: await runIn(exec, language, ex.stub, ex.tests, sandbox) };
+  return { exemplar: await runIn(exec, language, ex.exemplar, ex, sandbox), stub: await runIn(exec, language, ex.stub, ex, sandbox) };
 }

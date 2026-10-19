@@ -60,10 +60,27 @@ describe("lessons (spec 2026-10-19 §7, §7a)", () => {
   });
   it("writes the layout's extra files (go.mod for go)", () => {
     const proj = mkdtempSync(join(tmpdir(), "proj-"));
-    const ex = { id: "1-x", dir: "/nowhere", instructions: "# x\n", stub: "package exam\n", tests: "package exam\n", exemplar: "package exam\n" };
+    const ex = { id: "1-x", dir: "/nowhere", instructions: "# x\n", stub: "package exam\n", tests: "package exam\n", exemplar: "package exam\n", extras: [] as [string, string][] };
     writeExercise(proj, "learn/x/1-x", "go", ex);
     expect(readdirSync(join(proj, "learn/x/1-x")).sort()).toEqual(["examples_test.go", "go.mod", "instructions.md", "solution.go"]);
   });
+  it.skipIf(!has("python3"))("helper files under files/ reach the learner and the check (Exercism data modules)", async () => {
+    const root = fixture();
+    put(root, "python/sets/1-cater/instructions.md", "# Cater\n");
+    put(root, "python/sets/1-cater/solution.py", "from data import VEG\ndef veg():\n    raise NotImplementedError\n");
+    put(root, "python/sets/1-cater/.exemplar/solution.py", "from data import VEG\ndef veg():\n    return VEG\n");
+    put(root, "python/sets/1-cater/test_examples.py", "import unittest\nfrom solution import veg\nclass T(unittest.TestCase):\n    def test_v(self):\n        self.assertEqual(veg(), {'kale'})\n");
+    put(root, "python/sets/1-cater/files/data.py", "VEG = {'kale'}\n");
+    put(root, "python/sets/lesson.md", "---\nconcept: sets\norder: 3\n---\nSets.\n");
+    const ex = loadLessons("python", root).find((l) => l.concept === "sets")!.exercises[0];
+    expect(ex.extras).toEqual([["data.py", "VEG = {'kale'}\n"]]);
+    const proj = mkdtempSync(join(tmpdir(), "proj-"));
+    writeExercise(proj, "learn/sets/1-cater", "python", ex);
+    expect(readFileSync(join(proj, "learn/sets/1-cater/data.py"), "utf8")).toBe("VEG = {'kale'}\n");
+    const r = await checkExercise(realExec, "python", ex, null);
+    expect(r.exemplar.code, r.exemplar.out).toBe(0);
+    expect(r.stub.code).not.toBe(0);
+  }, 30_000);
   it.skipIf(!has("python3"))("checks an exercise: the exemplar passes and the stub fails", async () => {
     const ex = levelTasks("python", fixture())[0];
     const r = await checkExercise(realExec, "python", ex, null);
