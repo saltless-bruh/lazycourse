@@ -25,6 +25,8 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
     // M7 minor: old free-form rows read under the pack vocabulary's tag.
     weakConcepts: weakConcepts(d.profile.concepts(i.language), vocabOf(loadPack(i.language), loadPack("editor"))),
     done: d.profile.projects(i.language).map((p) => p.title), count: 1, exclude: i.exclude,
+    // Live check 2026-10-19: without the vocabulary the model invented tags no lesson matches.
+    tags: loadPack(i.language)?.tags.map((t) => t.tag) ?? [],
   }), (v) => checkSuggestions(v, 1));
   return s;
 }

@@ -4,7 +4,8 @@ import type { Size } from "./interview.js";
 // Project suggester (spec §6; 2026-10-19 Q4): `count` projects biased toward weak concepts, as JSON.
 export interface Suggestion { title: string; summary: string; size: Size; concepts: string[] }
 /** `about`: what the onboarding conversation learned (experience, known, idea…); `exclude`: titles already shown. */
-export interface SuggestInput { language: string; level: number; band: Band; about: Record<string, string>; weakConcepts: string[]; done: string[]; count: number; exclude: string[] }
+/** `tags`: the language's concept vocabulary; the project's concepts come from it so lessons can match them. */
+export interface SuggestInput { language: string; level: number; band: Band; about: Record<string, string>; weakConcepts: string[]; done: string[]; count: number; exclude: string[]; tags: string[] }
 
 const SIZES: readonly string[] = ["small", "medium", "large"];
 const list = (xs: string[]) => (xs.length ? xs.join(", ") : "none yet");
@@ -17,6 +18,7 @@ export function suggestPrompt(i: SuggestInput): string {
   for (const [k, v] of Object.entries(i.about)) if (v) lines.push(`${k}: ${v}`);
   lines.push(`weak concepts: ${list(i.weakConcepts)}`);
   lines.push(`finished projects: ${list(i.done)}`);
+  if (i.tags.length) lines.push(`concept tags to choose from: ${i.tags.join(", ")}`);
   lines.push(`projects wanted: ${i.count}`);
   if (i.exclude.length) lines.push(`do not suggest: ${i.exclude.join(", ")}`);
   return lines.join("\n");

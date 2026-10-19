@@ -44,7 +44,55 @@ export function checkInOnboarding(language: string, c: { level: number; known: s
 
 const lowScore = (o: Onboarding) => o.fields.selfScore !== undefined && o.fields.selfScore < 5 && selfScoreNeeded(o);
 
-const NOTE = /(`{3,}|~{3,})tutor-intake[ \t]*\r?\n([\s\S]*?)\1/g;
+/** The JSON object starting at `open` ("{"), strings aware; -1 when it never closes. */
+function objectEnd(t: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < t.length; i++) {
+    const c = t[i];
+    if (c === '"') { for (i++; i < t.length && t[i] !== '"'; i++) if (t[i] === "\\") i++; continue; }
+    if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * Every intake note in a reply, as the span to hide and its JSON. Live check 2026-10-19: a weak model
+ * writes the fence loosely (the tag on the line after the backticks, one backtick, no closing fence), so
+ * a note is any line holding only backticks and `tutor-intake` (or the tag alone, right after a line of
+ * backticks), followed by a JSON object. The tag inside prose never counts.
+ */
+export function intakeSpans(text: string): { start: number; end: number; json: string }[] {
+  const out: { start: number; end: number; json: string }[] = [];
+  for (let i = text.indexOf("tutor-intake"); i >= 0; i = text.indexOf("tutor-intake", i + 1)) {
+    const ls = text.lastIndexOf("\n", i - 1) + 1, le = text.indexOf("\n", i) < 0 ? text.length : text.indexOf("\n", i);
+    const before = text.slice(ls, i).trim(), after = text.slice(i + "tutor-intake".length, le).trim();
+    if (after !== "") continue;
+    let start = ls;
+    if (before === "") {
+      const pls = text.lastIndexOf("\n", ls - 2) + 1;
+      if (ls === 0 || !/^[ \t]*[`~]{1,3}[ \t]*$/.test(text.slice(pls, ls - 1))) continue;
+      start = pls;
+    } else if (!/^[`~]{1,3}$/.test(before)) continue;
+    const open = text.slice(le).search(/\S/);
+    const brace = open >= 0 && text[le + open] === "{" ? le + open : -1;
+    const close = brace >= 0 ? objectEnd(text, brace) : -1;
+    let end = close >= 0 ? close : le;
+    const fence = /^[ \t]*\n?[ \t]*[`~]{1,3}[ \t]*(\n|$)/.exec(text.slice(end));
+    if (fence) end += fence[0].length;
+    else if (close < 0) { const f = /\n[ \t]*[`~]{1,3}[ \t]*(\n|$)/.exec(text.slice(end)); end = f ? end + f.index + f[0].length : text.length; }
+    else if (text[end] === "\n") end += 1;
+    out.push({ start, end, json: close >= 0 ? text.slice(brace, close) : "" });
+  }
+  return out;
+}
+
+/** The reply without its intake notes (the learner never sees them). */
+export function stripIntake(text: string): string {
+  let out = "", last = 0;
+  for (const sp of intakeSpans(text)) { out += text.slice(last, sp.start); last = sp.end; }
+  return out + text.slice(last);
+}
 
 /** Free text onto the four experience bands; null when it cannot tell. */
 function experienceBand(s: string): string | null {
@@ -59,10 +107,10 @@ function experienceBand(s: string): string | null {
 
 /** The last `tutor-intake` fence as validated fields; null when there is no fence or its JSON is broken. */
 export function parseIntake(text: string): Partial<Fields> | null {
-  const notes = [...text.matchAll(NOTE)];
+  const notes = intakeSpans(text);
   if (!notes.length) return null;
   let raw: unknown;
-  try { raw = JSON.parse(notes[notes.length - 1][2]); } catch { return null; }
+  try { raw = JSON.parse(notes[notes.length - 1].json); } catch { return null; }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const v = raw as Record<string, unknown>, out: Partial<Fields> = {};
   if (typeof v.experience === "string") { const b = experienceBand(v.experience); if (b) out.experience = b; }

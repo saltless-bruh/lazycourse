@@ -1,3 +1,4 @@
+import { stripIntake } from "./onboard.js";
 import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import { RUNG_NAMES } from "./ladder.js";
@@ -131,15 +132,15 @@ function scrubLine(line: string): string {
  * It must never cost a judgment: when parseJudgment would read the result differently, the original
  * text is kept and the [tutor-check] path reports the leak instead.
  */
-export function scrubInternals(text: string): string {
+export function scrubInternals(raw: string): string {
+  // Spec 2026-10-19 §6: intake notes are for the extension only, however loosely the model fenced them.
+  const text = stripIntake(raw);
   const prose = (p: string) => p.split("\n")
     .filter((l) => KEEP_LINE.test(l) || !META_LINE.test(l))
     .map((l) => (KEEP_LINE.test(l) ? l : scrubLine(l))).join("\n");
   let out = "", last = 0;
   for (const m of text.matchAll(FENCES)) {
     out += prose(text.slice(last, m.index));
-    // Spec 2026-10-19 §6: the onboarding note is for the extension only; the learner never sees it.
-    if (m[2].trim().toLowerCase() === "tutor-intake") { last = m.index + m[0].length; continue; }
     if (QUOTES.has(m[2].trim().toLowerCase())) {
       const open = m[0].slice(0, m[0].indexOf("\n") + 1);
       out += open + scrubInternals(m[3]) + m[0].slice(open.length + m[3].length);
@@ -147,7 +148,7 @@ export function scrubInternals(text: string): string {
     last = m.index + m[0].length;
   }
   out += prose(text.slice(last));
-  if (out === text || JSON.stringify(parseJudgment(out)) !== JSON.stringify(parseJudgment(text))) return text;
+  if (out === raw || JSON.stringify(parseJudgment(out)) !== JSON.stringify(parseJudgment(raw))) return text;
   return out;
 }
 

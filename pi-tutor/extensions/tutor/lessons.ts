@@ -119,6 +119,9 @@ export function planRounds(project: string[], known: Set<string>, weak: string[]
     const last = Math.max(...[...needed].map((l) => l.order));
     for (const l of lessons) if (l.order <= last && !isKnown(l)) needed.add(l);
   }
+  // Live check 2026-10-19: a beginner's project may name no concept a lesson covers; learning first then
+  // starts at the beginning of the course (two rounds), not with nothing.
+  if (opts.beginner && !needed.size) for (const l of [...lessons].sort((a, b) => a.order - b.order).filter((x) => !isKnown(x)).slice(0, 6)) needed.add(l);
   const rank = (l: Lesson) => { const w = weak.findIndex((c) => matches(l, c)); return w < 0 ? Number.MAX_SAFE_INTEGER : w; };
   const order = [...needed].sort((a, b) => rank(a) - rank(b) || a.order - b.order).map((l) => l.concept);
   const rounds: string[][] = [];

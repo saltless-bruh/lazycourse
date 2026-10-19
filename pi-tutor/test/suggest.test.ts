@@ -29,12 +29,16 @@ describe("suggestPrompt", () => {
   it("carries language, level, band, what the conversation learned, weak concepts, finished projects, count and exclusions", () => {
     const p = suggestPrompt({
       language: "rust", level: 40, band: "intermediate", about: { experience: "1-3 years", known: "python", idea: "CLIs" },
-      weakConcepts: ["borrow", "lifetimes"], done: ["Todo CLI"], count: 1, exclude: ["Pinger"],
+      weakConcepts: ["borrow", "lifetimes"], done: ["Todo CLI"], count: 1, exclude: ["Pinger"], tags: [],
     });
     for (const s of ["rust", "level 40 (intermediate)", "experience: 1-3 years", "known: python", "idea: CLIs", "borrow, lifetimes", "Todo CLI", "projects wanted: 1", "do not suggest: Pinger"]) expect(p).toContain(s);
   });
+  it("asks for concept tags from the language's vocabulary (live check 2026-10-19: the model invented its own)", () => {
+    const p = suggestPrompt({ language: "python", level: 5, band: "beginner", about: {}, weakConcepts: [], done: [], count: 1, exclude: [], tags: ["variables", "loops", "files-io"] });
+    expect(p).toContain("concept tags to choose from: variables, loops, files-io");
+  });
   it("says 'none yet' for empty lists", () => {
-    const p = suggestPrompt({ language: "go", level: 80, band: "pro", about: {}, weakConcepts: [], done: [], count: 3, exclude: [] });
+    const p = suggestPrompt({ language: "go", level: 80, band: "pro", about: {}, weakConcepts: [], done: [], count: 3, exclude: [], tags: [] });
     expect(p).toContain("weak concepts: none yet");
     expect(p).toContain("finished projects: none yet");
     expect(p).not.toContain("do not suggest");

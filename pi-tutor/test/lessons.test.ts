@@ -124,6 +124,9 @@ describe("lesson rounds (spec 2026-10-19 Q14, Q15)", () => {
     expect(r.flat()).toEqual(["basics", "bools", "numbers", "conditionals", "strings", "lists"]);
     expect(r.map((x) => x.length)).toEqual([3, 3]);
   });
+  it("a beginner whose project names no known concept starts at the beginning of the course (live check 2026-10-19)", () => {
+    expect(planRounds(["data-entry", "file-storage"], new Set(), [], lessons, { beginner: true })).toEqual([["basics", "bools", "numbers"], ["conditionals", "strings", "lists"]]);
+  });
   it("nothing to learn gives no rounds", () => {
     expect(planRounds(["async"], new Set(), [], lessons)).toEqual([]);
   });

@@ -136,3 +136,16 @@ describe("live check 2026-10-19: a weak model copies the example note", () => {
     expect(missing(rust)).toContain("selfScore");
   });
 });
+
+describe("malformed notes from the live check (2026-10-19)", () => {
+  const tagOnNextLine = "Does that sound right?\n```\n  tutor-intake\n  {\"experience\": \"none yet\"}\n```\n";
+  const singleBacktick = "Build now or learn first?\n`tutor-intake\n{\"path\": \"learn\", \"note\": \"a {brace} in text\"}\n";
+  it("reads a note whose tag sits on the line after the fence, or that opens with one backtick", () => {
+    expect(parseIntake(tagOnNextLine)).toEqual({ experience: "none yet" });
+    expect(parseIntake(singleBacktick)).toEqual({ path: "learn" });
+  });
+  it("the learner sees neither shape", () => {
+    expect(scrubInternals(tagOnNextLine)).toBe("Does that sound right?\n");
+    expect(scrubInternals(singleBacktick)).toBe("Build now or learn first?\n");
+  });
+});
