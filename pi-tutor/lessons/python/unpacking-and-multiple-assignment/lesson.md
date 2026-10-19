@@ -2,7 +2,7 @@
 concept: unpacking-and-multiple-assignment
 title: "Unpacking And Multiple Assignment"
 tags: [sets-tuples]
-source: exercism/python 6105f6d exercises/concept/locomotive-engineer (MIT)
+source: exercism-python 6105f6d exercises/concept/locomotive-engineer (MIT)
 order: 14
 ---
 
@@ -379,4 +379,4 @@ The `zip()` function takes multiple iterables and returns a `list` of `tuples` w
 [view-objects]: https://docs.python.org/3/library/stdtypes.html#dict-views
 [zip]: https://docs.python.org/3/library/functions.html#zip
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/locomotive-engineer), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/locomotive-engineer), MIT licence.

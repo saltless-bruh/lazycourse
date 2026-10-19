@@ -1,0 +1,2 @@
+Content from https://github.com/exercism/go at commit 74f09b25dd12c14571cc684a7cb57149634037bd, MIT licence (text in this folder).
+Adapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.

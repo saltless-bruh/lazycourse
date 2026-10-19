@@ -2,7 +2,7 @@
 concept: tuples
 title: "Tuples"
 tags: [sets-tuples]
-source: exercism/python 6105f6d exercises/concept/tisbury-treasure-hunt (MIT)
+source: exercism-python 6105f6d exercises/concept/tisbury-treasure-hunt (MIT)
 order: 11
 ---
 
@@ -153,4 +153,4 @@ True
 [mutable sequence operations]: https://docs.python.org/3/library/stdtypes.html#mutable-sequence-types
 [tuple]: https://docs.python.org/3/library/stdtypes.html#tuple
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/tisbury-treasure-hunt), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/tisbury-treasure-hunt), MIT licence.

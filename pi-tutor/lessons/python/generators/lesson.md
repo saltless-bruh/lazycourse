@@ -2,7 +2,7 @@
 concept: generators
 title: "Generators"
 tags: [iterators]
-source: exercism/python 6105f6d exercises/concept/plane-tickets (MIT)
+source: exercism-python 6105f6d exercises/concept/plane-tickets (MIT)
 order: 17
 ---
 
@@ -156,4 +156,4 @@ Now whenever `__next__()` is called on the `infinite_sequence` object, it will r
 [lazy iterator]: https://en.wikipedia.org/wiki/Lazy_evaluation
 [yield expression]: https://docs.python.org/3.11/reference/expressions.html#yield-expressions
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/plane-tickets), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/plane-tickets), MIT licence.

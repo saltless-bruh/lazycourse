@@ -2,7 +2,7 @@
 concept: dicts
 title: "Dicts"
 tags: [dicts]
-source: exercism/python 6105f6d exercises/concept/inventory-management (MIT)
+source: exercism-python 6105f6d exercises/concept/inventory-management (MIT)
 order: 12
 ---
 
@@ -158,4 +158,4 @@ Likewise, the `.keys()` method will return `keys` and the `.values()` method wil
 [mapping-types-dict]: https://docs.python.org/3/library/stdtypes.html#mapping-types-dict
 [term-hashable]: https://docs.python.org/3/glossary.html#term-hashable
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/inventory-management), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/inventory-management), MIT licence.

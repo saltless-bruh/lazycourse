@@ -1,0 +1,2 @@
+Content from https://github.com/exercism/lua at commit 02837e0e92766d5b786c5a354e789073c970e5aa, MIT licence (text in this folder).
+Adapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.

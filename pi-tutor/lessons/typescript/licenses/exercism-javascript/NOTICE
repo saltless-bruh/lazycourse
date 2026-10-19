@@ -1,0 +1,2 @@
+Content from https://github.com/exercism/javascript at commit ff04f35158cdf61eebfdf18a774010495a1fd6d9, MIT licence (text in this folder).
+Adapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.

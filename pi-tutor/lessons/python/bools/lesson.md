@@ -2,7 +2,7 @@
 concept: bools
 title: "Bools"
 tags: [booleans]
-source: exercism/python 6105f6d exercises/concept/ghost-gobble-arcade-game (MIT)
+source: exercism-python 6105f6d exercises/concept/ghost-gobble-arcade-game (MIT)
 order: 2
 ---
 
@@ -32,4 +32,4 @@ We can evaluate Boolean expressions using the `and`, `or`, and `not` operators:
 
 [bools]: https://docs.python.org/3/library/stdtypes.html#typebool
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/ghost-gobble-arcade-game), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/ghost-gobble-arcade-game), MIT licence.

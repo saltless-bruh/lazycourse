@@ -103,13 +103,14 @@ export function jestToNodeTest(src: string, module: string, ext: "js" | "ts"): s
     const open = body.indexOf("(", i);
     const close = closeParen(body, open);
     if (close < 0) return null;
-    const actual = body.slice(open + 1, close - 1).trim();
+    // Prettier leaves a trailing comma inside multi-line calls: expect(\n  f(x),\n).toBe(\n  y,\n).
+    const actual = body.slice(open + 1, close - 1).trim().replace(/,$/, "").trim();
     const m = /^\.(not\.)?([A-Za-z]+)\(/.exec(body.slice(close));
     if (!m) return null;
     const argOpen = close + m[0].length - 1;
     const argClose = closeParen(body, argOpen);
     if (argClose < 0) return null;
-    const conv = assertion(actual, !!m[1], m[2], body.slice(argOpen + 1, argClose - 1).trim());
+    const conv = assertion(actual, !!m[1], m[2], body.slice(argOpen + 1, argClose - 1).trim().replace(/,$/, "").trim());
     if (conv === null) return null;
     out += body.slice(0, i) + conv;
     body = body.slice(argClose);
@@ -159,16 +160,41 @@ const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(PKG, "lessons");
 
 interface Source { name: string; repo: string; commit: string; licence: string; licenceFiles: string[] }
-const EXERCISM_PYTHON: Source = { name: "exercism-python", repo: "https://github.com/exercism/python", commit: "6105f6d9d3ef66ce3d5c8f529d2882af3d76b706", licence: "MIT", licenceFiles: ["LICENSE"] };
-
-/** Exercism concept slugs → pack vocabulary tags; unmapped slugs keep their own tag (recorded in SOURCES.md). */
-const PY_TAGS: Record<string, string[]> = {
-  basics: ["variables"], bools: ["booleans"], numbers: ["numbers"], conditionals: ["conditionals"], comparisons: ["conditionals"],
-  strings: ["strings"], "string-methods": ["strings"], lists: ["lists"], "list-methods": ["lists"], loops: ["loops"],
-  tuples: ["sets-tuples"], dicts: ["dicts"], "dict-methods": ["dicts"], "unpacking-and-multiple-assignment": ["sets-tuples"],
-  sets: ["sets-tuples"], classes: ["classes"], generators: ["iterators"],
+const src = (name: string, repo: string, commit: string): Source => ({ name, repo, commit, licence: "MIT", licenceFiles: ["LICENSE"] });
+const EX = {
+  python: src("exercism-python", "https://github.com/exercism/python", "6105f6d9d3ef66ce3d5c8f529d2882af3d76b706"),
+  go: src("exercism-go", "https://github.com/exercism/go", "74f09b25dd12c14571cc684a7cb57149634037bd"),
+  javascript: src("exercism-javascript", "https://github.com/exercism/javascript", "ff04f35158cdf61eebfdf18a774010495a1fd6d9"),
+  typescript: src("exercism-typescript", "https://github.com/exercism/typescript", "a24e6ae756c61932165bb7d0a2703417a8291af3"),
+  rust: src("exercism-rust", "https://github.com/exercism/rust", "cc099ae090a6acbe6f53f1e36325263046ba333e"),
+  lua: src("exercism-lua", "https://github.com/exercism/lua", "02837e0e92766d5b786c5a354e789073c970e5aa"),
 };
+const RUSTLINGS = src("rustlings", "https://github.com/rust-lang/rustlings", "bc8e51115c9304fbd036f5d6fca683e71363468f");
 const LEVELS = ["leap", "raindrops", "isogram", "luhn"];
+
+/** The pack's concept vocabulary (packs/<lang>/card.md): a slug that is a tag or an alias maps onto the tag. */
+function vocabulary(lang: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const card = readIf(join(PKG, "packs", lang, "card.md"));
+  for (const m of card.matchAll(/^- `([^`]+)`:[^\n]*?(?:\(aliases: ([^)]*)\))?$/gm)) {
+    out.set(m[1], m[1]);
+    for (const a of (m[2] ?? "").split(",").map((x) => x.trim()).filter(Boolean)) out.set(a, m[1]);
+  }
+  return out;
+}
+/** Exercism concept slugs the pack vocabulary does not name, mapped by hand onto its tags. */
+const EXTRA_TAGS: Record<string, Record<string, string>> = {
+  python: { basics: "variables", bools: "booleans", comparisons: "conditionals", "unpacking-and-multiple-assignment": "sets-tuples" },
+  go: { basics: "variables", "string-formatting": "strings", "strings-package": "strings", runes: "strings", "type-conversion": "types", "zero-values": "variables" },
+  javascript: { basics: "variables", booleans: "types", "type-conversion": "types", "arithmetic-operators": "numbers", "template-strings": "strings", "rest-and-spread": "objects", "array-destructuring": "objects", "object-destructuring": "objects", "array-analysis": "arrays", "array-loops": "arrays", "array-transformations": "arrays", sets: "maps-sets" },
+  typescript: { basics: "types", booleans: "types", "type-conversion": "types", "template-strings": "types", "array-analysis": "arrays", "array-loops": "arrays", "array-transformations": "arrays", "array-destructuring": "objects", "object-destructuring": "objects", "rest-and-spread": "objects", sets: "objects" },
+  rust: { variables: "ownership", "move-semantics": "ownership", vecs: "collections", hashmaps: "collections", options: "option", "vec-macro": "collections", "vec-stack": "collections", "entry-api": "collections" },
+  lua: { basics: "functions" },
+};
+function tagsFor(vocab: Map<string, string>, concepts: string[], lang = ""): string[] {
+  const one = (c: string) => vocab.get(c) ?? EXTRA_TAGS[lang]?.[c] ?? (c.endsWith("-methods") ? vocab.get(c.replace(/-methods$/, "s")) ?? vocab.get(c.replace(/-methods$/, "")) : undefined) ?? c;
+  return [...new Set(concepts.map(one))];
+}
 
 function clone(s: Source): string {
   const dir = mkdtempSync(join(tmpdir(), `vendor-${s.name}-`));
@@ -181,8 +207,8 @@ const put = (path: string, text: string) => { mkdirSync(dirname(path), { recursi
 const readIf = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
 const json = (p: string) => JSON.parse(readFileSync(p, "utf8")) as Record<string, any>;
 
-function keepLicence(s: Source, src: string, lang: string): void {
-  for (const f of s.licenceFiles) cpSync(join(src, f), join(OUT, lang, "licenses", s.name, f));
+function keepLicence(s: Source, from: string, lang: string): void {
+  for (const f of s.licenceFiles) cpSync(join(from, f), join(OUT, lang, "licenses", s.name, f));
   put(join(OUT, lang, "licenses", s.name, "NOTICE"), `Content from ${s.repo} at commit ${s.commit}, ${s.licence} licence (text in this folder).\nAdapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.\n`);
 }
 
@@ -192,70 +218,195 @@ function instructions(docs: string): string {
   return `${main}\n${hints ? `\n## Hints\n\n${hints.replace(/^# Hints\s*/, "")}\n` : ""}`;
 }
 
-/** One Exercism exercise folder → lessons/<lang>/<rel>/ (stub, tests, exemplar, extra helper files). */
-function exercismExercise(lang: string, src: string, rel: string, conv: (test: string, module: string) => string | null, stubName: string, testsName: string): string | null {
-  const meta = json(join(src, ".meta", "config.json"));
+/** How one language's exercises land in the exam layout. */
+interface Track {
+  stub: string; tests: string;
+  conv(test: string, module: string): string | null;
+  /** Rewrites a helper file the source ships (Rust's Cargo.toml gains [workspace]). */
+  fixExtra?(name: string, text: string): string;
+  /** Files the exercise folder carries that its tests need (Go's go.mod pins the Go version the tests use). */
+  alsoCopy?: string[];
+}
+const TRACKS: Record<string, Track> = {
+  python: { stub: "solution.py", tests: "test_examples.py", conv: pythonTests },
+  go: { stub: "solution.go", tests: "examples_test.go", conv: (t) => t, alsoCopy: ["go.mod"] },
+  javascript: { stub: "solution.js", tests: "examples.exam.js", conv: (t, m) => jestToNodeTest(t, m, "js") },
+  typescript: { stub: "solution.ts", tests: "examples.exam.ts", conv: (t, m) => jestToNodeTest(t, m, "ts") },
+  rust: {
+    stub: "src/lib.rs", tests: "tests/examples.rs", conv: rustTests,
+    // Like the exam layout: [workspace] keeps the exercise its own workspace inside the learner's cargo project.
+    fixExtra: (name, text) => (name === "Cargo.toml" && !/^\[workspace\]/m.test(text) ? `${text.trimEnd()}\n\n[workspace]\n` : text),
+  },
+  lua: { stub: "solution.lua", tests: "examples_test.lua", conv: bustedToHarness },
+};
+
+/** Exercism Rust: every test runs (Exercism marks all but the first `#[ignore]`). */
+export function rustTests(src: string): string {
+  return src.split("\n").filter((l) => !/^\s*#\[ignore\]\s*$/.test(l)).join("\n");
+}
+
+/** One Exercism exercise folder → lessons/<lang>/<rel>/ (stub, tests, exemplar, helper files). */
+function exercismExercise(lang: string, from: string, rel: string, track: Track): string | null {
+  const meta = json(join(from, ".meta", "config.json"));
   const files = meta.files as { solution: string[]; test: string[]; exemplar?: string[]; example?: string[]; editor?: string[] };
   const solution = files.solution[0], test = files.test[0], exemplar = (files.exemplar ?? files.example ?? [])[0];
   if (!solution || !test || !exemplar) return "missing solution, test or exemplar";
   const module = solution.replace(/\.[a-z]+$/, "").split("/").pop()!;
-  const tests = conv(readFileSync(join(src, test), "utf8"), module);
+  const tests = track.conv(readFileSync(join(from, test), "utf8"), module);
   if (tests === null) return "tests use features the converter does not support";
   const dest = join(OUT, lang, rel);
   rmSync(dest, { recursive: true, force: true });
-  put(join(dest, "instructions.md"), instructions(join(src, ".docs")));
-  put(join(dest, stubName), readFileSync(join(src, solution), "utf8"));
-  put(join(dest, testsName), tests);
-  put(join(dest, ".exemplar", stubName), readFileSync(join(src, exemplar), "utf8"));
-  for (const extra of files.editor ?? []) put(join(dest, "files", extra), readFileSync(join(src, extra), "utf8"));
+  put(join(dest, "instructions.md"), instructions(join(from, ".docs")));
+  put(join(dest, track.stub), readFileSync(join(from, solution), "utf8"));
+  put(join(dest, track.tests), tests);
+  put(join(dest, ".exemplar", track.stub), readFileSync(join(from, exemplar), "utf8"));
+  for (const extra of [...files.solution.slice(1), ...files.test.slice(1), ...(files.editor ?? []), ...(track.alsoCopy ?? []).filter((f) => existsSync(join(from, f)))]) {
+    put(join(dest, "files", extra), (track.fixExtra ?? ((_n, t) => t))(extra, readFileSync(join(from, extra), "utf8")));
+  }
   return null;
 }
 
-function python(): void {
-  const s = EXERCISM_PYTHON, src = clone(s), lang = "python";
-  const config = json(join(src, "config.json"));
-  const skipped: string[] = [], lessons: string[] = [];
-  let order = 0;
-  for (const ex of config.exercises.concept as { slug: string; name: string; concepts: string[]; status?: string }[]) {
-    if (ex.status === "deprecated" || ex.status === "wip" || ex.concepts.length === 0) { skipped.push(`${ex.slug}: status ${ex.status ?? "?"}`); continue; }
+interface Part { s: Source; what: string; lessons: string[]; skipped: string[] }
+
+/** Exercism concept exercises as lessons (text: the exercise's introduction) into `lang`'s lessons. */
+function exercismConcepts(lang: string, s: Source, from: string, track: Track, vocab: Map<string, string>, startOrder: number, opts: { drop?: Record<string, string>; note?: string } = {}): Part {
+  const config = json(join(from, "config.json"));
+  const part: Part = { s, what: "concept lessons and exercises", lessons: [], skipped: [] };
+  let order = startOrder;
+  for (const ex of config.exercises.concept as { slug: string; concepts: string[]; status?: string }[]) {
+    if (ex.status === "deprecated" || ex.status === "wip" || ex.concepts.length === 0) { part.skipped.push(`${ex.slug}: status ${ex.status ?? "?"}`); continue; }
+    if (opts.drop?.[ex.slug]) { part.skipped.push(`${ex.slug}: ${opts.drop[ex.slug]}`); rmSync(join(OUT, lang, ex.concepts[0] ?? ex.slug), { recursive: true, force: true }); continue; }
     const concept = ex.concepts[0];
-    const why = exercismExercise(lang, join(src, "exercises", "concept", ex.slug), `${concept}/1-${ex.slug}`, pythonTests, "solution.py", "test_examples.py");
-    if (why) { skipped.push(`${ex.slug}: ${why}`); rmSync(join(OUT, lang, concept), { recursive: true, force: true }); continue; }
-    const conceptMeta = (config.concepts as { slug: string; name: string }[]).find((c) => c.slug === concept);
-    const text = readIf(join(src, "exercises", "concept", ex.slug, ".docs", "introduction.md")).trim() || readIf(join(src, "concepts", concept, "introduction.md")).trim();
-    const tags = PY_TAGS[concept] ?? [concept];
+    const why = exercismExercise(lang, join(from, "exercises", "concept", ex.slug), `${concept}/1-${ex.slug}`, track);
+    if (why) { part.skipped.push(`${ex.slug}: ${why}`); rmSync(join(OUT, lang, concept), { recursive: true, force: true }); continue; }
+    let text = readIf(join(from, "exercises", "concept", ex.slug, ".docs", "introduction.md")).trim() || readIf(join(from, "concepts", concept, "introduction.md")).trim();
+    for (const f of TEXT_FIXES.filter((x) => x.slug === ex.slug && text.includes(x.from))) {
+      text = text.split(f.from).join(f.to);
+      part.skipped.push(`${ex.slug}: text fixed (${f.why})`);
+    }
+    const tags = tagsFor(vocab, ex.concepts, lang);
+    const name = (config.concepts as { slug: string; name: string }[]).find((c) => c.slug === concept)?.name ?? concept;
     put(join(OUT, lang, concept, "lesson.md"), [
-      "---", `concept: ${concept}`, `title: ${JSON.stringify(conceptMeta?.name ?? concept)}`, `tags: [${tags.join(", ")}]`,
-      `source: exercism/python ${s.commit.slice(0, 7)} exercises/concept/${ex.slug} (MIT)`, `order: ${++order}`, "---", "",
-      text, "", `Source: [Exercism Python track](${s.repo}/tree/${s.commit}/exercises/concept/${ex.slug}), MIT licence.`, "",
+      "---", `concept: ${concept}`, `title: ${JSON.stringify(name)}`, `tags: [${tags.join(", ")}]`,
+      `source: ${s.name} ${s.commit.slice(0, 7)} exercises/concept/${ex.slug} (MIT)`, `order: ${++order}`, "---", "",
+      text, ...(opts.note ? ["", opts.note] : []), "", `Source: [${s.name}](${s.repo}/tree/${s.commit}/exercises/concept/${ex.slug}), MIT licence.`, "",
     ].join("\n"));
-    lessons.push(`- \`${concept}\` (${tags.join(", ")}${PY_TAGS[concept] ? "" : ", own tag"}): exercises/concept/${ex.slug}`);
+    part.lessons.push(`- \`${concept}\` (${tags.join(", ")}): exercises/concept/${ex.slug}`);
   }
-  LEVELS.forEach((slug, i) => {
-    const why = exercismExercise(lang, join(src, "exercises", "practice", slug), `_levels/${i + 1}-${slug}`, pythonTests, "solution.py", "test_examples.py");
-    if (why) skipped.push(`practice/${slug}: ${why}`);
-  });
-  keepLicence(s, src, lang);
-  writeSources(lang, [{ s, what: "concept lessons and exercises; level ladder (practice exercises)", lessons, skipped }]);
-  rmSync(src, { recursive: true, force: true });
+  return part;
 }
 
-/** SOURCES.md: generated part per source, then the hand-written "Our own lessons" part kept as is. */
-function writeSources(lang: string, parts: { s: Source; what: string; lessons: string[]; skipped: string[] }[]): void {
+function exercismLevels(lang: string, s: Source, from: string, track: Track, part: Part): void {
+  part.what = part.what ? `${part.what}; level ladder (practice exercises)` : "level ladder (practice exercises)";
+  LEVELS.forEach((slug, i) => {
+    const why = exercismExercise(lang, join(from, "exercises", "practice", slug), `_levels/${i + 1}-${slug}`, track);
+    if (why) part.skipped.push(`practice/${slug}: ${why}`);
+  });
+}
+
+/** SOURCES.md: generated part per source, then the hand-written part after the marker, kept as is. */
+function writeSources(lang: string, parts: Part[]): void {
   const path = join(OUT, lang, "SOURCES.md");
   const own = readIf(path).split("<!-- own -->")[1] ?? "\n## Our own lessons\n\nNone yet.\n";
   const gen = parts.map(({ s, what, lessons, skipped }) => [
     `## ${s.name}`, "", `- Repo: ${s.repo}`, `- Commit: ${s.commit}`, `- Licence: ${s.licence} (licenses/${s.name}/)`, `- Used for: ${what}`, "",
-    "Lessons:", ...lessons, "", "Skipped:", ...(skipped.length ? skipped.map((x) => `- ${x}`) : ["- none"]), "",
+    "Lessons:", ...(lessons.length ? lessons : ["- none (level ladder only)"]), "", "Skipped:", ...(skipped.length ? skipped.map((x) => `- ${x}`) : ["- none"]), "",
   ].join("\n")).join("\n");
   put(path, `# ${lang} lesson sources\n\nGenerated by scripts/vendor-lessons.ts; the part after the marker is written by hand.\n\n${gen}\n<!-- own -->${own}`);
 }
 
-const VENDORS: Record<string, () => void> = { python };
+/** Upstream text defects found by `npm run lessons`, fixed when vendoring and listed in SOURCES.md. */
+const TEXT_FIXES: { slug: string; from: string; to: string; why: string }[] = [
+  { slug: "recycling-robot", from: "[historical reasons][`typeof null` is `\"object\"`]", to: "[historical reasons][typeof null is object]", why: "a reference link whose label did not match its definition" },
+];
+
+/** Exercises that failed `npm run lessons` (exemplar did not pass or stub did not fail): dropped and listed. */
+const DROP: Record<string, Record<string, string>> = {
+  python: {},
+  go: { "weather-forecast": "its test reads its own source file by name (to check comments); the renamed layout breaks that" },
+  javascript: {}, typescript: {},
+  rust: { "resistor-color": "it needs external crates (enum-iterator, int-enum), and exercises run offline in the sandbox" },
+  lua: {},
+};
+
+function exercismLanguage(lang: string, opts: { levels?: boolean } = {}): Part[] {
+  const s = EX[lang as keyof typeof EX], from = clone(s);
+  const part = exercismConcepts(lang, s, from, TRACKS[lang], vocabulary(lang), 0, { drop: DROP[lang] });
+  if (opts.levels !== false) exercismLevels(lang, s, from, TRACKS[lang], part);
+  keepLicence(s, from, lang);
+  rmSync(from, { recursive: true, force: true });
+  return [part];
+}
+
+/** TypeScript has no concept syllabus (Q25): the JavaScript track's concept exercises, which are valid
+ *  TypeScript, run as .ts; the level ladder comes from the TypeScript track. Marked thin in the README. */
+function typescript(): Part[] {
+  const js = EX.javascript, jsFrom = clone(js);
+  const lessons = exercismConcepts("typescript", js, jsFrom, TRACKS.typescript, vocabulary("typescript"), 0, {
+    drop: DROP.typescript,
+    note: "TypeScript runs this JavaScript as it is; types are added on top. See the TypeScript Handbook, *The Basics* (https://www.typescriptlang.org/docs/handbook/2/basic-types.html).",
+  });
+  keepLicence(js, jsFrom, "typescript");
+  rmSync(jsFrom, { recursive: true, force: true });
+  const ts = EX.typescript, tsFrom = clone(ts);
+  const levels: Part = { s: ts, what: "", lessons: [], skipped: [] };
+  exercismLevels("typescript", ts, tsFrom, TRACKS.typescript, levels);
+  keepLicence(ts, tsFrom, "typescript");
+  rmSync(tsFrom, { recursive: true, force: true });
+  return [lessons, levels];
+}
+
+/** Rust: rustlings topics with real #[test]s (the topic README as text) first, then Exercism's concept exercises. */
+function rust(): Part[] {
+  const r = RUSTLINGS, from = clone(r), vocab = vocabulary("rust");
+  const part: Part = { s: r, what: "topic lessons (README) and exercises with #[test]", lessons: [], skipped: [] };
+  const topics = readdirSync(join(from, "exercises")).filter((d) => /^\d\d_/.test(d)).sort();
+  let order = 0;
+  for (const topic of topics) {
+    const concept = topic.replace(/^\d\d_/, "").replace(/_/g, "-");
+    const files = readdirSync(join(from, "exercises", topic)).filter((f) => f.endsWith(".rs")).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const kept: string[] = [];
+    for (const f of files) {
+      const stub = readFileSync(join(from, "exercises", topic, f), "utf8"), sol = readIf(join(from, "solutions", topic, f));
+      const name = f.replace(/\.rs$/, "");
+      if (!/#\[test\]/.test(stub)) { part.skipped.push(`${topic}/${f}: no #[test] (a "make it compile" exercise)`); continue; }
+      if (!sol) { part.skipped.push(`${topic}/${f}: no solution`); continue; }
+      if (DROP.rust[`${topic}/${f}`]) { part.skipped.push(`${topic}/${f}: ${DROP.rust[`${topic}/${f}`]}`); rmSync(join(OUT, "rust", concept, `${kept.length + 1}-${name}`), { recursive: true, force: true }); continue; }
+      const dest = join(OUT, "rust", concept, `${kept.length + 1}-${name}`);
+      rmSync(dest, { recursive: true, force: true });
+      put(join(dest, "instructions.md"), `# ${name}\n\nMake the tests in \`src/lib.rs\` pass: follow the \`TODO\` comments in the file.\n`);
+      put(join(dest, "src/lib.rs"), stub);
+      put(join(dest, "tests/examples.rs"), "");
+      put(join(dest, ".exemplar/src/lib.rs"), sol);
+      kept.push(f);
+    }
+    if (!kept.length) { rmSync(join(OUT, "rust", concept), { recursive: true, force: true }); continue; }
+    const tags = tagsFor(vocab, [concept], "rust");
+    put(join(OUT, "rust", concept, "lesson.md"), [
+      "---", `concept: ${concept}`, `title: ${JSON.stringify(concept)}`, `tags: [${tags.join(", ")}]`,
+      `source: rustlings ${r.commit.slice(0, 7)} exercises/${topic} (MIT)`, `order: ${++order}`, "---", "",
+      readIf(join(from, "exercises", topic, "README.md")).trim(), "", `Source: [rustlings exercises/${topic}](${r.repo}/tree/${r.commit}/exercises/${topic}), MIT licence.`, "",
+    ].join("\n"));
+    part.lessons.push(`- \`${concept}\` (${tags.join(", ")}): exercises/${topic} (${kept.join(", ")})`);
+  }
+  keepLicence(r, from, "rust");
+  rmSync(from, { recursive: true, force: true });
+  const e = EX.rust, eFrom = clone(e);
+  const ex = exercismConcepts("rust", e, eFrom, TRACKS.rust, vocab, 100, { drop: DROP.rust });
+  exercismLevels("rust", e, eFrom, TRACKS.rust, ex);
+  keepLicence(e, eFrom, "rust");
+  rmSync(eFrom, { recursive: true, force: true });
+  return [part, ex];
+}
+
+const VENDORS: Record<string, () => Part[]> = {
+  python: () => exercismLanguage("python"), go: () => exercismLanguage("go"), javascript: () => exercismLanguage("javascript"),
+  lua: () => exercismLanguage("lua"), typescript, rust,
+};
 
 if (import.meta.main) {
   const lang = process.argv[2];
   const run = lang ? VENDORS[lang] : undefined;
   if (!run) { process.stderr.write(`usage: node scripts/vendor-lessons.ts <${Object.keys(VENDORS).join("|")}>\n`); process.exit(2); }
-  run();
+  writeSources(lang!, run());
 }

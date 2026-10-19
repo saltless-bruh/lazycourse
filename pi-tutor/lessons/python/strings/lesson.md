@@ -2,7 +2,7 @@
 concept: strings
 title: "Strings"
 tags: [strings]
-source: exercism/python 6105f6d exercises/concept/little-sisters-vocab (MIT)
+source: exercism-python 6105f6d exercises/concept/little-sisters-vocab (MIT)
 order: 7
 ---
 
@@ -263,4 +263,4 @@ Strings support all [common sequence operations][common sequence operations].
 [text sequence]: https://docs.python.org/3/library/stdtypes.html#text-sequence-type-str
 [unicode code points]: https://stackoverflow.com/questions/27331819/whats-the-difference-between-a-character-a-code-point-a-glyph-and-a-grapheme
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/little-sisters-vocab), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/little-sisters-vocab), MIT licence.

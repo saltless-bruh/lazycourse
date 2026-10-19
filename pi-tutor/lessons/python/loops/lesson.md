@@ -2,7 +2,7 @@
 concept: loops
 title: "Loops"
 tags: [loops]
-source: exercism/python 6105f6d exercises/concept/making-the-grade (MIT)
+source: exercism-python 6105f6d exercises/concept/making-the-grade (MIT)
 order: 10
 ---
 
@@ -191,4 +191,4 @@ The [`break`][break statement] (_like in many C-related languages_) keyword can 
 [truth value testing]: https://docs.python.org/3/library/stdtypes.html#truth-value-testing
 [while statement]: https://docs.python.org/3/reference/compound_stmts.html#the-while-statement
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/making-the-grade), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/making-the-grade), MIT licence.

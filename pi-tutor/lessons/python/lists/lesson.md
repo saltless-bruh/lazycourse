@@ -2,7 +2,7 @@
 concept: lists
 title: "Lists"
 tags: [lists]
-source: exercism/python 6105f6d exercises/concept/card-games (MIT)
+source: exercism-python 6105f6d exercises/concept/card-games (MIT)
 order: 8
 ---
 
@@ -264,4 +264,4 @@ _For a more in-depth explanation, of `loops` and `iterators`, complete the `loop
 [slice notation]: https://docs.python.org/3/reference/expressions.html#slicings
 [tuple]: https://docs.python.org/3/library/stdtypes.html#tuple
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/card-games), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/card-games), MIT licence.

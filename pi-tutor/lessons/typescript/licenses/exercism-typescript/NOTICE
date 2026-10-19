@@ -1,0 +1,2 @@
+Content from https://github.com/exercism/typescript at commit a24e6ae756c61932165bb7d0a2703417a8291af3, MIT licence (text in this folder).
+Adapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.

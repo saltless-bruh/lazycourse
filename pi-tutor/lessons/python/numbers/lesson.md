@@ -2,7 +2,7 @@
 concept: numbers
 title: "Numbers"
 tags: [numbers]
-source: exercism/python 6105f6d exercises/concept/currency-exchange (MIT)
+source: exercism-python 6105f6d exercises/concept/currency-exchange (MIT)
 order: 3
 ---
 
@@ -85,4 +85,4 @@ To convert a float to an integer, you can use `int()`. To convert an integer to 
 [floating point math]: https://docs.python.org/3.9/tutorial/floatingpoint.html
 [numeric-type-docs]: https://docs.python.org/3/library/stdtypes.html#typesnumeric
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/currency-exchange), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/currency-exchange), MIT licence.

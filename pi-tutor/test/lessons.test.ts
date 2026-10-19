@@ -97,6 +97,10 @@ describe("lesson text checks (side-agent note 2026-10-19: the text, not only the
     const p = textProblems(bad);
     expect(p).toEqual(expect.arrayContaining([expect.stringMatching(/double backticks/), expect.stringMatching(/directive/), expect.stringMatching(/lone ':'/), expect.stringMatching(/role/)]));
   });
+  it("flags a reference-style link whose definition the excerpt left out", () => {
+    expect(textProblems("an instance of [`std::io::Stdin`][iostdin], a handle\n")).toEqual([expect.stringMatching(/undefined reference link \[iostdin\]/)]);
+    expect(textProblems("see [the docs][d]\n\n[d]: https://example.com\n")).toEqual([]);
+  });
   it("clean Markdown with code fences has no problems", () => {
     expect(textProblems("Text with `code`.\n\n```python\n>>> 1 + 1\n2\n```\n")).toEqual([]);
   });

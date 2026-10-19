@@ -39,6 +39,10 @@ describe("vendor converters (spec 2026-10-19 §7a, Q26)", () => {
     expect(out).toContain("test('b', () => {");
     expect(out).not.toMatch(/expect\(|xtest|@jest/);
   });
+  it("jest: Prettier's trailing commas inside expect(...) and the matcher do not leak into the assert call", () => {
+    const out = jestToNodeTest("test('x', () => {\n  expect(\n    canSpy(true, false),\n  ).toBe(\n    true,\n  );\n});\n", "m", "js")!;
+    expect(out).toContain("assert.strictEqual(canSpy(true, false), true);");
+  });
   it("jest: a typescript test imports ./solution.ts", () => {
     expect(jestToNodeTest("import { f } from './leap';\ntest('x', () => { expect(f()).toBe(1); });\n", "leap", "ts")).toContain("from './solution.ts';");
   });

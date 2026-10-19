@@ -2,7 +2,7 @@
 concept: conditionals
 title: "Conditionals"
 tags: [conditionals]
-source: exercism/python 6105f6d exercises/concept/meltdown-mitigation (MIT)
+source: exercism-python 6105f6d exercises/concept/meltdown-mitigation (MIT)
 order: 4
 ---
 
@@ -89,4 +89,4 @@ else:
 [if statement]: https://docs.python.org/3/reference/compound_stmts.html#the-if-statement
 [truth value testing]: https://docs.python.org/3/library/stdtypes.html#truth-value-testing
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/meltdown-mitigation), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/meltdown-mitigation), MIT licence.

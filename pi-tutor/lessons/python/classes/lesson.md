@@ -2,7 +2,7 @@
 concept: classes
 title: "Classes"
 tags: [classes]
-source: exercism/python 6105f6d exercises/concept/ellens-alien-game (MIT)
+source: exercism-python 6105f6d exercises/concept/ellens-alien-game (MIT)
 order: 16
 ---
 
@@ -276,4 +276,4 @@ class MyClass:
 [functional]: https://en.wikipedia.org/wiki/Functional_programming
 [dot notation]: https://stackoverflow.com/questions/45179186/understanding-the-dot-notation-in-python
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/ellens-alien-game), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/ellens-alien-game), MIT licence.

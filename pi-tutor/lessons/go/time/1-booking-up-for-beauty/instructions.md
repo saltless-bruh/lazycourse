@@ -1,0 +1,90 @@
+# Instructions
+
+In this exercise you'll be working on an appointment scheduler for a beauty salon that opened on September 15th in 2012.
+
+You have five tasks, which will all involve appointment dates.
+
+## 1. Parse appointment date
+
+Implement the `Schedule` function to parse a textual representation of an appointment date into the corresponding `time.Time` format:
+
+```go
+Schedule("7/25/2019 13:45:00")
+// => 2019-07-25 13:45:00 +0000 UTC
+```
+
+## 2. Check if an appointment has already passed
+
+Implement the `HasPassed` function that takes an appointment date and checks if the appointment was somewhere in the past:
+
+```go
+HasPassed("July 25, 2019 13:45:00")
+// => true
+```
+
+## 3. Check if appointment is in the afternoon
+
+Implement the `IsAfternoonAppointment` function that takes an appointment date and checks if the appointment is in the afternoon (>= 12:00 and < 18:00):
+
+```go
+IsAfternoonAppointment("Thursday, July 25, 2019 13:45:00")
+// => true
+```
+
+## 4. Describe the time and date of the appointment
+
+Implement the `Description` function that takes an appointment date and returns a description of that date and time:
+
+```go
+Description("7/25/2019 13:45:00")
+// => "You have an appointment on Thursday, July 25, 2019, at 13:45."
+```
+
+## 5. Return the anniversary date of the salon's opening
+
+Implement the `AnniversaryDate` function that returns the anniversary date of the salon's opening for the current year in UTC.
+
+Assuming the current year is 2020:
+
+```go
+AnniversaryDate()
+
+// => 2020-09-15 00:00:00 +0000 UTC
+```
+
+**Note:** the return value is a `time.Time` and the time of day doesn't matter.
+
+## Hints
+
+## General
+
+- [Use the methods found in the time package.][time]
+
+## 1. Parse appointment date
+
+- There is a [method][time.parse] for parsing a `string` into a `Time`.
+- Additional information for formatting parts of a date can be found in the constants section of the [time package documentation][time-package-constants].
+
+## 2. Check if an appointment has already passed
+
+- There are [methods][before] for [comparing][after] `Times` and [getting][now] the current date and time.
+
+## 3. Check if appointment is in the afternoon
+
+- There is a [method][hour] for getting the hour of a `Time`.
+
+## 4. Describe the time and date of the appointment
+
+- Convert the given string to a `Time` then format the answer string accordingly, using the appropriate [methods][time] to extract the needed constituents.
+
+## 5. Return the anniversary date of the salon's opening
+
+- Create a `Time` of the anniversary date of the salon's opening for the current year.
+
+[time]: https://golang.org/pkg/time/#pkg-index
+[time.parse]: https://golang.org/pkg/time/#Parse
+[before]: https://golang.org/pkg/time/#Time.Before
+[after]: https://golang.org/pkg/time/#Time.After
+[now]: https://golang.org/pkg/time/#Now
+[hour]: https://golang.org/pkg/time/#Time.Hour
+[time-package-constants]: https://pkg.go.dev/time#pkg-constants

@@ -2,7 +2,7 @@
 concept: comparisons
 title: "Comparisons"
 tags: [conditionals]
-source: exercism/python 6105f6d exercises/concept/black-jack (MIT)
+source: exercism-python 6105f6d exercises/concept/black-jack (MIT)
 order: 5
 ---
 
@@ -245,4 +245,4 @@ False
 [value comparisons none]: https://docs.python.org/3/reference/expressions.html?highlight=none#value-comparisons
 [value comparisons]: https://docs.python.org/3/reference/expressions.html?highlight=nan#value-comparisons
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/black-jack), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/black-jack), MIT licence.

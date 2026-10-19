@@ -97,6 +97,10 @@ export function textProblems(text: string): string[] {
   if (/^\.\. [a-zA-Z_-]+(::|:)?/m.test(prose)) out.push("rST directive or comment (.. …)");
   if (/^[ \t]*:[ \t]*$/m.test(prose)) out.push("a lone ':' line (rST literal-block marker)");
   if (/\bXXX\b/.test(prose)) out.push("an XXX note from the source's comments");
+  for (const m of prose.matchAll(/\]\[([^\]\n]+)\]/g)) {
+    const label = m[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(`^\\[${label}\\]:`, "mi").test(text)) out.push(`undefined reference link [${m[1]}] (its definition was cut from the excerpt)`);
+  }
   return out;
 }
 

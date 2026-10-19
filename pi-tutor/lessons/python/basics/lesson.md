@@ -2,7 +2,7 @@
 concept: basics
 title: "Basics"
 tags: [variables]
-source: exercism/python 6105f6d exercises/concept/guidos-gorgeous-lasagna (MIT)
+source: exercism-python 6105f6d exercises/concept/guidos-gorgeous-lasagna (MIT)
 order: 1
 ---
 
@@ -295,4 +295,4 @@ Takes a number and raises it to the specified power, returning the result.
 [sphinx]: https://www.sphinx-doc.org/en/master/usage/index.html
 [type hints]: https://docs.python.org/3/library/typing.html
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/guidos-gorgeous-lasagna), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/guidos-gorgeous-lasagna), MIT licence.

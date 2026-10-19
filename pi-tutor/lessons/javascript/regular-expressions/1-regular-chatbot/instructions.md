@@ -1,0 +1,145 @@
+# Instructions
+
+You have been hired as a Regular Expression Specialist in a company that is developing a Chatbot.
+
+It is in a very basic phase of development, hence your mission is to use Regular Expressions to improve the chatbot's ability to understand and generate natural language.
+
+## Check Valid Command
+
+Apart from being smart, the Chatbot is also a loyal assistant.
+
+To ask something to the chatbot, the user must say the word “**Chatbot**” in the first position of the command.
+
+It doesn't matter if the keyword is in UPPERCASE or lowercase. The important aspect here is the position of the word.
+
+Implement the function `isValidCommand()` that helps the Chatbot recognize when the user is giving a command.
+
+```javascript
+isValidCommand("Chatbot, play a song from the 80's.";
+// => True
+isValidCommand("Hey Chatbot, where is the closest pharmacy?";
+// => False
+isValidCommand("CHATBOT, do you have a solution for this challenge?";
+// => True
+```
+
+## Remove encrypted emojis
+
+The Chatbot has a difficult time understanding how humans use emojis to express their emotions.
+
+When the chatbot receives user messages, each emoji is represented as “_emoji_” followed by its _id_ number.
+
+Implement the `removeEmoji()` method to take a string and remove all the emoji’s encryption throughout the message.
+
+Lines not containing emoji’s text should be returned unmodified.
+
+Just remove the emoji string. Do not attempt to adjust the whitespace.
+
+For this particular challenge, use constructor syntax for creating the regular expression.
+
+```javascript
+removeEmoji("I love playing videogames emoji3465 it's one of my hobbies");
+// => "I love playing videogames  it's one of my hobbies"
+```
+
+## Check Valid Phone Number
+
+Considering the download of chatbot features on a mobile app, the user is expected to write a phone number during the conversation.
+
+The problem is that the chatbot can only read and validate a number with a specific format.
+
+If the number is valid (matches the character sequence specified by the **regular expression**), the chatbot answers with a message thanking the user and confirming the number. If the number is invalid, the function informs the user that the phone number is not valid.
+
+The expected format is: (+##) ###-###-###
+
+```javascript
+checkPhoneNumber('(+34) 659-771-594');
+// => "Thanks! You can now download me to your phone."
+checkPhoneNumber('659-771-594');
+// => "Oops, it seems like I can't reach out to 659-771-594"
+```
+
+## Get website link
+
+The Chatbot is a really curious software. Even though he can search on the internet about a particular topic, he likes to ask users about cool websites or URL’s to go find relevant information.
+
+Example of Conversation:
+
+- **Chatbot**: Hey username, I would like to learn how to code in JavaScript, do you know any cool website where I could learn?
+- **User**: I learned a lot from [exercism.org](http://exercism.org)
+
+Implement the function `getURL()` which is able to return an array with just the link of each website. Writing a regex to recognize any URL would be very complicated, but the Chatbot only needs to read simple URLs. For this exercise, a URL is any `"."`-delimited sequence of words.
+
+```javascript
+getURL(
+  'I learned a lot from exercism.org and developer.mozilla.org, but I found ts39.es very boring!',
+);
+// => ["exercism.org", "developer.mozilla.org", "ts39.es"];
+```
+
+## Greet the user
+
+For storing data from all the persons who have had a conversation with, the chatbot is able to get the Full Name from the user’s profile in this style: **“smith, john”**.
+
+In this way, we want our chatbot to be really polite and make a good impression.
+
+Write the function `niceToMeetYou()` that takes a string with the full name of the user, and returns the string **“Nice to meet you, John Smith”**
+
+For learning purposes, implement the function using a **replacement method** from Regular Expressions.
+
+```javascript
+let str = 'Smith, John';
+
+niceToMeetYou(str);
+// => "Nice to meet you, John Smith"
+```
+
+## Hints
+
+## 1. Check Valid Command
+
+- Use the [test()][mdn-regex-test] method for returning a boolean.
+- Remember that we can use [flags][mdn-flags] at the end of the regular expression for additional features such as case insensitive.
+
+## 2. Remove Encrypted Emojis
+
+- In this case we must use the [RexExp][mdn-regular-expressions] constructor to build our regular expression.
+- Thanks to the common encryption of each emoji, we can use `[0-9]` to search for any digit after the `emoji`word.
+- The character `+` matches one or more consecutive items.
+- Use the [split()][mdn-regex-split] method alongside the regex for each emoji to get rid of all encryption.
+- Finally, return this splitted array as a string using the [join()][mdn-join] method.
+
+## 3. Check Valid Phone Number
+
+- In this exercise we are playing with `groups and ranges`. Read this [documentation][mdn-groups] for learning more about it.
+- This [article][phone-validation] is really good at explaining different ways of number validation.
+- You may also want to use this [cheatsheet][mdn-regex-cheatsheet] for a broad view of available features in regular expressions.
+- Use the `test()` method to check whether the phone number is valid or not.
+- Return the final answer with a simple `if statement`.
+
+## 4. Get Website Link
+
+- We are targeting words that are joined by one or more `.(dots)`.
+- Remember to put the flag `g` at the end so we can get all the domains in any sentence.
+- Use the [match()][mdn-regex-match] method to return an array with all the previous matches.
+
+## 5. Greet the user
+
+- First, use the [replace()][mdn-regex-replace] method directly to the given string.
+- Use [Named Capture Groups][mdn-groups] to store the `name` and `surname` into different values.
+- Pass a `(...match)` destructuring to the replacer function so you can get the name and surname into the object within the matched groups.
+- Use the `pop()` method to store the matched object with `name` and `surname`.
+- Finally, implement a `template String` so you can get the values from the regular expression object. See [this][mdn-capturing-groups] example for knowing about how match() stores objects.
+
+[mdn-regex-cheatsheet]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions/Cheatsheet
+[mdn-regular-expressions]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions
+[mdn-common-functions]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions#using_regular_expressions_in_javascript
+[mdn-flags]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions#advanced_searching_with_flags
+[mdn-regex-test]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/test
+[mdn-regex-match]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match
+[mdn-regex-replace]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace
+[mdn-regex-split]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/split
+[mdn-join]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/join
+[mdn-groups]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions/Groups_and_Ranges
+[phone-validation]: https://www.w3resource.com/javascript/form/phone-no-validation.php
+[mdn-capturing-groups]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match#using_named_capturing_groups

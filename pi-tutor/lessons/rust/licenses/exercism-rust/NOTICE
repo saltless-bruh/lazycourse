@@ -1,0 +1,2 @@
+Content from https://github.com/exercism/rust at commit cc099ae090a6acbe6f53f1e36325263046ba333e, MIT licence (text in this folder).
+Adapted for lazycourse: tests converted to run without pytest/Jest/busted; files renamed to the exam layout.

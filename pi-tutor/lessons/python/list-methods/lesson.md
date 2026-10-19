@@ -2,7 +2,7 @@
 concept: list-methods
 title: "List Methods"
 tags: [lists]
-source: exercism/python 6105f6d exercises/concept/chaitanas-colossal-coaster (MIT)
+source: exercism-python 6105f6d exercises/concept/chaitanas-colossal-coaster (MIT)
 order: 9
 ---
 
@@ -260,4 +260,4 @@ ValueError: 10 is not in list
 [sorting how to]: https://docs.python.org/3/howto/sorting.html
 [tuple]: https://docs.python.org/3/library/stdtypes.html#tuple
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/chaitanas-colossal-coaster), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/chaitanas-colossal-coaster), MIT licence.

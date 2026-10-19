@@ -2,7 +2,7 @@
 concept: dict-methods
 title: "Dict Methods"
 tags: [dicts]
-source: exercism/python 6105f6d exercises/concept/mecha-munch-management (MIT)
+source: exercism-python 6105f6d exercises/concept/mecha-munch-management (MIT)
 order: 13
 ---
 
@@ -228,4 +228,4 @@ For a detailed explanation of dictionaries and methods for working with them, th
 [how-to-dicts]: https://realpython.com/python-dicts/
 [mapping-types-dict]: https://docs.python.org/3/library/stdtypes.html#mapping-types-dict
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/mecha-munch-management), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/mecha-munch-management), MIT licence.

@@ -2,7 +2,7 @@
 concept: sets
 title: "Sets"
 tags: [sets-tuples]
-source: exercism/python 6105f6d exercises/concept/cater-waiter (MIT)
+source: exercism-python 6105f6d exercises/concept/cater-waiter (MIT)
 order: 15
 ---
 
@@ -432,4 +432,4 @@ To obtain only items unique to each `set` in the series, intersections between a
 [type-frozenset]: https://docs.python.org/3/library/stdtypes.html#frozenset
 [type-set]: https://docs.python.org/3/library/stdtypes.html#set
 
-Source: [Exercism Python track](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/cater-waiter), MIT licence.
+Source: [exercism-python](https://github.com/exercism/python/tree/6105f6d9d3ef66ce3d5c8f529d2882af3d76b706/exercises/concept/cater-waiter), MIT licence.
