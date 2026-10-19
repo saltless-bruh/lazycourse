@@ -103,7 +103,7 @@ export const REASONED = "I think the loop stops early because range excludes the
 /** One agent run as Pi drives it: before_agent_start for `prompt`, then the given assistant turn(s). */
 export async function turn(events: Record<string, Handler>, ctx: unknown, prompt: string, ...messages: unknown[]) {
   const opts = { sections: {} as Record<string, string> };
-  const r = (await events["before_agent_start"]({ type: "before_agent_start", prompt, systemPromptOptions: opts }, ctx)) as { message?: { content: string } } | undefined;
+  const r = (await events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: opts }, ctx)) as { message?: { content: string } } | undefined;
   for (const message of messages) {
     // Pi swaps a message_end replacement into the same object before turn_end (agent-session.js _replaceMessageInPlace).
     const r = (await events["message_end"]?.({ type: "message_end", message }, ctx)) as { message?: object } | undefined;

@@ -1,7 +1,9 @@
 # Pi and Neovim surface used by pi-tutor
 
-Verified against `@earendil-works/pi-coding-agent` 1.1.0 `dist/core/extensions/types.d.ts`
-(2026-10-12), installed binary 1.1.0 (2026-10-12), `neovim` npm client 5.5.0, Neovim 0.12.6 (2026-10-12).
+Verified against `@earendil-works/pi-coding-agent` 1.3.0 `dist/core/extensions/types.d.ts`
+(2026-10-19; was 1.1.0 on 2026-10-12), installed binary 1.3.0 (2026-10-19), `neovim` npm client 5.5.0,
+Neovim 0.12.6 (2026-10-12). 1.1.0 → 1.3.0 types diff: `before_agent_start` became a union (below),
+tool definitions gained optional `reachesTools`, namespaces optional `aliases` (unused here).
 Re-verify every line when bumping versions.
 
 ## Pi CLI
@@ -24,13 +26,16 @@ Re-verify every line when bumping versions.
 - `pi.registerCommand(name, { description, handler(args, ctx) })`
 - `pi.appendEntry(customType, data)`
 - `pi.sendUserMessage(text, { deliverAs: "followUp" })`: always triggers a turn; `deliverAs` is
-  ignored when idle and required while streaming (agent-session.js:1551). Used once per
-  editor-triggered episode, text prefixed `[tutor]`.
+  ignored when idle and required while streaming (1.3.0 agent-session.js:1637 throws "Agent is already
+  processing" without it). Since 1.2.0 a run counts as streaming while it starts (`before_agent_start`
+  included), so every call passes `deliverAs: "followUp"`: the editor nudge (text prefixed `[tutor]`),
+  `/tutor-architect <q>`, `/tutor-plan <id>` and `/tutor-plan next`.
 - `pi.sendMessage({ customType, content, display, details }, { triggerTurn: false })` (types.d.ts:1234;
   agent-session.js:1782 `sendCustomMessage`): while idle it appends the message to the session now and renders it
   with the default CustomMessageComponent (a labelled Markdown box, custom-message.js); while streaming it is
   deferred to the end of the turn. Custom messages are in the model's context. M8: tutor_grade, tutor_progress.
 - `ctx.isIdle()` (types.d.ts:236): nudges are sent only when true. The session_start `ctx` is kept.
+  Since 1.2.0 it is also false while a run starts.
 - `pi.on("tool_call", (event, ctx) => ToolCallEventResult | undefined)` (types.d.ts:1200);
   `event.toolName`, `event.input` (mutable; we never mutate); result `{ block: true, reason }`.
   Inputs: read `{path}`, grep `{pattern, path?, glob?}`, find `{pattern, path?}`, ls `{path?}`.
@@ -103,7 +108,11 @@ Re-verify every line when bumping versions.
   make Pi ask "trust this folder?" (trust-manager.js:8), so the M4 scaffold writes no `.pi/` (M5 decides).
 - `ctx.ui.setWidget(key, string[] | undefined)`, `ctx.ui.setStatus(key, text)`,
   `ctx.ui.setWorkingMessage(text)`, `ctx.ui.notify(msg, level)`
-- `pi.on("before_agent_start", (event, ctx) => …)`: mutate `event.systemPromptOptions.sections["tutor"]`
+- `pi.on("before_agent_start", (event, ctx) => …)`: since 1.2.0 `BeforeAgentStartEvent` is a union on
+  `messageType` (1.3.0 types.d.ts:720-742): `"user"` carries `prompt`/`images`; `"custom"` (a run started by
+  `pi.sendMessage(…, { triggerTurn: true })` while idle) carries `message` and no `prompt`. The handler reads
+  the prompt only for `"user"`; a custom run gets the prompt sections but opens no chat episode.
+  Mutate `event.systemPromptOptions.sections["tutor"]`
   (band prompt); return `{ message: { customType: "tutor_editor", content, display: false, details } }`
   for the per-turn editor context (`BeforeAgentStartEventResult.message`). Never return `systemPrompt`.
 - `pi.on("turn_end", (event) => …)`: `event.message` is the AgentMessage; assistant `content` is

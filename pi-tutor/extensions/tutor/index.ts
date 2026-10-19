@@ -444,10 +444,12 @@ export default function (pi: ExtensionAPI): void {
     const role = roleNamed(activeRole);
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
-    // A learner's chat message opens an episode; our own [tutor] nudges and non-ladder roles do not.
-    if (role.ladder && !episode && !event.prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
+    // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
+    const prompt = event.messageType === "user" ? event.prompt : "";
+    // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
+    if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
-    run = { prompt: event.prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined };
+    run = { prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -470,7 +472,7 @@ export default function (pi: ExtensionAPI): void {
     if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
     // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
     const mapStep = workflow !== null && role.ladder && STEPS[workflow.step - 1] === "Map";
-    if (lang && pack && role.ladder && indexWanted({ prompt: event.prompt, mapStep })) {
+    if (lang && pack && role.ladder && indexWanted({ prompt, mapStep })) {
       const index = packIndex(lang);
       if (index) parts.push(index);
     }
@@ -618,7 +620,7 @@ export default function (pi: ExtensionAPI): void {
       setRole("architect");
       paint();
       // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-      if (q && ctx.hasUI) pi.sendUserMessage(q);
+      if (q && ctx.hasUI) pi.sendUserMessage(q, { deliverAs: "followUp" });
       else ctx.ui.notify("architecture professor: ask about components, data flow or trade-offs", "info");
     },
   });
@@ -642,7 +644,7 @@ export default function (pi: ExtensionAPI): void {
         const moved = advanceWorkflow(true);
         paint();
         if (moved && moved.done === undefined && ctx.hasUI) {
-          pi.sendUserMessage(`${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`);
+          pi.sendUserMessage(`${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`, { deliverAs: "followUp" });
         }
         return;
       }
@@ -661,7 +663,7 @@ export default function (pi: ExtensionAPI): void {
       paint();
       const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
       // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-      if (ctx.hasUI) pi.sendUserMessage(kickoff);
+      if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
       else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
     },
   });

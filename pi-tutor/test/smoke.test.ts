@@ -52,7 +52,7 @@ describe("extension wiring", () => {
   it("before_agent_start sets the band section; detached turns carry the episode but no editor snapshot", async () => {
     const { events, commands, ctx } = await boot();
     const opts = { sections: {} as Record<string, string> };
-    const r1 = (await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx)) as { message: { customType: string; content: string; display: boolean } };
+    const r1 = (await events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "hi", systemPromptOptions: opts }, ctx)) as { message: { customType: string; content: string; display: boolean } };
     expect(opts.sections["tutor"]).toContain("# Tutor band: intermediate\n");
     expect(opts.sections["tutor"]).toContain("## Teaching style");
     expect(opts.sections["tutor"]).toContain("```tutor-judgment");
@@ -61,7 +61,7 @@ describe("extension wiring", () => {
     expect(r1.message.content).toMatch(/^\[episode\] stuck on: learner question\nhint rung 2\/5/);
     expect(r1.message.content).not.toContain("[editor]");
     await commands["tutor-level"].handler("5", ctx);
-    await events["before_agent_start"]({ type: "before_agent_start", prompt: "hi", systemPromptOptions: opts }, ctx);
+    await events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "hi", systemPromptOptions: opts }, ctx);
     expect(opts.sections["tutor"]).toContain("# Tutor band: beginner\n");
   });
 
@@ -115,7 +115,7 @@ describe("M2 review fixes", () => {
 });
 
 describe("M3 episodes, ladder and guard", () => {
-  const bas = (prompt: string) => ({ type: "before_agent_start", prompt, systemPromptOptions: { sections: {} } });
+  const bas = (prompt: string) => ({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: { sections: {} } });
 
   it("a chat message opens an episode; correct advances, wrong holds, episode_closed closes", async () => {
     const { events, ctx, entries, widgets } = await boot();
@@ -276,7 +276,7 @@ describe("M4 review fixes", () => {
     try {
       const b = await boot({ cwd: dir });
       other.exec("BEGIN EXCLUSIVE"); // another tutor holds the write lock past the busy timeout
-      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
       await expect(b.events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, b.ctx)).resolves.toBeUndefined();
       expect(b.widgets["tutor"]?.[1]).toMatch(/outside nvim|episode closed/); // the episode still closed
       await expect(b.commands["tutor-level"].handler("70", b.ctx)).resolves.toBeUndefined();
@@ -399,7 +399,7 @@ describe("M5 ease start rung", () => {
     process.env.PI_TUTOR_PROFILE = file;
     try {
       const b = await boot({ cwd: dir });
-      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
       expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
       await b.events["turn_end"]({ type: "turn_end", message: assistant('hm\n```tutor-judgment\n{"judgment":"wrong","concept_tags":["traits"]}\n```') }, b.ctx);
       expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 2");
@@ -898,7 +898,7 @@ describe("M6c: turn and episode bookkeeping", () => {
     // Pi's real order (agent-loop.js:114-118, 180-186): input fires while reply 1 streams, reply 1's
     // turn_end comes next, and only then is the steered text delivered as a user message_start.
     const user = (text: string) => ({ type: "message_start", message: { role: "user", content: [{ type: "text", text }], timestamp: 1 } });
-    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "what does this do?", systemPromptOptions: opts }, b.ctx);
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "what does this do?", systemPromptOptions: opts }, b.ctx);
     await b.events["message_start"](user("what does this do?"), b.ctx);
     await b.events["input"]({ type: "input", text: REASONED, source: "interactive", streamingBehavior: "steer" }, b.ctx);
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx); // reply 1: guarded against the first prompt
@@ -909,7 +909,7 @@ describe("M6c: turn and episode bookkeeping", () => {
   it("a followUp resets the run only when delivered, with the delivered (expanded) text", async () => {
     const b = await boot();
     const user = (text: string) => ({ type: "message_start", message: { role: "user", content: [{ type: "text", text }], timestamp: 1 } });
-    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: REASONED, systemPromptOptions: { sections: {} } }, b.ctx);
     await b.events["message_start"](user(REASONED), b.ctx);
     await b.events["input"]({ type: "input", text: "/skill:x", source: "interactive", streamingBehavior: "followUp" }, b.ctx);
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
@@ -1050,7 +1050,7 @@ describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
   it("tags follow the language the question was asked in, even if the session moved mid-reply (M7 minor)", async () => {
     const b = await boot({ cwd: await projectDir("python") });
     const opts = { sections: {} as Record<string, string> };
-    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: opts }, b.ctx);
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: REASONED, systemPromptOptions: opts }, b.ctx);
     const rust = fakeCtx([], await projectDir("rust")); // e.g. /resume into a rust project before turn_end
     await b.events["session_start"]({ type: "session_start", reason: "resume" }, rust.ctx);
     await b.events["turn_end"]({ type: "turn_end", message: tagged(["KeyError"]) }, rust.ctx);
@@ -1276,5 +1276,21 @@ describe("/tutor-progress (gap #8)", () => {
     expect(b.messages.at(-1)?.message).toMatchObject({ content: expect.stringMatching(/no progress yet/) });
     await b.commands["tutor-progress"].handler("../../x", b.ctx);
     expect(b.notes.at(-1)).toMatch(/usage: \/tutor-progress \[language\]/);
+  });
+});
+
+describe("Pi 1.2+: before_agent_start also fires for custom-message runs (messageType)", () => {
+  it("a run started by another extension's custom message gets the tutor prompt but opens no episode and does not throw", async () => {
+    const b = await boot();
+    await b.commands["tutor-level"].handler("10", b.ctx); // beginner: a learner message would open a chat episode
+    const before = episodes(b.entries).length;
+    const opts = { sections: {} as Record<string, string> };
+    const message = { role: "custom", customType: "other_ext", content: "a reminder from another extension", display: true, timestamp: Date.now() };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, b.ctx);
+    expect(opts.sections["tutor"]).toBeTruthy();
+    expect(episodes(b.entries)).toHaveLength(before);
+    // The learner's next real message still opens its episode as before.
+    await turn(b.events, b.ctx, "how do I start?", judged("none"));
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "chat" } });
   });
 });

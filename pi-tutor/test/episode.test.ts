@@ -87,7 +87,7 @@ describe("stuck episodes through a real Neovim", () => {
 
   it("an editor error supersedes an open chat episode and still nudges (final review I1)", async () => {
     const b = await linked();
-    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "what does :w do?", systemPromptOptions: { sections: {} } }, b.ctx);
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "what does :w do?", systemPromptOptions: { sections: {} } }, b.ctx);
     expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "chat" } });
     await setError("boom");
     await until(() => b.sent.length > 0);
@@ -134,7 +134,7 @@ describe("profile language in a scaffolded project (M4 final review I3)", () => 
       nvim = attach({ socket: h.socket });
       writeFileSync(join(root, "tasks.md"), "- [ ] P1.T1\n");
       await nvim.command(`edit ${join(root, "tasks.md")}`); // filetype markdown, as right after the switch
-      await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "where do I start?", systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "where do I start?", systemPromptOptions: { sections: {} } }, b.ctx);
       expect(b.widgets["tutor"]?.[0]).toMatch(/^tutor  markdown/); // display follows the buffer
       await b.events["turn_end"]({ type: "turn_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: '```tutor-judgment\n{"judgment":"none","concept_tags":["planning"],"episode_closed":true}\n```' }] } }, b.ctx);
       await b.commands["tutor-level"].handler("60", b.ctx);
@@ -279,7 +279,7 @@ describe("M6c: episodes against a real Neovim", () => {
   it("a judgment for a replaced episode leaves the new one alone (M3 #17)", async () => {
     const b = await linked(); // beginner: error threshold 0
     const opts = { sections: {} as Record<string, string> };
-    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: REASONED, systemPromptOptions: opts }, b.ctx); // chat episode
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: REASONED, systemPromptOptions: opts }, b.ctx); // chat episode
     await setError("boom"); // replaces it mid-reply
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
@@ -288,7 +288,7 @@ describe("M6c: episodes against a real Neovim", () => {
   it("a run that started without an episode does not judge one opened mid-reply (M6c M6)", async () => {
     const b = await linked(); // beginner: error threshold 0
     const opts = { sections: {} as Record<string, string> };
-    await b.events["before_agent_start"]({ type: "before_agent_start", prompt: "[tutor] a proactive nudge", systemPromptOptions: opts }, b.ctx); // no episode
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[tutor] a proactive nudge", systemPromptOptions: opts }, b.ctx); // no episode
     expect(episodes(b.entries)).toHaveLength(0);
     await setError("boom"); // an editor episode opens mid-reply
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
