@@ -28,7 +28,7 @@ import { EXPERIENCE } from "./interview.js";
 import { levelTasks, writeExercise, loadLessons, planRounds, startLessons, nextConcept, nextRound, type Lesson, type LessonState } from "./lessons.js";
 import { scaffoldPrompt, checkScaffold, writeScaffold } from "./scaffold.js";
 import { completeJson, type Complete } from "./llm.js";
-import { withLoader, Cancelled, MODEL_TIMEOUT_MS, type CustomUi } from "./progress.js";
+import { withLoader, Cancelled, MODEL_TIMEOUT_MS, SPEC_JOB_TIMEOUT_MS, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
 import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakConcepts, type IndexEntry } from "./packs.js";
@@ -1127,7 +1127,7 @@ export default function (pi: ExtensionAPI): void {
     const meta = { language: proj.language, level: job.level, band: bandFor(job.level), title: job.project.title, summary: job.project.summary };
     void (async () => {
       try {
-        const spec = await completeJson(rawComplete(ctx, AbortSignal.timeout(MODEL_TIMEOUT_MS)), systemText("scaffold"),
+        const spec = await completeJson(rawComplete(ctx, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
           scaffoldPrompt({ language: proj.language, level: job.level, band: meta.band, project: { ...job.project, size: "small" }, about: job.about, rounds: job.rounds }),
           (v) => checkScaffold(v, job.rounds));
         writeScaffold(proj.path, spec, meta, { existing: true });

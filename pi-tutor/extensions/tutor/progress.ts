@@ -7,6 +7,8 @@
  * reply) ran past 180 s on z-ai/glm-5.3-flash in the live check; the loader's Esc cancels sooner.
  */
 export const MODEL_TIMEOUT_MS = 600_000;
+/** The background plan job (spec 2026-10-19 Q10): nobody waits on it, and a slow provider needed over 10 minutes. */
+export const SPEC_JOB_TIMEOUT_MS = 30 * 60_000;
 
 export interface LoaderLike { readonly signal: AbortSignal; onAbort?: () => void }
 

@@ -131,3 +131,10 @@ describe("lesson rounds (spec 2026-10-19 Q14, Q15)", () => {
     expect(planRounds(["async"], new Set(), [], lessons)).toEqual([]);
   });
 });
+
+describe("background plan job (live check 2026-10-19: a slow provider took over 10 minutes twice)", () => {
+  it("waits up to 30 minutes, since nobody waits on it", async () => {
+    const { SPEC_JOB_TIMEOUT_MS } = await import("../extensions/tutor/progress.js");
+    expect(SPEC_JOB_TIMEOUT_MS).toBe(30 * 60_000);
+  });
+});
