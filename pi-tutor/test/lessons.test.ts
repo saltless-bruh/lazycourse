@@ -19,7 +19,7 @@ function exercise(root: string, rel: string) {
 }
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "lessons-"));
-  put(root, "python/loops/lesson.md", "---\nconcept: loops\ntitle: Loops\ntags: [loops]\nsource: exercism/python\nchecked: doctest\norder: 2\n---\nA loop repeats.\n");
+  put(root, "python/loops/lesson.md", "---\nconcept: loops\ntitle: Loops\ntags: [loops]\nsource: exercism/python\nchecked: doctest\nrequires: [basics, lists]\norder: 2\n---\nA loop repeats.\n");
   put(root, "python/basics/lesson.md", "---\nconcept: basics\ntitle: Basics\ntags: [variables]\nsource: exercism/python\norder: 1\n---\nValues have names.\n");
   exercise(root, "python/loops/1-count");
   put(root, "python/loops/2-broken/instructions.md", "no exemplar here\n");
@@ -35,6 +35,8 @@ describe("lessons (spec 2026-10-19 §7, §7a)", () => {
     expect(ls.map((l) => l.concept)).toEqual(["basics", "loops"]);
     expect(ls[1]).toMatchObject({ title: "Loops", tags: ["loops"], source: "exercism/python", order: 2, checked: "doctest" });
     expect(ls[0].checked).toBeNull();
+    expect(ls[1].requires).toEqual(["basics", "lists"]);
+    expect(ls[0].requires).toBeNull();
     expect(ls[1].text).toContain("A loop repeats.");
   });
   it("skips an exercise missing its exemplar (Review Focus #3)", () => {
@@ -107,7 +109,7 @@ describe("lesson text checks (side-agent note 2026-10-19: the text, not only the
 });
 
 describe("lesson rounds (spec 2026-10-19 Q14, Q15)", () => {
-  const L = (concept: string, order: number, tags: string[] = [concept]): Lesson => ({ language: "python", concept, title: concept, tags, source: "", order, checked: null, text: "", exercises: [] });
+  const L = (concept: string, order: number, tags: string[] = [concept]): Lesson => ({ language: "python", concept, title: concept, tags, source: "", order, checked: null, requires: null, text: "", exercises: [] });
   const lessons = ["basics", "bools", "numbers", "conditionals", "strings", "lists", "loops", "dicts", "functions"].map((c, i) => L(c, i + 1));
   it("only concepts with a lesson that the learner does not know, weak ones first, three per round", () => {
     const r = planRounds(["numbers", "conditionals", "strings", "lists", "loops", "dicts", "functions", "bools", "async"], new Set(["bools"]), ["dicts", "loops"], lessons);
@@ -126,6 +128,22 @@ describe("lesson rounds (spec 2026-10-19 Q14, Q15)", () => {
   });
   it("a beginner whose project names no known concept starts at the beginning of the course (live check 2026-10-19)", () => {
     expect(planRounds(["data-entry", "file-storage"], new Set(), [], lessons, { beginner: true })).toEqual([["basics", "bools", "numbers"], ["conditionals", "strings", "lists"]]);
+  });
+  it("a beginner gets only the stated prerequisites of the project's lessons, followed through", () => {
+    const req = (l: Lesson, requires: string[]): Lesson => ({ ...l, requires });
+    const ls = lessons.map((l) => l.concept === "lists" ? req(l, ["conditionals", "strings"]) : l.concept === "strings" ? req(l, ["basics"])
+      : l.concept === "conditionals" ? req(l, ["basics", "bools"]) : l.concept === "basics" ? req(l, []) : l);
+    expect(planRounds(["lists"], new Set(), [], ls, { beginner: true }).flat()).toEqual(["basics", "bools", "conditionals", "strings", "lists"]);
+    expect(planRounds(["lists"], new Set(["strings"]), [], ls, { beginner: true }).flat()).toEqual(["basics", "bools", "conditionals", "lists"]);
+  });
+  it("a prerequisite may name a tag; one that names no lesson is ignored", () => {
+    const ls = [L("basics", 1, ["variables"]), { ...L("numbers", 2), requires: ["variables", "math-magic"] }, L("bools", 3)];
+    expect(planRounds(["numbers"], new Set(), [], ls, { beginner: true })).toEqual([["basics", "numbers"]]);
+  });
+  it("a prerequisite comes before the lesson that needs it, even when it sits later in course order", () => {
+    const ls = [{ ...L("strings", 1), requires: [] }, { ...L("input", 2), requires: ["strings", "functions"] }, { ...L("functions", 100), requires: [] }];
+    expect(planRounds(["input"], new Set(), [], ls, { beginner: true }).flat()).toEqual(["strings", "functions", "input"]);
+    expect(planRounds(["input", "functions"], new Set(), ["input"], ls).flat()).toEqual(["functions", "input"]);
   });
   it("nothing to learn gives no rounds", () => {
     expect(planRounds(["async"], new Set(), [], lessons)).toEqual([]);

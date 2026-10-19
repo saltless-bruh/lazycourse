@@ -3,6 +3,7 @@ concept: string-formatting
 title: "String Formatting"
 tags: [strings, packages]
 source: exercism-go 74f09b2 exercises/concept/party-robot (MIT)
+requires: [strings, arithmetic-operators]
 order: 3
 ---
 

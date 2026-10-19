@@ -3,6 +3,7 @@ concept: conditionals
 title: "Conditionals"
 tags: [conditionals]
 source: exercism-python 6105f6d exercises/concept/meltdown-mitigation (MIT)
+requires: [basics, bools]
 order: 4
 ---
 

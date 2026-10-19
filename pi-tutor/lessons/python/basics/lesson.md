@@ -3,6 +3,7 @@ concept: basics
 title: "Basics"
 tags: [variables]
 source: exercism-python 6105f6d exercises/concept/guidos-gorgeous-lasagna (MIT)
+requires: []
 order: 1
 ---
 

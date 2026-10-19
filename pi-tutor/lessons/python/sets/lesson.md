@@ -3,6 +3,7 @@ concept: sets
 title: "Sets"
 tags: [sets-tuples]
 source: exercism-python 6105f6d exercises/concept/cater-waiter (MIT)
+requires: [basics, dicts, lists, loops, tuples]
 order: 15
 ---
 

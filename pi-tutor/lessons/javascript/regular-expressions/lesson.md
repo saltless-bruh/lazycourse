@@ -3,6 +3,7 @@ concept: regular-expressions
 title: "Regular Expressions"
 tags: [regular-expressions]
 source: exercism-javascript ff04f35 exercises/concept/regular-chatbot (MIT)
+requires: [arrays, objects, conditionals-ternary]
 order: 21
 ---
 

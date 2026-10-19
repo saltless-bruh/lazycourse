@@ -3,6 +3,7 @@ concept: input
 title: "Reading what the user types"
 tags: [functions]
 source: lua/lua 8cb93ba manual io.read (Lua licence); exercises ours
+requires: [basics, numbers]
 order: 10.5
 ---
 

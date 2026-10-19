@@ -4,6 +4,7 @@ title: "Reading and writing files"
 tags: [files-io]
 source: python/cpython v3.14.8 (8e6e75d) Doc/tutorial/inputoutput.rst §7.2 (PSF License); exercises ours
 checked: doctest
+requires: [functions, strings, loops]
 order: 13.5
 ---
 

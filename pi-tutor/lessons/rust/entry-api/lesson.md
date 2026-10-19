@@ -3,6 +3,7 @@ concept: entry-api
 title: "Entry API"
 tags: [collections]
 source: exercism-rust cc099ae exercises/concept/magazine-cutout (MIT)
+requires: [functions, option]
 order: 102
 ---
 

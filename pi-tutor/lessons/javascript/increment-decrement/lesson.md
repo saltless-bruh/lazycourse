@@ -3,6 +3,7 @@ concept: increment-decrement
 title: "Increment/Decrement"
 tags: [increment-decrement, for-loops]
 source: exercism-javascript ff04f35 exercises/concept/bird-watcher (MIT)
+requires: [arrays, comparison]
 order: 7
 ---
 

@@ -3,6 +3,7 @@ concept: range-iteration
 title: "Range Iteration"
 tags: [range-iteration, type-definitions]
 source: exercism-go 74f09b2 exercises/concept/chessboard (MIT)
+requires: [comparison, for-loops, maps, slices, structs]
 order: 16
 ---
 

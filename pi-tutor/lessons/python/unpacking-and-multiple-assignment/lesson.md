@@ -3,6 +3,7 @@ concept: unpacking-and-multiple-assignment
 title: "Unpacking And Multiple Assignment"
 tags: [sets-tuples]
 source: exercism-python 6105f6d exercises/concept/locomotive-engineer (MIT)
+requires: [loops, lists, tuples, dicts]
 order: 14
 ---
 

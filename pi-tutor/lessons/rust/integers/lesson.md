@@ -3,6 +3,7 @@ concept: integers
 title: "Integers"
 tags: [integers, floating-point-numbers]
 source: exercism-rust cc099ae exercises/concept/assembly-line (MIT)
+requires: [functions]
 order: 103
 ---
 

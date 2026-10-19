@@ -3,6 +3,7 @@ concept: vec-macro
 title: "vec! macro"
 tags: [collections]
 source: exercism-rust cc099ae exercises/concept/short-fibonacci (MIT)
+requires: [functions, integers]
 order: 108
 ---
 

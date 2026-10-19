@@ -3,6 +3,7 @@ concept: list-methods
 title: "List Methods"
 tags: [lists]
 source: exercism-python 6105f6d exercises/concept/chaitanas-colossal-coaster (MIT)
+requires: [lists]
 order: 9
 ---
 

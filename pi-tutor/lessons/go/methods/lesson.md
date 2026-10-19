@@ -3,6 +3,7 @@ concept: methods
 title: "Methods"
 tags: [methods]
 source: exercism-go 74f09b2 exercises/concept/jedliks-toys (MIT)
+requires: [structs, string-formatting, range-iteration, pointers, functions]
 order: 11
 ---
 

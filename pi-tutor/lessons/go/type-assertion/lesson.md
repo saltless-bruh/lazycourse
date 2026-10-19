@@ -3,6 +3,7 @@ concept: type-assertion
 title: "Type Assertion"
 tags: [type-assertion, types]
 source: exercism-go 74f09b2 exercises/concept/sorting-room (MIT)
+requires: [interfaces, string-formatting]
 order: 15
 ---
 

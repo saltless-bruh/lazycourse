@@ -3,6 +3,7 @@ concept: vec-stack
 title: "Vector as a Stack"
 tags: [collections]
 source: exercism-rust cc099ae exercises/concept/rpn-calculator (MIT)
+requires: [functions, integers, option, enums]
 order: 109
 ---
 

@@ -3,6 +3,7 @@ concept: randomness
 title: "Randomness"
 tags: [randomness]
 source: exercism-go 74f09b2 exercises/concept/animal-magic (MIT)
+requires: [arithmetic-operators, slices]
 order: 24
 ---
 

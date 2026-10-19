@@ -3,6 +3,7 @@ concept: floating-point-numbers
 title: "Floating-Point Numbers"
 tags: [floating-point-numbers]
 source: exercism-go 74f09b2 exercises/concept/interest-is-interesting (MIT)
+requires: [arithmetic-operators, comparison, string-formatting, for-loops]
 order: 22
 ---
 

@@ -4,6 +4,7 @@ title: "Functions"
 tags: [functions]
 source: exercism/python 6105f6d concepts/functions (MIT); exercises ours
 checked: doctest
+requires: [basics]
 order: 1.5
 ---
 

@@ -3,6 +3,7 @@ concept: strings
 title: "Strings"
 tags: [strings]
 source: exercism-python 6105f6d exercises/concept/little-sisters-vocab (MIT)
+requires: [basics, conditionals]
 order: 7
 ---
 

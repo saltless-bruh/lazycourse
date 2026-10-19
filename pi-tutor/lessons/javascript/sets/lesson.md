@@ -3,6 +3,7 @@ concept: sets
 title: "Sets"
 tags: [maps-sets]
 source: exercism-javascript ff04f35 exercises/concept/ozans-playlist (MIT)
+requires: [array-destructuring, array-loops, comparison, rest-and-spread, arrays]
 order: 17
 ---
 

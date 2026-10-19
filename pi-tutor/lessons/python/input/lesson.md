@@ -3,6 +3,7 @@ concept: input
 title: "Reading what the user types"
 tags: [input]
 source: python/cpython v3.14.8 (8e6e75d) Doc/tutorial/errors.rst §8.3 example (PSF License); exercises ours
+requires: [exceptions, loops]
 order: 10.6
 ---
 

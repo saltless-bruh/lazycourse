@@ -16,7 +16,9 @@ const LEVELS = "_levels";
 /** `extras`: helper files the source ships next to the stub (Exercism data modules), from `files/`. */
 export interface Exercise { id: string; dir: string; instructions: string; stub: string; tests: string; exemplar: string; extras: [string, string][] }
 /** `checked`: how the lesson text itself is verified ("doctest": its >>> examples run in `npm run lessons`), or null. */
-export interface Lesson { language: string; concept: string; title: string; tags: string[]; source: string; order: number; checked: string | null; text: string; exercises: Exercise[] }
+export interface Lesson { language: string; concept: string; title: string; tags: string[]; source: string; order: number; checked: string | null;
+  /** The lessons (concepts or tags) this one builds on, as its source states them; null: not stated, so every earlier lesson. */
+  requires: string[] | null; text: string; exercises: Exercise[] }
 
 const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
 const read = (p: string) => { try { return readFileSync(p, "utf8"); } catch { return null; } };
@@ -54,7 +56,7 @@ export function loadLessons(language: string, root = LESSONS_DIR): Lesson[] {
     out.push({
       language, concept: String(f.concept ?? concept), title: String(f.title ?? concept),
       tags: Array.isArray(f.tags) ? f.tags.map(String) : [], source: String(f.source ?? ""), order: Number(f.order ?? 999),
-      checked: typeof f.checked === "string" ? f.checked : null,
+      checked: typeof f.checked === "string" ? f.checked : null, requires: Array.isArray(f.requires) ? f.requires.map(String) : null,
       text: body.trim(), exercises: exercisesIn(language, join(base, concept)),
     });
   }
@@ -108,22 +110,39 @@ const matches = (l: Lesson, c: string) => l.concept === c || l.tags.includes(c);
 
 /**
  * Lesson rounds for a project (Q14, Q15): the project's concepts that have a lesson and are not known,
- * weak ones first, then in course order, at most 3 per round. A beginner also gets every lesson that
- * comes before the project's last needed one in course order (variables before lists).
+ * weak ones first, then in course order, at most 3 per round. A beginner also gets the lessons those
+ * build on (a lesson's `requires`, or every earlier lesson when it states none), followed through.
  */
 export function planRounds(project: string[], known: Set<string>, weak: string[], lessons: Lesson[], opts: { beginner?: boolean } = {}): string[][] {
   const isKnown = (l: Lesson) => known.has(l.concept) || l.tags.some((t) => known.has(t));
+  const named = (c: string) => lessons.find((l) => l.concept === c) ?? lessons.find((l) => l.tags.includes(c));
   const needed = new Set<Lesson>();
   for (const c of project) for (const l of lessons) if (matches(l, c) && !isKnown(l)) needed.add(l);
   if (opts.beginner && needed.size) {
-    const last = Math.max(...[...needed].map((l) => l.order));
-    for (const l of lessons) if (l.order <= last && !isKnown(l)) needed.add(l);
+    // Live check 2026-10-19: "every lesson before the last one needed" planned 13 lessons for a 3-concept project;
+    // a beginner gets the prerequisites each lesson states, followed through, and no others.
+    const pull = (l: Lesson) => {
+      for (const c of l.requires ?? lessons.filter((x) => x.order < l.order).map((x) => x.concept)) {
+        const x = named(c);
+        if (x && !isKnown(x) && !needed.has(x)) { needed.add(x); pull(x); }
+      }
+    };
+    for (const l of [...needed]) pull(l);
   }
   // Live check 2026-10-19: a beginner's project may name no concept a lesson covers; learning first then
   // starts at the beginning of the course (two rounds), not with nothing.
   if (opts.beginner && !needed.size) for (const l of [...lessons].sort((a, b) => a.order - b.order).filter((x) => !isKnown(x)).slice(0, 6)) needed.add(l);
   const rank = (l: Lesson) => { const w = weak.findIndex((c) => matches(l, c)); return w < 0 ? Number.MAX_SAFE_INTEGER : w; };
-  const order = [...needed].sort((a, b) => rank(a) - rank(b) || a.order - b.order).map((l) => l.concept);
+  // A planned prerequisite goes first, even when weak-first or course order would put it later.
+  const order: string[] = [], seen = new Set<Lesson>();
+  const emit = (l: Lesson) => {
+    if (seen.has(l)) return;
+    seen.add(l);
+    const first = (l.requires ?? []).map(named).filter((x): x is Lesson => !!x && needed.has(x)).sort((a, b) => a.order - b.order);
+    for (const x of first) emit(x);
+    order.push(l.concept);
+  };
+  for (const l of [...needed].sort((a, b) => rank(a) - rank(b) || a.order - b.order)) emit(l);
   const rounds: string[][] = [];
   for (let i = 0; i < order.length; i += 3) rounds.push(order.slice(i, i + 3));
   return rounds;

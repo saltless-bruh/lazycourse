@@ -3,6 +3,7 @@ concept: pointers
 title: "Pointers"
 tags: [pointers]
 source: exercism-go 74f09b2 exercises/concept/election-day (MIT)
+requires: [structs, slices, maps, arithmetic-operators, string-formatting]
 order: 21
 ---
 

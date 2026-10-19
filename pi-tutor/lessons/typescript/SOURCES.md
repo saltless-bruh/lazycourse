@@ -43,6 +43,13 @@ Skipped:
 - windowing-system: tests use features the converter does not support
 - captains-log: tests use features the converter does not support
 - recycling-robot: text fixed (a reference link whose label did not match its definition)
+- array-loops: prerequisites callbacks dropped (no lesson teaches them)
+- array-transformations: prerequisites callbacks dropped (no lesson teaches them)
+- arrow-functions: prerequisites callbacks dropped (no lesson teaches them)
+- dates: prerequisites classes dropped (no lesson teaches them)
+- regular-expressions: prerequisites classes dropped (no lesson teaches them)
+- sets: prerequisites classes dropped (no lesson teaches them)
+- type-checking: prerequisites errors, classes dropped (no lesson teaches them)
 
 ## exercism-typescript
 

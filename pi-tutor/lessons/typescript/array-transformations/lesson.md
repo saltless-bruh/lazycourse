@@ -3,6 +3,7 @@ concept: array-transformations
 title: "Array Transformations"
 tags: [arrays]
 source: exercism-javascript ff04f35 exercises/concept/elyses-transformative-enchantments (MIT)
+requires: [numbers, arrays, comparison]
 order: 19
 ---
 

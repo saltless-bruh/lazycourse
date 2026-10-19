@@ -3,6 +3,7 @@ concept: numbers
 title: "Numbers"
 tags: [numbers]
 source: exercism-lua 02837e0 exercises/concept/cars-assemble (MIT)
+requires: [basics]
 order: 2
 ---
 

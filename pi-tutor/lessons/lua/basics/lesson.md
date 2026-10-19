@@ -3,6 +3,7 @@ concept: basics
 title: "Basics"
 tags: [functions]
 source: exercism-lua 02837e0 exercises/concept/lasagna (MIT)
+requires: []
 order: 1
 ---
 

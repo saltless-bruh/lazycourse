@@ -3,6 +3,7 @@ concept: functions
 title: "Functions"
 tags: [functions]
 source: exercism-rust cc099ae exercises/concept/lucians-luscious-lasagna (MIT)
+requires: []
 order: 101
 ---
 

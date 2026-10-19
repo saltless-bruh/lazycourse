@@ -3,6 +3,7 @@ concept: files-io
 title: "Reading and writing files"
 tags: [functions]
 source: lua/lua 8cb93ba manual io.lines, io.open (Lua licence); exercises ours
+requires: [basics]
 order: 10.6
 ---
 

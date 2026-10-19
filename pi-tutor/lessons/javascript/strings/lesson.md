@@ -3,6 +3,7 @@ concept: strings
 title: "Strings"
 tags: [strings]
 source: exercism-javascript ff04f35 exercises/concept/poetry-club-door-policy (MIT)
+requires: [basics]
 order: 4
 ---
 

@@ -3,6 +3,7 @@ concept: files-io
 title: "Reading and writing files"
 tags: [files-io]
 source: gobyexample 28c81a7 examples/reading-files, writing-files (CC BY 3.0); exercises ours
+requires: [functions, for-loops, errors]
 order: 30.6
 ---
 

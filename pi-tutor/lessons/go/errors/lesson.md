@@ -3,6 +3,7 @@ concept: errors
 title: "Errors"
 tags: [errors]
 source: exercism-go 74f09b2 exercises/concept/the-farm (MIT)
+requires: [interfaces, comparison, functions, structs, string-formatting, methods]
 order: 18
 ---
 

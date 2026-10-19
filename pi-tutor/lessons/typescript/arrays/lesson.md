@@ -3,6 +3,7 @@ concept: arrays
 title: "Arrays"
 tags: [arrays]
 source: exercism-javascript ff04f35 exercises/concept/elyses-enchantments (MIT)
+requires: [numbers]
 order: 5
 ---
 

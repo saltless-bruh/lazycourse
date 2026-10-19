@@ -3,6 +3,7 @@ concept: while-loops
 title: "While Loops"
 tags: [while-loops, conditionals-switch]
 source: exercism-javascript ff04f35 exercises/concept/mixed-juices (MIT)
+requires: [comparison, arrays]
 order: 8
 ---
 

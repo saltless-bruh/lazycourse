@@ -3,6 +3,7 @@ concept: bools
 title: "Bools"
 tags: [booleans]
 source: exercism-python 6105f6d exercises/concept/ghost-gobble-arcade-game (MIT)
+requires: [basics]
 order: 2
 ---
 

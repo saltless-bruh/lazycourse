@@ -3,6 +3,7 @@ concept: dicts
 title: "Dicts"
 tags: [dicts]
 source: exercism-python 6105f6d exercises/concept/inventory-management (MIT)
+requires: [loops, lists, tuples]
 order: 12
 ---
 

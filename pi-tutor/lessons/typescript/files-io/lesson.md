@@ -3,6 +3,7 @@ concept: files-io
 title: "Reading and writing files"
 tags: [modules]
 source: nodejs/node bb3f917 doc/api/fs.md (Node.js licence); exercises ours
+requires: [functions, strings, arrays, conditionals-ternary]
 order: 40.6
 ---
 
