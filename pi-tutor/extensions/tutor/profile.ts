@@ -1,3 +1,4 @@
+import { emptyCard, nextCard, ratingFor, seedCard, type CardState } from "./review.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -30,6 +31,8 @@ export const MIGRATIONS: string[] = [
   // v4 (M8): exams, each folding score/100 into its concepts' ease (spec 2026-10-13 §6).
   `CREATE TABLE exams (id INTEGER PRIMARY KEY AUTOINCREMENT, exam TEXT NOT NULL, project TEXT, language TEXT NOT NULL, topic TEXT,
      score INTEGER NOT NULL, minutes REAL NOT NULL, late INTEGER NOT NULL, concepts TEXT NOT NULL, created INTEGER NOT NULL);`,
+  // v5 (spec 2026-10-19 §7b): one FSRS card per concept; `due` is epoch ms for the "what to review" query.
+  `CREATE TABLE cards (language TEXT NOT NULL, tag TEXT NOT NULL, card TEXT NOT NULL, due INTEGER NOT NULL, PRIMARY KEY (language, tag));`,
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -129,7 +132,32 @@ export class Profile {
   recordEpisode(e: EpisodeRecord, score: number | null): void {
     this.db.prepare(`INSERT INTO episodes (language, project, concept_tags, rungs_used, turns, opened, closed) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(e.language, e.project, JSON.stringify(e.concept_tags), e.rungs_used, e.turns, e.opened, e.closed);
-    if (score !== null) this.foldEase(e.language, e.concept_tags, score);
+    if (score === null) return;
+    for (const tag of e.concept_tags) this.rateConcept(e.language, tag, score, e.closed);
+    this.foldEase(e.language, e.concept_tags, score);
+  }
+
+  /**
+   * One FSRS review of a concept. Rate before folding ease: a concept with an ease from before v5 and
+   * no card yet gets a card seeded from that ease; a brand-new concept starts from an empty card.
+   */
+  rateConcept(language: string, tag: string, score: number, now: number): void {
+    const row = this.db.prepare("SELECT card FROM cards WHERE language = ? AND tag = ?").get(language, tag) as Row | undefined;
+    let card: CardState;
+    if (row) card = JSON.parse(String(row.card)) as CardState;
+    else {
+      const old = this.db.prepare("SELECT ease FROM concepts WHERE language = ? AND tag = ?").get(language, tag) as Row | undefined;
+      card = old ? seedCard(Number(old.ease), now) : emptyCard(now);
+    }
+    const next = nextCard(card, ratingFor(score), now);
+    this.db.prepare(`INSERT INTO cards (language, tag, card, due) VALUES (?, ?, ?, ?)
+      ON CONFLICT(language, tag) DO UPDATE SET card = excluded.card, due = excluded.due`).run(language, tag, JSON.stringify(next), next.due);
+  }
+
+  /** Concepts due for review at `now`, longest overdue first. */
+  dueConcepts(language: string, now: number, limit = 3): string[] {
+    return (this.db.prepare("SELECT tag FROM cards WHERE language = ? AND due <= ? ORDER BY due, tag LIMIT ?").all(language, now, limit) as Row[])
+      .map((r) => String(r.tag));
   }
 
   /** One ease sample per tag, folded as a running mean (episodes and exams). */
@@ -142,6 +170,7 @@ export class Profile {
   recordExam(e: ExamRecord): void {
     this.db.prepare(`INSERT INTO exams (exam, project, language, topic, score, minutes, late, concepts, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(e.exam, e.project, e.language, e.topic, e.score, e.minutes, e.late ? 1 : 0, JSON.stringify(e.concepts), e.created);
+    for (const tag of e.concepts) this.rateConcept(e.language, tag, e.score / 100, e.created);
     this.foldEase(e.language, e.concepts, e.score / 100);
   }
 

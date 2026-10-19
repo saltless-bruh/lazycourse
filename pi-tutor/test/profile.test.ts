@@ -112,7 +112,7 @@ describe("busy profile (final review I4)", () => {
 
 describe("profile v3+: settings", () => {
   it("is schema v3 and keeps a setting across reopen", () => {
-    expect(SCHEMA_VERSION).toBe(4);
+    expect(SCHEMA_VERSION).toBe(5);
     const path = join(mkdtempSync(join(tmpdir(), "prof-")), "p.sqlite");
     const a = Profile.open(path);
     expect(a.setting("thinking")).toBeNull();
@@ -257,9 +257,45 @@ describe("profile v4: exams (spec 2026-10-13 §6, M8 D7)", () => {
     raw.exec(`INSERT INTO settings VALUES ('thinking', 'hide');`);
     raw.close();
     const q = Profile.open(file);
-    expect(q.version).toBe(4);
+    expect(q.version).toBe(SCHEMA_VERSION);
     expect(q.setting("thinking")).toBe("hide");
     expect(q.exams("python")).toEqual([]);
     q.close();
+  });
+});
+
+describe("profile v5: FSRS cards (spec 2026-10-19 §7b)", () => {
+  const day = 86_400_000;
+  it("a v4 profile opens at v5 with its rows kept", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pv5-")), "p.sqlite");
+    const db = new DatabaseSync(path);
+    db.exec("CREATE TABLE schema_version (v INTEGER NOT NULL); INSERT INTO schema_version VALUES (0);");
+    for (const m of MIGRATIONS.slice(0, 4)) db.exec(m);
+    db.prepare("UPDATE schema_version SET v = 4").run();
+    db.prepare("INSERT INTO concepts (language, tag, ease, episodes) VALUES ('python', 'loops', 0.3, 2)").run();
+    db.close();
+    const p = Profile.open(path);
+    expect(p.version).toBe(5);
+    expect(p.concepts("python")).toMatchObject([{ tag: "loops", ease: 0.3 }]);
+    p.close();
+  });
+  it("a badly scored concept becomes due; one rated easy yesterday is not due today", () => {
+    const p = Profile.open(":memory:");
+    const t = Date.UTC(2026, 9, 19);
+    p.recordEpisode({ language: "python", project: null, concept_tags: ["loops"], rungs_used: 3, turns: 2, opened: t, closed: t }, 0.2);
+    expect(p.dueConcepts("python", t + 365 * day)).toContain("loops");
+    p.rateConcept("python", "dicts", 1, t - day);
+    expect(p.dueConcepts("python", t)).not.toContain("dicts");
+    p.close();
+  });
+  it("exams rate their concepts too, and due concepts come oldest first, at most `limit`", () => {
+    const p = Profile.open(":memory:");
+    const t = Date.UTC(2026, 9, 19);
+    p.recordExam({ exam: "01-x", project: null, language: "go", topic: null, score: 10, minutes: 5, late: false, concepts: ["maps", "slices"], created: t });
+    p.rateConcept("go", "structs", 0.1, t + day);
+    const due = p.dueConcepts("go", t + 365 * day, 2);
+    expect(due).toHaveLength(2);
+    expect(due).not.toContain("structs");
+    p.close();
   });
 });
