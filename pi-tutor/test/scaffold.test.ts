@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkScaffold, taskIds, slugify, commentPrefix, isEmptyOrMissing, writeScaffold, scaffoldPrompt, type ScaffoldSpec } from "../extensions/tutor/scaffold.js";
+import { checkScaffold, taskIds, slugify, commentPrefix, isEmptyOrMissing, writeScaffold, scaffoldPrompt, agents, type ScaffoldSpec } from "../extensions/tutor/scaffold.js";
 import { systemText } from "../extensions/tutor/prompts.js";
 
 const spec = (over: Partial<ScaffoldSpec> = {}): ScaffoldSpec => ({
@@ -21,7 +21,11 @@ describe("taskIds / checkScaffold", () => {
     expect(checkScaffold(spec())).toEqual(spec());
   });
   it("rejects a task id missing from requirements, naming it", () => {
-    expect(() => checkScaffold(spec({ requirements_md: "## P1.T1\n## P1.T2\n" }))).toThrow(/P1\.T1\.S1/);
+    expect(() => checkScaffold(spec({ requirements_md: "## P1.T1\n## P1.T1.S1\n" }))).toThrow(/P1\.T2/);
+  });
+  it("a subtask needs no section of its own: its task's section covers it (live check 2026-10-20: smaller plans)", () => {
+    expect(checkScaffold(spec({ requirements_md: "## P1.T1\n...\n## P1.T2\n...\n" })).tasks_md).toContain("P1.T1.S1");
+    expect(agents(meta)).toMatch(/subtask's requirements are in its task's section/);
   });
   it("rejects tasks without ids or without checkboxes", () => {
     expect(() => checkScaffold(spec({ tasks_md: "# Tasks\n- [ ] do things\n" }))).toThrow(/task ids/);
@@ -117,6 +121,15 @@ describe("build or learn: milestones and the existing project folder (spec 2026-
     expect(p).toMatch(/## Milestone 2: lists/);
     expect(p).toContain("idea: a todo list");
     expect(scaffoldPrompt({ language: "python", level: 10, band: "beginner", project, about: {}, rounds: [] })).not.toMatch(/Milestone/);
+  });
+  it("the prompt sets a size budget, smaller for a plan of milestones (live check 2026-10-20: weak models failed the big one)", () => {
+    const learn = scaffoldPrompt({ language: "python", level: 10, band: "beginner", project, about: {}, rounds: [["basics"], ["lists"]] });
+    expect(learn).toMatch(/at most 3 tasks per milestone/);
+    expect(learn).toMatch(/at most 3 subtasks per task/);
+    const build = scaffoldPrompt({ language: "python", level: 50, band: "intermediate", project, about: {}, rounds: [] });
+    expect(build).toMatch(/at most 8 tasks/);
+    expect(build).not.toMatch(/subtasks per task/);
+    expect(systemText("scaffold")).toMatch(/one `## <id>` section per task/);
   });
   it("a learn-first spec must carry the milestone headings", () => {
     expect(() => checkScaffold(spec(), [["basics"]])).toThrow(/## Milestone 1/);

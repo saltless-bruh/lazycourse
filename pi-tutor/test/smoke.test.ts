@@ -1485,7 +1485,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     p.saveLanguage("python", 10, {}, 1); p.addProject("python", dir, "Tip Calculator", 1);
     p.setSetting("onboarding", JSON.stringify({ ...newOnboarding(null), targetByCode: true, level: 10, stage: "choose", dir,
       fields: { experience: "none yet", known: [], target: "python", idea: null },
-      project: { title: "Tip Calculator", summary: "Split a bill.", concepts: ["numbers", "functions"] } }));
+      project: { title: "Tip Calculator", summary: "Split a bill.", concepts: ["numbers", "functions", "conditionals"] } }));
     p.close();
   });
   afterEach(() => {
@@ -1510,12 +1510,12 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     const b = await boot({ cwd: dir });
     expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { deliverAs: "followUp" } });
   });
-  it("learn first: lesson rounds start (a beginner gets the earlier lessons too) and the spec is written in milestones in the background", async () => {
+  it("learn first: lesson rounds start (a beginner gets what its concepts build on: conditionals needs bools) and the spec is written in milestones in the background", async () => {
     const b = await boot({ cwd: dir });
-    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
     await exchange(b, note({ path: "learn" }));
     const lesson = await setting(`lesson:${dir}`);
-    expect(lesson.rounds).toEqual([["basics", "functions", "bools"], ["numbers"]]);
+    expect(lesson.rounds).toEqual([["basics", "functions", "bools"], ["numbers", "conditionals", "comparisons"]]);
     expect(lesson.concept).toBe("basics");
     expect(await setting("onboarding")).toBeNull();
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
@@ -1546,14 +1546,14 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(b.notes.some((n) => /could not be written.*\/tutor-start spec retries/.test(n))).toBe(true);
     await b.commands["tutor-lesson"].handler("next", b.ctx);
     expect(existsSync(pjoin(dir, "learn", "basics", "1-guidos-gorgeous-lasagna", "solution.py"))).toBe(true);
-    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
     await b.commands["tutor-start"].handler("spec", b.ctx);
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
   it("lesson exercises: never the exemplar; two fails step back; a pass rates the concept and moves on; skip marks it known", async () => {
     const b = await boot({ cwd: dir });
     b.pi.exec = realExec as never;
-    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
     await exchange(b, note({ path: "learn" }));
     await b.commands["tutor-lesson"].handler("next", b.ctx);
     const ex = pjoin(dir, "learn", "basics", "1-guidos-gorgeous-lasagna");
@@ -1604,7 +1604,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     const p = Profile.open(file); p.rateConcept("python", "loops", 0.1, Date.now() - 40 * 86_400_000); p.close();
     const b = await boot({ cwd: dir });
     b.pi.exec = realExec as never;
-    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
     await exchange(b, note({ path: "learn" }));
     await b.commands["tutor-lesson"].handler("review", b.ctx);
     expect((await setting(`lesson:${dir}`)).concept).toBe("loops");
@@ -1636,7 +1636,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
   });
   it("the last concept of a round turns to building that milestone; next starts the following round", async () => {
     const b = await boot({ cwd: dir });
-    b.replies.push(SPEC(["basics, functions, bools", "numbers"]));
+    b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
     await exchange(b, note({ path: "learn" }));
     for (let i = 0; i < 3; i++) await b.commands["tutor-lesson"].handler("skip", b.ctx);
     expect((await setting(`lesson:${dir}`)).building).toBe(true);
