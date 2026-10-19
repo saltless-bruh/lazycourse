@@ -3,6 +3,7 @@ concept: comparison
 title: "Comparison"
 tags: [comparison, conditionals]
 source: exercism-javascript ff04f35 exercises/concept/vehicle-purchase (MIT)
+requires: [booleans, numbers, strings]
 order: 6
 ---
 

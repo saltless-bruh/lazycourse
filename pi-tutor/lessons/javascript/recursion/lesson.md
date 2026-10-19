@@ -3,6 +3,7 @@ concept: recursion
 title: "Recursion"
 tags: [recursion]
 source: exercism-javascript ff04f35 exercises/concept/pizza-order (MIT)
+requires: [functions, rest-and-spread, array-destructuring, array-transformations]
 order: 15
 ---
 

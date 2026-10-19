@@ -3,6 +3,7 @@ concept: zero-values
 title: "Zero Values"
 tags: [variables]
 source: exercism-go 74f09b2 exercises/concept/census (MIT)
+requires: [maps, structs, arithmetic-operators, string-formatting, booleans, methods, slices, comparison, pointers]
 order: 19
 ---
 

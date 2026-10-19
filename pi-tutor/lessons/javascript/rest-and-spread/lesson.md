@@ -3,6 +3,7 @@ concept: rest-and-spread
 title: "Rest and Spread"
 tags: [objects]
 source: exercism-javascript ff04f35 exercises/concept/train-driver (MIT)
+requires: [functions, array-destructuring]
 order: 12
 ---
 

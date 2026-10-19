@@ -3,6 +3,7 @@ concept: input
 title: "Reading what the user types"
 tags: [files-io]
 source: gobyexample 28c81a7 examples/line-filters (CC BY 3.0); exercises ours
+requires: [functions, for-loops, errors, strings]
 order: 30.5
 ---
 

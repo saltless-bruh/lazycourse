@@ -3,6 +3,7 @@ concept: type-checking
 title: "Type Checking"
 tags: [type-checking]
 source: exercism-javascript ff04f35 exercises/concept/recycling-robot (MIT)
+requires: [basics, objects, arrays]
 order: 23
 ---
 

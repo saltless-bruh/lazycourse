@@ -8,7 +8,9 @@ generated. `npm run lessons` checks every exercise: its exemplar passes and its 
 lessons/<language>/
   SOURCES.md                     each source: repo, pinned commit, licence, attribution; skipped items and why
   licenses/<source>/LICENSE      verbatim licence text (+ NOTICE)
-  <concept>/lesson.md            front matter: concept, title, tags (pack vocabulary), source, order
+  <concept>/lesson.md            front matter: concept, title, tags (pack vocabulary), source, requires, order
+                                 requires: the lessons it builds on (Exercism's `prerequisites`; ours from what
+                                 the exemplar uses; rustlings states none, so every earlier lesson)
                                  body: the lesson text (vendored; edited only to cut), about 60 lines at most
   <concept>/<n>-<slug>/          one exercise, n = 1.. easiest first
       instructions.md            the source's instructions (+ its hints under "Hints")

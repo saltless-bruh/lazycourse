@@ -3,6 +3,7 @@ concept: null-undefined
 title: "Null and Undefined"
 tags: [null-undefined]
 source: exercism-javascript ff04f35 exercises/concept/amusement-park (MIT)
+requires: [objects]
 order: 14
 ---
 

@@ -3,6 +3,7 @@ concept: array-destructuring
 title: "Array Destructuring"
 tags: [objects]
 source: exercism-javascript ff04f35 exercises/concept/elyses-destructured-enchantments (MIT)
+requires: [arrays, functions, objects]
 order: 11
 ---
 

@@ -3,6 +3,7 @@ concept: for-loops
 title: "For Loops"
 tags: [for-loops]
 source: exercism-go 74f09b2 exercises/concept/bird-watcher (MIT)
+requires: [arithmetic-operators, comparison, slices]
 order: 12
 ---
 

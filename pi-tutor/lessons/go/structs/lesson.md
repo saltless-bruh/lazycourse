@@ -3,6 +3,7 @@ concept: structs
 title: "Structs"
 tags: [structs]
 source: exercism-go 74f09b2 exercises/concept/need-for-speed (MIT)
+requires: [comparison, arithmetic-operators]
 order: 10
 ---
 

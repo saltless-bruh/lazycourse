@@ -3,6 +3,7 @@ concept: functions
 title: "Functions"
 tags: [functions]
 source: exercism-javascript ff04f35 exercises/concept/lasagna-master (MIT)
+requires: [objects, arrays, null-undefined]
 order: 18
 ---
 

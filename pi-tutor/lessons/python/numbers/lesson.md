@@ -3,6 +3,7 @@ concept: numbers
 title: "Numbers"
 tags: [numbers]
 source: exercism-python 6105f6d exercises/concept/currency-exchange (MIT)
+requires: [basics]
 order: 3
 ---
 

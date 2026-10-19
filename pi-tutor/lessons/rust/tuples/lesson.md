@@ -3,6 +3,7 @@ concept: tuples
 title: "Tuples"
 tags: [tuples, destructuring]
 source: exercism-rust cc099ae exercises/concept/low-power-embedded-game (MIT)
+requires: [methods]
 order: 107
 ---
 

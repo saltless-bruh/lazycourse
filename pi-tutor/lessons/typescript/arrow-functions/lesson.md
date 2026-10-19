@@ -3,6 +3,7 @@ concept: arrow-functions
 title: "Arrow Functions"
 tags: [functions, arrays]
 source: exercism-javascript ff04f35 exercises/concept/elyses-analytic-enchantments (MIT)
+requires: [arrays, booleans, numbers]
 order: 10
 ---
 

@@ -3,6 +3,7 @@ concept: strings
 title: "Strings"
 tags: [strings]
 source: exercism-go 74f09b2 exercises/concept/welcome-to-tech-palace (MIT)
+requires: [basics]
 order: 20
 ---
 

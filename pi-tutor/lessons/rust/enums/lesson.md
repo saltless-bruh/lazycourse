@@ -3,6 +3,7 @@ concept: enums
 title: "Enums Basic"
 tags: [enums]
 source: exercism-rust cc099ae exercises/concept/semi-structured-logs (MIT)
+requires: [functions]
 order: 104
 ---
 

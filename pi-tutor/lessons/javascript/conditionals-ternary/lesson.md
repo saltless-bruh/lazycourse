@@ -3,6 +3,7 @@ concept: conditionals-ternary
 title: "Ternary Operator"
 tags: [conditionals-ternary, strings]
 source: exercism-javascript ff04f35 exercises/concept/custom-signs (MIT)
+requires: [strings, comparison, type-conversion]
 order: 20
 ---
 

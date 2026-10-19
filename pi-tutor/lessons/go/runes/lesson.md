@@ -3,6 +3,7 @@ concept: runes
 title: "Runes"
 tags: [strings]
 source: exercism-go 74f09b2 exercises/concept/logs-logs-logs (MIT)
+requires: [strings, comparison, slices, maps, range-iteration]
 order: 14
 ---
 

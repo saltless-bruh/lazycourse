@@ -3,6 +3,7 @@ concept: generators
 title: "Generators"
 tags: [iterators]
 source: exercism-python 6105f6d exercises/concept/plane-tickets (MIT)
+requires: [conditionals, dicts, lists, loops, classes]
 order: 17
 ---
 

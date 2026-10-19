@@ -3,6 +3,7 @@ concept: methods
 title: "Methods"
 tags: [structs]
 source: exercism-rust cc099ae exercises/concept/health-statistics (MIT)
+requires: [integers]
 order: 105
 ---
 

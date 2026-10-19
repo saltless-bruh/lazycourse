@@ -3,6 +3,7 @@ concept: files-io
 title: "Reading and writing files"
 tags: [error-handling]
 source: rust-lang/book 1500248 ch12-02 (MIT/Apache-2.0); exercises ours
+requires: [functions, strings, error-handling, iterators]
 order: 50.6
 ---
 

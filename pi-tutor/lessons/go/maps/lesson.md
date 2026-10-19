@@ -3,6 +3,7 @@ concept: maps
 title: "Maps"
 tags: [maps]
 source: exercism-go 74f09b2 exercises/concept/gross-store (MIT)
+requires: [comparison, arithmetic-operators, strings, conditionals-switch, functions]
 order: 8
 ---
 

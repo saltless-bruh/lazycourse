@@ -3,6 +3,7 @@ concept: string-methods
 title: "String Methods"
 tags: [strings]
 source: exercism-python 6105f6d exercises/concept/little-sisters-essay (MIT)
+requires: [basics, strings]
 order: 6
 ---
 

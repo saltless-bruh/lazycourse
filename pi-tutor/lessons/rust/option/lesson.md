@@ -3,6 +3,7 @@ concept: option
 title: "Option"
 tags: [option]
 source: exercism-rust cc099ae exercises/concept/role-playing-game (MIT)
+requires: [methods, tuples]
 order: 106
 ---
 

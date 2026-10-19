@@ -3,6 +3,7 @@ concept: dict-methods
 title: "Dict Methods"
 tags: [dicts]
 source: exercism-python 6105f6d exercises/concept/mecha-munch-management (MIT)
+requires: [dicts]
 order: 13
 ---
 

@@ -3,6 +3,7 @@ concept: arithmetic-operators
 title: "Arithmetic Operators"
 tags: [arithmetic-operators, numbers]
 source: exercism-go 74f09b2 exercises/concept/cars-assemble (MIT)
+requires: [basics]
 order: 6
 ---
 

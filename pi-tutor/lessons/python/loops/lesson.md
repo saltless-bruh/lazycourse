@@ -3,6 +3,7 @@ concept: loops
 title: "Loops"
 tags: [loops]
 source: exercism-python 6105f6d exercises/concept/making-the-grade (MIT)
+requires: [basics, comparisons, lists, list-methods, strings]
 order: 10
 ---
 

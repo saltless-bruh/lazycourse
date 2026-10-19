@@ -3,6 +3,7 @@ concept: conditionals-switch
 title: "Conditionals Switch"
 tags: [conditionals-switch]
 source: exercism-go 74f09b2 exercises/concept/blackjack (MIT)
+requires: [booleans, strings, arithmetic-operators, comparison]
 order: 4
 ---
 

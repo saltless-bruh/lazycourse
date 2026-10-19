@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { retryAssistantCall } from "@earendil-works/pi-ai/compat";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
 import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
@@ -28,7 +29,7 @@ import { EXPERIENCE } from "./interview.js";
 import { levelTasks, writeExercise, loadLessons, planRounds, startLessons, nextConcept, nextRound, type Lesson, type LessonState } from "./lessons.js";
 import { scaffoldPrompt, checkScaffold, writeScaffold } from "./scaffold.js";
 import { completeJson, type Complete } from "./llm.js";
-import { withLoader, Cancelled, MODEL_TIMEOUT_MS, SPEC_JOB_TIMEOUT_MS, type CustomUi } from "./progress.js";
+import { withLoader, Cancelled, MODEL_TIMEOUT_MS, SPEC_JOB_TIMEOUT_MS, PROVIDER_RETRY, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
 import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakConcepts, type IndexEntry } from "./packs.js";
@@ -119,7 +120,7 @@ function rawComplete(ctx: ExtensionContext, signal: AbortSignal): Complete {
   return async (system, user) => {
     const model = ctx.model;
     if (!model) throw new Error("no model selected");
-    const r = await ctx.modelRegistry.complete(model, { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] }, { signal });
+    const r = await retryAssistantCall(() => ctx.modelRegistry.complete(model, { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] }, { signal }), PROVIDER_RETRY, signal);
     if (r.stopReason !== "stop") throw new Error(`model stopped (${r.stopReason})${r.errorMessage ? `: ${r.errorMessage}` : ""}`);
     return r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
   };

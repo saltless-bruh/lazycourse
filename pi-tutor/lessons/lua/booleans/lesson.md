@@ -3,6 +3,7 @@ concept: booleans
 title: "Booleans"
 tags: [booleans]
 source: exercism-lua 02837e0 exercises/concept/pacman-rules (MIT)
+requires: [basics]
 order: 3
 ---
 

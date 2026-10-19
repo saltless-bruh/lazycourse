@@ -3,6 +3,7 @@ concept: objects
 title: "Objects"
 tags: [objects]
 source: exercism-javascript ff04f35 exercises/concept/high-score-board (MIT)
+requires: [numbers, increment-decrement]
 order: 16
 ---
 

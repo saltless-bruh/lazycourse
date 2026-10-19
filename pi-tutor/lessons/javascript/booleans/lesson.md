@@ -3,6 +3,7 @@ concept: booleans
 title: "Booleans"
 tags: [types]
 source: exercism-javascript ff04f35 exercises/concept/annalyns-infiltration (MIT)
+requires: [basics]
 order: 2
 ---
 

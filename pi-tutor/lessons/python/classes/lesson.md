@@ -3,6 +3,7 @@ concept: classes
 title: "Classes"
 tags: [classes]
 source: exercism-python 6105f6d exercises/concept/ellens-alien-game (MIT)
+requires: [basics, bools, comparisons, loops, dicts, lists, numbers, sets, strings, tuples]
 order: 16
 ---
 

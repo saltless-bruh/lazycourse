@@ -3,6 +3,7 @@ concept: functions
 title: "Functions"
 tags: [functions]
 source: exercism-go 74f09b2 exercises/concept/lasagna-master (MIT)
+requires: [comparison, arithmetic-operators, strings, slices, for-loops]
 order: 9
 ---
 

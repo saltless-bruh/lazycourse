@@ -3,6 +3,7 @@ concept: first-class-functions
 title: "First Class Functions"
 tags: [first-class-functions]
 source: exercism-go 74f09b2 exercises/concept/expenses (MIT)
+requires: [for-loops, functions, structs, range-iteration, errors]
 order: 23
 ---
 

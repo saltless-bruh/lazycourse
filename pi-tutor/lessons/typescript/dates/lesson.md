@@ -3,6 +3,7 @@ concept: dates
 title: "Date and Time"
 tags: [dates]
 source: exercism-javascript ff04f35 exercises/concept/appointment-time (MIT)
+requires: [objects, comparison, type-conversion]
 order: 22
 ---
 

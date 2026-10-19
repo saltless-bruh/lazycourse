@@ -3,6 +3,7 @@ concept: stringers
 title: "Stringers"
 tags: [stringers]
 source: exercism-go 74f09b2 exercises/concept/meteorology (MIT)
+requires: [strings, string-formatting, interfaces, methods, structs]
 order: 26
 ---
 

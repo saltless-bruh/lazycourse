@@ -52,3 +52,15 @@ describe("lesson text", () => {
     });
   }
 });
+
+// Beginner plans follow `requires` (live check 2026-10-19): each name must be a lesson (concept or tag) of the
+// same language, and a lesson of ours (not Exercism's or rustlings') states its own, from what its exemplar uses.
+describe("lesson prerequisites", () => {
+  for (const lang of LANGUAGES) {
+    const ls = loadLessons(lang);
+    for (const l of ls) it(`${lang}/${l.concept}: requires names lessons`, () => {
+      expect((l.requires ?? []).filter((c) => !ls.some((x) => x.concept === c || x.tags.includes(c)))).toEqual([]);
+      if (!/^(exercism-|rustlings )/.test(l.source)) expect(l.requires, "our lessons state their prerequisites").not.toBeNull();
+    });
+  }
+});

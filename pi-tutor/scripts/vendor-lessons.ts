@@ -273,7 +273,10 @@ function exercismConcepts(lang: string, s: Source, from: string, track: Track, v
   const config = json(join(from, "config.json"));
   const part: Part = { s, what: "concept lessons and exercises", lessons: [], skipped: [] };
   let order = startOrder;
-  for (const ex of config.exercises.concept as { slug: string; concepts: string[]; status?: string }[]) {
+  const exercises = config.exercises.concept as { slug: string; concepts: string[]; prerequisites?: string[]; status?: string }[];
+  // A prerequisite names a concept; the lesson that teaches it is named after its exercise's first concept.
+  const teaches = new Map(exercises.flatMap((e) => e.concepts.map((c) => [c, e.concepts[0]] as const)));
+  for (const ex of exercises) {
     if (ex.status === "deprecated" || ex.status === "wip" || ex.concepts.length === 0) { part.skipped.push(`${ex.slug}: status ${ex.status ?? "?"}`); continue; }
     if (opts.drop?.[ex.slug]) { part.skipped.push(`${ex.slug}: ${opts.drop[ex.slug]}`); rmSync(join(OUT, lang, ex.concepts[0] ?? ex.slug), { recursive: true, force: true }); continue; }
     const concept = ex.concepts[0];
@@ -288,12 +291,33 @@ function exercismConcepts(lang: string, s: Source, from: string, track: Track, v
     const name = (config.concepts as { slug: string; name: string }[]).find((c) => c.slug === concept)?.name ?? concept;
     put(join(OUT, lang, concept, "lesson.md"), [
       "---", `concept: ${concept}`, `title: ${JSON.stringify(name)}`, `tags: [${tags.join(", ")}]`,
-      `source: ${s.name} ${s.commit.slice(0, 7)} exercises/concept/${ex.slug} (MIT)`, `order: ${++order}`, "---", "",
+      `source: ${s.name} ${s.commit.slice(0, 7)} exercises/concept/${ex.slug} (MIT)`,
+      `requires: [${[...new Set((ex.prerequisites ?? []).map((c) => teaches.get(c) ?? c))].filter((c) => c !== concept).join(", ")}]`, `order: ${++order}`, "---", "",
       text, ...(opts.note ? ["", opts.note] : []), "", `Source: [${s.name}](${s.repo}/tree/${s.commit}/exercises/concept/${ex.slug}), MIT licence.`, "",
     ].join("\n"));
     part.lessons.push(`- \`${concept}\` (${tags.join(", ")}): exercises/concept/${ex.slug}`);
   }
+  pruneRequires(lang, part);
   return part;
+}
+
+/** A prerequisite no lesson of `lang` teaches (its exercise was skipped) cannot be planned: drop it and list it. */
+function pruneRequires(lang: string, part: Part): void {
+  const base = join(OUT, lang), names = new Set<string>();
+  const lessonFiles = readdirSync(base).map((d) => join(base, d, "lesson.md")).filter((f) => existsSync(f));
+  for (const f of lessonFiles) {
+    const t = readFileSync(f, "utf8");
+    names.add(t.match(/^concept: (.+)$/m)![1]);
+    for (const tag of t.match(/^tags: \[(.*)\]$/m)![1].split(", ").filter(Boolean)) names.add(tag);
+  }
+  for (const f of lessonFiles) {
+    const t = readFileSync(f, "utf8"), m = t.match(/^requires: \[(.*)\]$/m);
+    if (!m || !t.includes(`source: ${part.s.name} `)) continue;
+    const all = m[1].split(", ").filter(Boolean), gone = all.filter((c) => !names.has(c));
+    if (!gone.length) continue;
+    writeFileSync(f, t.replace(m[0], `requires: [${all.filter((c) => names.has(c)).join(", ")}]`));
+    part.skipped.push(`${t.match(/^concept: (.+)$/m)![1]}: prerequisites ${gone.join(", ")} dropped (no lesson teaches them)`);
+  }
 }
 
 function exercismLevels(lang: string, s: Source, from: string, track: Track, part: Part): void {

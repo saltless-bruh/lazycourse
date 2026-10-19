@@ -3,6 +3,7 @@ concept: array-loops
 title: "Array Loops"
 tags: [arrays]
 source: exercism-javascript ff04f35 exercises/concept/elyses-looping-enchantments (MIT)
+requires: [arrays, increment-decrement, comparison]
 order: 13
 ---
 

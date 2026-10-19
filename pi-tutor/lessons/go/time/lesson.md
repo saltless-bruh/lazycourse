@@ -3,6 +3,7 @@ concept: time
 title: "Time"
 tags: [time]
 source: exercism-go 74f09b2 exercises/concept/booking-up-for-beauty (MIT)
+requires: [string-formatting, arithmetic-operators, functions, booleans]
 order: 5
 ---
 

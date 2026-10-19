@@ -3,6 +3,7 @@ concept: comparisons
 title: "Comparisons"
 tags: [conditionals]
 source: exercism-python 6105f6d exercises/concept/black-jack (MIT)
+requires: [basics, bools, conditionals]
 order: 5
 ---
 

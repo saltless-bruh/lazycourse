@@ -88,6 +88,10 @@ Re-verify every line when bumping versions.
   error result carrying `error.message` (pi-agent-core agent-loop.js:536); the secret scanner's refusal
   reaches the model that way. Parameters use `Type` from `typebox`, which Pi's loader aliases to its own
   copy (loader.js getAliases; also `@earendil-works/pi-ai`).
+- `retryAssistantCall(produce, { enabled, maxRetries, baseDelayMs }, signal)` from `@earendil-works/pi-ai/compat`
+  (pi-ai dist/utils/retry.d.ts; the loader aliases `@earendil-works/pi-ai/compat`, loader.js:67): wraps our
+  `modelRegistry.complete` calls (rawComplete) so timeouts/5xx retry with backoff like Pi's own turns, and
+  quota/billing errors return at once (`isRetryableAssistantError`). Policy: `PROVIDER_RETRY` in progress.ts.
 - `--tools <list>` is an allowlist of "built-in, extension, or custom tools" (docs/cli.md:120): nvim-tutor
   starts Pi with `--tools read,grep,find,ls,tutor_remember,tutor_recall`; the guard allows the two
   memory tools by name.

@@ -40,8 +40,9 @@ export function checkScaffold(v: unknown, rounds: string[][] = []): ScaffoldSpec
   const ids = taskIds(s.tasks_md);
   if (ids.length === 0) throw new Error("tasks_md has no task ids like P1.T1");
   if (!s.tasks_md.includes("[ ]")) throw new Error("tasks_md tasks need [ ] checkboxes");
+  // Live check 2026-10-20: a section per subtask made the reply too long for weak models; a task's section covers its subtasks.
   for (let k = 1; k <= rounds.length; k++) if (!new RegExp(`^## Milestone ${k}:`, "m").test(s.tasks_md)) throw new Error(`tasks_md needs a "## Milestone ${k}: …" heading for lesson round ${k}`);
-  const missing = ids.filter((id) => !new RegExp(`\\b${id.replace(/\./g, "\\.")}\\b`).test(s.requirements_md));
+  const missing = ids.filter((id) => !/\.S\d+$/.test(id)).filter((id) => !new RegExp(`\\b${id.replace(/\./g, "\\.")}\\b`).test(s.requirements_md));
   if (missing.length) throw new Error(`requirements_md is missing sections for ${missing.join(", ")}`);
   const entry = normalize(s.entry_file);
   if (isAbsolute(s.entry_file) || !entry.startsWith("src/") || entry === "src/" || entry.split("/").includes("..")) {
@@ -60,6 +61,8 @@ export function scaffoldPrompt(i: { language: string; level: number; band: Band;
     `concepts to exercise: ${i.project.concepts.join(", ") || "any"}`,
     ...Object.entries(i.about).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`),
     DETAIL[i.band],
+    // Live check 2026-10-20: weak models failed the long reply (45 tasks); a small budget keeps it finishable.
+    `Size: ${i.rounds.length ? "at most 3 tasks per milestone" : "at most 8 tasks in all"}${i.band === "beginner" ? ", at most 3 subtasks per task" : ""}; design_md at most 30 lines.`,
   ];
   if (i.rounds.length) {
     lines.push("The learner learns the concepts in rounds before building. Group tasks_md into milestones, one per round, with these exact headings; a milestone's tasks may use only the concepts of its round and the rounds before it:");
@@ -95,7 +98,7 @@ export function agents(m: ScaffoldMeta): string {
     `- This is a ${m.language} learning project: ${m.title}. ${m.summary}\n` +
     `- The learner's level is ${m.level} (${m.band}). Coach; never write the solution.\n` +
     `- Never write or edit files in src/. You have read-only tools; the learner writes all the code.\n` +
-    `- The plan is spec/design.md, spec/tasks.md and spec/requirements.md. Refer to tasks by id (P1.T2.S3) and cite \`path:line\`.\n`;
+    `- The plan is spec/design.md, spec/tasks.md and spec/requirements.md. Refer to tasks by id (P1.T2.S3) and cite \`path:line\`; a subtask's requirements are in its task's section (P1.T2).\n`;
 }
 
 /**

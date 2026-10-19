@@ -3,6 +3,7 @@ concept: tuples
 title: "Tuples"
 tags: [sets-tuples]
 source: exercism-python 6105f6d exercises/concept/tisbury-treasure-hunt (MIT)
+requires: [bools, loops, conditionals, numbers]
 order: 11
 ---
 

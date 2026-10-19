@@ -3,6 +3,7 @@ concept: numbers
 title: "Numbers"
 tags: [numbers, arithmetic-operators]
 source: exercism-javascript ff04f35 exercises/concept/freelancer-rates (MIT)
+requires: [basics]
 order: 3
 ---
 

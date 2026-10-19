@@ -3,6 +3,7 @@ concept: regular-expressions
 title: "Regular Expressions"
 tags: [regular-expressions]
 source: exercism-go 74f09b2 exercises/concept/parsing-log-files (MIT)
+requires: [runes, methods, slices]
 order: 25
 ---
 

@@ -3,6 +3,7 @@ concept: type-conversion
 title: "Type Conversion"
 tags: [types]
 source: exercism-javascript ff04f35 exercises/concept/lucky-numbers (MIT)
+requires: [booleans, strings, numbers, null-undefined, arrays]
 order: 9
 ---
 

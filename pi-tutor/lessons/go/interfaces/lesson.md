@@ -3,6 +3,7 @@ concept: interfaces
 title: "Interfaces"
 tags: [interfaces]
 source: exercism-go 74f09b2 exercises/concept/airport-robot (MIT)
+requires: [functions, structs, strings, methods]
 order: 17
 ---
 

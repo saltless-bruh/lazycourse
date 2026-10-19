@@ -3,6 +3,7 @@ concept: input
 title: "Reading what the user types"
 tags: [strings]
 source: rust-lang/book 1500248 ch02 (MIT/Apache-2.0); exercises ours
+requires: [functions, strings, error-handling]
 order: 50.5
 ---
 

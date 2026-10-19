@@ -17,8 +17,22 @@ SHA = {k: os.popen(f"git -C {GAP}/{k} rev-parse HEAD").read().strip() for k in [
 def put(rel, text):
     p = os.path.join(L, rel); os.makedirs(os.path.dirname(p), exist_ok=True); open(p, "w").write(text)
 
+# What each lesson's exercises build on, from what its exemplar uses (beginner plans follow these).
+REQUIRES = {
+    ("go", "input"): ["functions", "for-loops", "errors", "strings"],
+    ("go", "files-io"): ["functions", "for-loops", "errors"],
+    ("javascript", "input"): ["functions", "strings", "while-loops", "type-conversion"],
+    ("javascript", "files-io"): ["functions", "strings", "arrays", "conditionals-ternary"],
+    ("typescript", "input"): ["functions", "strings", "while-loops", "type-conversion"],
+    ("typescript", "files-io"): ["functions", "strings", "arrays", "conditionals-ternary"],
+    ("rust", "input"): ["functions", "strings", "error-handling"],
+    ("rust", "files-io"): ["functions", "strings", "error-handling", "iterators"],
+    ("lua", "input"): ["basics", "numbers"],
+    ("lua", "files-io"): ["basics"],
+}
+
 def lesson(lang, concept, title, tags, source, order, text, link):
-    put(f"{lang}/{concept}/lesson.md", f"---\nconcept: {concept}\ntitle: {title}\ntags: [{', '.join(tags)}]\nsource: {source}\norder: {order}\n---\n\n{text.strip()}\n\nSource: {link}\n")
+    put(f"{lang}/{concept}/lesson.md", f"---\nconcept: {concept}\ntitle: {title}\ntags: [{', '.join(tags)}]\nsource: {source}\nrequires: [{', '.join(REQUIRES[(lang, concept)])}]\norder: {order}\n---\n\n{text.strip()}\n\nSource: {link}\n")
 
 def ex(lang, concept, rel, stub_name, tests_name, instr, stub, tests, exemplar):
     put(f"{lang}/{concept}/{rel}/instructions.md", instr.strip() + "\n")

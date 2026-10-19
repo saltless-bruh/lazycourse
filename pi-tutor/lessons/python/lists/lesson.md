@@ -3,6 +3,7 @@ concept: lists
 title: "Lists"
 tags: [lists]
 source: exercism-python 6105f6d exercises/concept/card-games (MIT)
+requires: [conditionals, strings]
 order: 8
 ---
 

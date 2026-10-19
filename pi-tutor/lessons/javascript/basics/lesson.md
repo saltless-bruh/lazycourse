@@ -3,6 +3,7 @@ concept: basics
 title: "Basics"
 tags: [variables]
 source: exercism-javascript ff04f35 exercises/concept/lasagna (MIT)
+requires: []
 order: 1
 ---
 

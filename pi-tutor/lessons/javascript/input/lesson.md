@@ -3,6 +3,7 @@ concept: input
 title: "Reading what the user types"
 tags: [node-apis]
 source: nodejs/node bb3f917 doc/api/readline.md (Node.js licence); exercises ours
+requires: [functions, strings, while-loops, type-conversion]
 order: 40.5
 ---
 

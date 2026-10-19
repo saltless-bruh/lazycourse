@@ -143,6 +143,13 @@ conversation.
 - **Which concepts (Q14):** only those the learner is weak in, judged from the conversation and the
   profile's concept ease. Every lesson offers "skip, I know this". A skipped concept counts as known
   until the learner gets stuck on it.
+  A beginner also gets what those lessons build on: each lesson's `requires` (Exercism's
+  `prerequisites`; ours from what the exemplar uses), followed through, and nothing else. A lesson that
+  states none (rustlings) needs every earlier one. Prerequisites always come first. (Changed 2026-10-20:
+  "every lesson before the last needed one" planned 13 lessons for a three-concept project.)
+- **Plan size (2026-10-20):** the plan request carries a budget (at most 3 tasks per milestone, 8
+  without milestones, 3 subtasks per task for beginners, design at most 30 lines) and requirements per
+  task, not per subtask. The weak model failed the unbudgeted 45-task plan five times in a row.
 - **Pacing (Q15, Q22):** at most 3 concepts per round, then a tiny build milestone that uses only those
   concepts. Milestones are slices of the project's own `spec/tasks.md`: the spec writer receives the
   lesson rounds and groups the tasks so that each milestone needs only concepts already taught. The rhythm is learn → build → learn → build. A learner new to everything sees running code

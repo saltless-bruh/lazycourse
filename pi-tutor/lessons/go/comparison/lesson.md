@@ -3,6 +3,7 @@ concept: comparison
 title: "Comparison"
 tags: [comparison, conditionals-if]
 source: exercism-go 74f09b2 exercises/concept/vehicle-purchase (MIT)
+requires: [strings, arithmetic-operators, booleans]
 order: 7
 ---
 

@@ -3,6 +3,7 @@ concept: slices
 title: "Slices"
 tags: [slices, variadic-functions]
 source: exercism-go 74f09b2 exercises/concept/card-tricks (MIT)
+requires: [booleans, arithmetic-operators, comparison]
 order: 13
 ---
 
