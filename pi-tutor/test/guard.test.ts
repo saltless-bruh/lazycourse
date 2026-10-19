@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { guardToolCall, resolveToolPath, realpathLoose, skillDirs, MEMORY_TOOLS } from "../extensions/tutor/guard.js";
+import { guardToolCall, resolveToolPath, realpathLoose, skillDirs, MEMORY_TOOLS, DOCS_TOOLS } from "../extensions/tutor/guard.js";
 
 let root: string;
 beforeAll(() => {
@@ -118,5 +118,17 @@ describe("M6c: skill paths (M5 #39)", () => {
       { source: "skill", sourceInfo: { path: "<inline:abc>" } },
       { source: "skill", sourceInfo: { path: "builtin:foo" } },
     ])).toEqual(["/s/tutor-x", "/notes/tip.md"]);
+  });
+});
+
+describe("MCP: only context7's two docs tools (spec 2026-10-19 §8)", () => {
+  it("lets the two context7 tools through and nothing else from MCP", () => {
+    expect([...DOCS_TOOLS].sort()).toEqual(["mcp__context7__query_docs", "mcp__context7__resolve_library_id"]);
+    expect(guardToolCall("mcp__context7__query_docs", { libraryId: "/python/cpython", query: "open a file" }, "/tmp")).toBeUndefined();
+    expect(guardToolCall("mcp__context7__resolve_library_id", { libraryName: "python" }, "/tmp")).toBeUndefined();
+  });
+  it("blocks any other MCP tool and codemode (Review Focus #5)", () => {
+    expect(guardToolCall("mcp__other__write_file", {}, "/tmp")).toMatchObject({ block: true, reason: expect.stringMatching(/read-only/) });
+    expect(guardToolCall("codemode", {}, "/tmp")).toMatchObject({ block: true, reason: expect.stringMatching(/read-only/) });
   });
 });

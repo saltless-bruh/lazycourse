@@ -199,6 +199,30 @@ return {
 
 4. `:Tutor` (or `<leader>tt`) opens Pi in a right split; type at Pi's prompt. `<Esc><Esc>` leaves terminal mode.
 
+## Docs lookup with context7 (optional)
+
+The tutor answers from the offline DevDocs copy of your language's docs first. To let it also look up
+docs DevDocs lacks (third-party libraries such as `requests` or `serde`), add context7 to Pi once:
+
+```json
+// ~/.pi/agent/mcp.json
+{
+  "autoEnableCodemode": false,
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "exposure": "direct",
+      "description": "Up-to-date library documentation"
+    }
+  }
+}
+```
+
+- context7 is an outside service: the model's search queries (library names, topics) are sent to it.
+- The tutor's Pi starts with an explicit tool list that names only context7's two tools
+  (`mcp__context7__resolve_library_id`, `mcp__context7__query_docs`), so no other MCP server you add,
+  and no `codemode`, can reach the model; the tutor's tool guard blocks them as well.
+
 ## Upgrading Pi
 
 `pi-tutor/PI_SURFACE.md` lists every Pi API this project touches and the version it was verified against. To upgrade: read Pi's CHANGELOG "Breaking Changes" since that version, update the file, bump `peerDependencies` in `pi-tutor/package.json`, and run `npm run test:contract`.

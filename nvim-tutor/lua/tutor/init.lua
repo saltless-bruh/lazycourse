@@ -10,7 +10,10 @@ function M.build_cmd(pi_cmd)
   local cmd = vim.deepcopy(pi_cmd)
   if vim.fs.basename(cmd[1]) == "pi" then
     -- pi-tutor's memory tools (spec 2026-10-13 §7.1); --tools is an allowlist for extension tools too.
-    vim.list_extend(cmd, { "--tools", "read,grep,find,ls,tutor_remember,tutor_recall" })
+    -- Spec 2026-10-19 §8: naming mcp__ entries makes Pi filter MCP tools too, so only context7's two
+    -- docs lookups reach the model and a server added to mcp.json later cannot widen the tool set.
+    vim.list_extend(cmd, { "--tools",
+      "read,grep,find,ls,tutor_remember,tutor_recall,mcp__context7__resolve_library_id,mcp__context7__query_docs" })
   end
   return cmd
 end

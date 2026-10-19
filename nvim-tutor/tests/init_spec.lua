@@ -14,9 +14,9 @@ describe("tutor.init", function()
     assert.equals(job, t:job_id())
   end)
 
-  it("starts pi with the read tools plus the two tutor memory tools", function()
+  it("starts pi with the read tools, the two tutor memory tools and context7's two docs tools", function()
     local cmd = require("tutor").build_cmd({ "pi" })
-    assert.same({ "pi", "--tools", "read,grep,find,ls,tutor_remember,tutor_recall" }, cmd)
+    assert.same({ "pi", "--tools", "read,grep,find,ls,tutor_remember,tutor_recall,mcp__context7__resolve_library_id,mcp__context7__query_docs" }, cmd)
   end)
 
   it("starts pi in tutor mode (PI_TUTOR=1)", function()

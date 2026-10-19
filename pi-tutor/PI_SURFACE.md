@@ -145,6 +145,17 @@ Re-verify every line when bumping versions.
   editor card, set every turn in `before_agent_start`). `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.
 
+## MCP (Pi 1.3.0, docs/mcp.md, verified 2026-10-19)
+- Servers come from `~/.pi/agent/mcp.json` (user) or `.pi/mcp.json` (project, after project trust).
+  Tools are named `mcp__<server>__<tool>` with every character other than letters, digits and `_`
+  replaced by `_` (context7: `mcp__context7__resolve_library_id`, `mcp__context7__query_docs`).
+- `--tools` does not remove MCP tools unless one of its entries starts with `mcp__` (docs/mcp.md:228);
+  nvim-tutor names the two context7 tools, so every other MCP tool is filtered out at launch.
+- Adding a server auto-enables `codemode` unless `"autoEnableCodemode": false` sits beside
+  `mcpServers`; with the explicit `--tools` list, `codemode` is not in the tool set either way.
+- `exposure: "direct"` declares the server's tools to the model (the weak model needs no `tool_search`).
+- The `tool_call` guard allows only `DOCS_TOOLS` among MCP names (guard.ts).
+
 ## Neovim (via `neovim` npm client over `$NVIM`)
 - `$NVIM` is set for `:terminal` children to `v:servername` (verified 0.12.5)
 - Editor window = first window in the tabpage whose buffer has `buftype == ""` (current, then
