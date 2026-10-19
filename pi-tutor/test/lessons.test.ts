@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFil
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { loadLessons, levelTasks, writeExercise, checkExercise } from "../extensions/tutor/lessons.js";
+import { loadLessons, levelTasks, writeExercise, checkExercise, textProblems } from "../extensions/tutor/lessons.js";
 import { realExec } from "./fake-pi.js";
 
 const has = (cmd: string) => spawnSync(cmd, ["--version"]).status === 0;
@@ -19,7 +19,7 @@ function exercise(root: string, rel: string) {
 }
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "lessons-"));
-  put(root, "python/loops/lesson.md", "---\nconcept: loops\ntitle: Loops\ntags: [loops]\nsource: exercism/python\norder: 2\n---\nA loop repeats.\n");
+  put(root, "python/loops/lesson.md", "---\nconcept: loops\ntitle: Loops\ntags: [loops]\nsource: exercism/python\nchecked: doctest\norder: 2\n---\nA loop repeats.\n");
   put(root, "python/basics/lesson.md", "---\nconcept: basics\ntitle: Basics\ntags: [variables]\nsource: exercism/python\norder: 1\n---\nValues have names.\n");
   exercise(root, "python/loops/1-count");
   put(root, "python/loops/2-broken/instructions.md", "no exemplar here\n");
@@ -33,7 +33,8 @@ describe("lessons (spec 2026-10-19 §7, §7a)", () => {
   it("loads lessons in their order, with front matter parsed and text kept", () => {
     const ls = loadLessons("python", fixture());
     expect(ls.map((l) => l.concept)).toEqual(["basics", "loops"]);
-    expect(ls[1]).toMatchObject({ title: "Loops", tags: ["loops"], source: "exercism/python", order: 2 });
+    expect(ls[1]).toMatchObject({ title: "Loops", tags: ["loops"], source: "exercism/python", order: 2, checked: "doctest" });
+    expect(ls[0].checked).toBeNull();
     expect(ls[1].text).toContain("A loop repeats.");
   });
   it("skips an exercise missing its exemplar (Review Focus #3)", () => {
@@ -88,4 +89,15 @@ describe("lessons (spec 2026-10-19 §7, §7a)", () => {
     expect(r.stub.code).not.toBe(0);
     expect(r.stub.broken).toBe(false);
   }, 30_000);
+});
+
+describe("lesson text checks (side-agent note 2026-10-19: the text, not only the exercises)", () => {
+  it("flags reStructuredText leftovers: double backticks, roles, directives, a lone colon, XXX notes", () => {
+    const bad = "`open()` returns ``open(filename)``\n\n:\n\n.. XXX str(f) is <io.TextIOWrapper>\n\nsee :func:`open` and :file:`JPEG`\n";
+    const p = textProblems(bad);
+    expect(p).toEqual(expect.arrayContaining([expect.stringMatching(/double backticks/), expect.stringMatching(/directive/), expect.stringMatching(/lone ':'/), expect.stringMatching(/role/)]));
+  });
+  it("clean Markdown with code fences has no problems", () => {
+    expect(textProblems("Text with `code`.\n\n```python\n>>> 1 + 1\n2\n```\n")).toEqual([]);
+  });
 });

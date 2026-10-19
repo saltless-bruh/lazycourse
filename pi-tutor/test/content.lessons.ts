@@ -7,7 +7,8 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { LANGUAGES } from "../extensions/tutor/start.js";
 import { layout } from "../extensions/tutor/exam/layout.js";
-import { loadLessons, levelTasks, checkExercise, type Exercise } from "../extensions/tutor/lessons.js";
+import { loadLessons, levelTasks, checkExercise, textProblems, type Exercise } from "../extensions/tutor/lessons.js";
+import { writeFileSync, rmSync } from "node:fs";
 import { realExec } from "./fake-pi.js";
 
 const bwrap = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0;
@@ -32,4 +33,22 @@ for (const lang of LANGUAGES) {
     }
   });
 }
-it("lesson content check ran", () => expect(true).toBe(true));
+// The lesson text too (side-agent note 2026-10-19): no markup leftovers anywhere, and in lessons marked
+// `checked: doctest` every >>> example runs and prints what the lesson shows.
+describe("lesson text", () => {
+  for (const lang of LANGUAGES) for (const l of loadLessons(lang)) {
+    it(`${lang}/${l.concept}: no reStructuredText leftovers`, () => expect(textProblems(l.text)).toEqual([]));
+    if (l.checked === "doctest" && lang === "python") it.skipIf(!has("python"))(`${lang}/${l.concept}: its >>> examples run (doctest)`, () => {
+      // A block that calls input() waits for a person typing (the tutorial's own example): not doctest material.
+      const blocks = [...l.text.matchAll(/```python\n([\s\S]*?)```/g)].map((m) => m[1]).filter((b) => !/\binput\(/.test(b));
+      const dir = mkdtempSync(join(tmpdir(), "lesson-doctest-"));
+      try {
+        writeFileSync(join(dir, "examples.txt"), blocks.join("\n\n"));
+        // Files the examples write (open('workfile', 'w')) stay in this temp folder.
+        const r = spawnSync("python3", ["-m", "doctest", "-o", "ELLIPSIS", "-o", "NORMALIZE_WHITESPACE", "-o", "IGNORE_EXCEPTION_DETAIL", "examples.txt"],
+          { cwd: dir, input: "", encoding: "utf8", timeout: 20_000 });
+        expect(r.status, `${lang}/${l.concept} examples:\n${r.stdout}${r.stderr}`).toBe(0);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+  }
+});

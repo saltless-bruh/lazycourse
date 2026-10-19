@@ -3,6 +3,7 @@ concept: exceptions
 title: "Errors: try, except and raise"
 tags: [exceptions]
 source: python/cpython v3.14.8 (8e6e75d) Doc/tutorial/errors.rst §8.3–8.4 (PSF License)
+checked: doctest
 order: 10.5
 ---
 

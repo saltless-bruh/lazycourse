@@ -40,9 +40,19 @@ Skipped:
 Text is quoted or adapted from the cited source; exercises and tests are ours, each trusted only because its
 `.exemplar` passes and its stub fails in `npm run lessons`.
 
-- `functions`: text from Exercism Python `concepts/functions/introduction.md` (commit 6105f6d, MIT, licenses/exercism-python/);
+- `functions` (one fix: the upstream example's `print(hello())` line lacked its `>>> ` prompt): text from Exercism Python `concepts/functions/introduction.md` (commit 6105f6d, MIT, licenses/exercism-python/);
   exercises `1-rectangle-area`, `2-greeting` ours. (Exercism has a functions concept but no exercise for it.)
 - `exceptions`: text excerpted from the Python tutorial §8.3–8.4, CPython v3.14.8 (commit 8e6e75d), © Python Software
   Foundation, PSF License (licenses/python-docs/LICENSE, license.rst); exercises `1-parse-age`, `2-safe-divide` ours.
 - `input`: the tutorial's own input() loop (§8.3, PSF License) and our explanation; exercise `1-ask-number` ours.
 - `files-io`: text excerpted from the Python tutorial §7.2 (PSF License); exercises `1-count-lines`, `2-append-line` ours.
+
+## How the lesson text is checked
+
+- Every lesson: no leftover reStructuredText markup (`npm run lessons`).
+- Lessons marked `checked: doctest` (our excerpts: functions, exceptions, files-io): every `>>>` example in their
+  code blocks runs under doctest and must print what the lesson shows. A block that calls `input()` (the
+  tutorial's interactive loop) needs a person typing and is not run.
+- Vendored Exercism lessons are not doctest-run: they show a value on the line after an assignment as a teaching
+  convention, include deliberately broken examples ("this was indented by 3 spaces"), and print sets whose order
+  varies. They are kept verbatim from the pinned commit; their correctness rests on Exercism's review.

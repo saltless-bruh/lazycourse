@@ -15,7 +15,8 @@ const LEVELS = "_levels";
 
 /** `extras`: helper files the source ships next to the stub (Exercism data modules), from `files/`. */
 export interface Exercise { id: string; dir: string; instructions: string; stub: string; tests: string; exemplar: string; extras: [string, string][] }
-export interface Lesson { language: string; concept: string; title: string; tags: string[]; source: string; order: number; text: string; exercises: Exercise[] }
+/** `checked`: how the lesson text itself is verified ("doctest": its >>> examples run in `npm run lessons`), or null. */
+export interface Lesson { language: string; concept: string; title: string; tags: string[]; source: string; order: number; checked: string | null; text: string; exercises: Exercise[] }
 
 const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
 const read = (p: string) => { try { return readFileSync(p, "utf8"); } catch { return null; } };
@@ -53,6 +54,7 @@ export function loadLessons(language: string, root = LESSONS_DIR): Lesson[] {
     out.push({
       language, concept: String(f.concept ?? concept), title: String(f.title ?? concept),
       tags: Array.isArray(f.tags) ? f.tags.map(String) : [], source: String(f.source ?? ""), order: Number(f.order ?? 999),
+      checked: typeof f.checked === "string" ? f.checked : null,
       text: body.trim(), exercises: exercisesIn(language, join(base, concept)),
     });
   }
@@ -84,4 +86,16 @@ function runIn(exec: RunExec, language: string, stub: string, ex: Exercise, sand
 /** Trust check (spec §7a): the exemplar must pass and the stub must fail, each in a fresh folder. */
 export async function checkExercise(exec: RunExec, language: string, ex: Exercise, sandbox: SandboxHost | null): Promise<{ exemplar: TestRun; stub: TestRun }> {
   return { exemplar: await runIn(exec, language, ex.exemplar, ex, sandbox), stub: await runIn(exec, language, ex.stub, ex, sandbox) };
+}
+
+/** Markup a conversion from the docs' reStructuredText must not leave in a lesson (`npm run lessons`). */
+export function textProblems(text: string): string[] {
+  const prose = text.replace(/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$/gm, "");
+  const out: string[] = [];
+  if (/(?<!`)``[^`\n]+``(?!`)/.test(prose)) out.push("double backticks (rST inline literal)");
+  if (/:(func|exc|class|meth|attr|keyword|term|file|kbd|ref|dfn|data|mod|const|envvar):`/.test(prose)) out.push("rST role such as :func:`…`");
+  if (/^\.\. [a-zA-Z_-]+(::|:)?/m.test(prose)) out.push("rST directive or comment (.. …)");
+  if (/^[ \t]*:[ \t]*$/m.test(prose)) out.push("a lone ':' line (rST literal-block marker)");
+  if (/\bXXX\b/.test(prose)) out.push("an XXX note from the source's comments");
+  return out;
 }

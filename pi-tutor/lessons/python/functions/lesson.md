@@ -3,6 +3,7 @@ concept: functions
 title: "Functions"
 tags: [functions]
 source: exercism/python 6105f6d concepts/functions (MIT); exercises ours
+checked: doctest
 order: 1.5
 ---
 
@@ -42,8 +43,8 @@ Following is an example of a function with a return value:
 ```python
 >>> def hello():
 ...     return "Hello"
-... 
-print(hello())
+...
+>>> print(hello())
 Hello
 
 ```
