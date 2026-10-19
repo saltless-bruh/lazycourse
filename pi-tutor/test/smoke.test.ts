@@ -1558,6 +1558,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     wfile(pjoin(ex, "solution.py"), loadLessons("python").find((l) => l.concept === "basics")!.exercises[0].exemplar);
     await b.commands["tutor-lesson"].handler("check", b.ctx);
     expect((await setting(`lesson:${dir}`))).toMatchObject({ concept: "functions", stepBack: false, fails: 0 });
+    expect(b.notes.at(-1)).toMatch(/all pass! next: functions/); // live check: it said "exercise 1"
     await b.commands["tutor-lesson"].handler("skip", b.ctx);
     expect((await setting(`lesson:${dir}`)).concept).toBe("bools");
     const { Profile } = await import("../extensions/tutor/profile.js");

@@ -1217,9 +1217,10 @@ export default function (pi: ExtensionAPI): void {
         if (r.code === 0 && !r.killed) {
           profileWrite(() => { for (const t of les!.tags.length ? les!.tags : [lesson!.concept]) p.rateConcept(lang, t, 1, Date.now()); });
           let n: LessonState = lesson.exercise + 1 < les!.exercises.length ? { ...lesson, exercise: lesson.exercise + 1, fails: 0, stepBack: false } : nextConcept(lesson);
-          if (lesson.resume && n.concept !== lesson.concept) n = { ...n, ...lesson.resume, fails: 0, stepBack: false, building: false, resume: null };
+          const was = lesson.concept;
+          if (lesson.resume && n.concept !== was) n = { ...n, ...lesson.resume, fails: 0, stepBack: false, building: false, resume: null };
           saveLesson(n);
-          ctx.ui.notify(n.building ? `all pass! round ${n.round + 1} done: build Milestone ${n.round + 1} in spec/tasks.md, then /tutor-lesson next` : `all pass! next: ${n.concept === lesson.concept ? `exercise ${n.exercise + 1}` : n.concept} (/tutor-lesson next)`, "info");
+          ctx.ui.notify(n.building ? `all pass! round ${n.round + 1} done: build Milestone ${n.round + 1} in spec/tasks.md, then /tutor-lesson next` : `all pass! next: ${n.concept === was ? `exercise ${n.exercise + 1}` : n.concept} (/tutor-lesson next)`, "info");
           return;
         }
         const fails = lesson.fails + 1;
