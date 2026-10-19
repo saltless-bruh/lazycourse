@@ -202,10 +202,10 @@ return {
 ## Docs lookup with context7 (optional)
 
 The tutor answers from the offline DevDocs copy of your language's docs first. To let it also look up
-docs DevDocs lacks (third-party libraries such as `requests` or `serde`), add context7 to Pi once:
+docs DevDocs lacks (third-party libraries such as `requests` or `serde`), add context7 to Pi once, in
+`~/.pi/agent/mcp.json`:
 
 ```json
-// ~/.pi/agent/mcp.json
 {
   "autoEnableCodemode": false,
   "mcpServers": {
