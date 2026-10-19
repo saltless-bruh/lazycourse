@@ -374,7 +374,7 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
 
   /** The conversation to the point where the project folder is made (spec 2026-10-19 §5), answers scripted. */
   async function toProject(b: Awaited<ReturnType<typeof boot>>, lang: string, folder: string) {
-    const run = async (text: string) => { await turn(b.events, b.ctx, "[tutor] onboarding", assistant(text)); await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx); };
+    const run = async (text: string) => { await turn(b.events, b.ctx, "[tutor] onboarding", assistant(text)); await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx); await new Promise((r) => setTimeout(r, 20)); };
     await b.commands["tutor-start"].handler(lang, b.ctx);
     await run("hi");
     b.script.push("none yet", "", "3", "");          // fallback: experience, known, self-score, idea
@@ -1265,6 +1265,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
   async function exchange(b: Awaited<ReturnType<typeof boot>>, reply: unknown) {
     const t = await turn(b.events, b.ctx, "[tutor] onboarding", reply);
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await new Promise((r) => setTimeout(r, 20)); // a kick is sent once Pi is idle
     return t;
   }
   async function saved() {
@@ -1410,6 +1411,22 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(b.widgets["tutor"]?.[1]).not.toMatch(/judged/);
     expect((await saved()).stage).toBe("project");
   });
+  it("a kick waits until Pi is idle, so it starts a fresh run with the tutor's sections (live check 2026-10-19)", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    const sentBefore = b.sent.length;
+    b.busy.value = true; // Pi is still finishing the run while agent_end handlers run
+    await turn(b.events, b.ctx, "[tutor] onboarding", assistant("hello"));
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(b.sent.length).toBe(sentBefore); // not queued into the ending run
+    b.busy.value = false;
+    await new Promise((r) => setTimeout(r, 120));
+    expect(b.sent.length).toBe(sentBefore + 1);
+    expect(b.sent.at(-1)?.text).toMatch(/level \d+\/100/);
+  });
   it("the project suggestion shows Pi's cancellable loader and passes its signal (final review I1)", async () => {
     const { initTheme, BorderedLoader } = await import("@earendil-works/pi-coding-agent");
     initTheme(undefined, false);
@@ -1467,6 +1484,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
   async function exchange(b: Awaited<ReturnType<typeof boot>>, reply: unknown) {
     const t = await turn(b.events, b.ctx, "[tutor] onboarding", reply);
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await new Promise((r) => setTimeout(r, 20)); // a kick is sent once Pi is idle
     return t;
   }
   async function setting(key: string) {

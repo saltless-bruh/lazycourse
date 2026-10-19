@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, checkInOnboarding, type Onboarding } from "../extensions/tutor/onboard.js";
+import { newOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, checkInOnboarding, stripIntake, type Onboarding } from "../extensions/tutor/onboard.js";
 import { scrubInternals } from "../extensions/tutor/compliance.js";
 
 const fence = (o: object) => "Nice to meet you! What would you like to build?\n\n```tutor-intake\n" + JSON.stringify(o) + "\n```\n";
@@ -147,5 +147,13 @@ describe("malformed notes from the live check (2026-10-19)", () => {
   it("the learner sees neither shape", () => {
     expect(scrubInternals(tagOnNextLine)).toBe("Does that sound right?\n");
     expect(scrubInternals(singleBacktick)).toBe("Build now or learn first?\n");
+  });
+});
+
+describe("more note shapes from the live check (2026-10-19, round 3)", () => {
+  it("a bare tag line, or [tutor-intake], followed by the object", () => {
+    expect(parseIntake("Build now or learn first?\ntutor-intake\n{\"path\": \"learn\"}\n")).toEqual({ path: "learn" });
+    expect(stripIntake("Questions?\n[tutor-intake]\n{}\n")).toBe("Questions?\n");
+    expect(stripIntake("End every reply with the tutor-intake note.\n")).toBe("End every reply with the tutor-intake note.\n");
   });
 });

@@ -952,9 +952,19 @@ export default function (pi: ExtensionAPI): void {
     onboarding = o;
     if (profile) { const p = profile; profileWrite(() => p.setSetting("onboarding", o ? JSON.stringify(o) : "")); }
   }
+  /**
+   * Live check 2026-10-19: a message queued while a run is still ending (from agent_end) runs as a follow-up
+   * in that loop with no before_agent_start, so the model never gets the onboarding or lesson section.
+   * Sent once Pi is idle, it starts a fresh run.
+   */
+  function sendWhenIdle(ctx: ExtensionContext, text: string, tries = 0) {
+    if (closing) return;
+    if (ctx.isIdle() || tries >= 600) { pi.sendUserMessage(text, { deliverAs: "followUp" }); return; }
+    setTimeout(() => sendWhenIdle(ctx, text, tries + 1), 50).unref?.();
+  }
   /** Start the model's next onboarding turn (only the TUI may start a turn, as for /tutor-plan). */
   function kick(ctx: ExtensionContext, what: string) {
-    if (ctx.hasUI) pi.sendUserMessage(`${TUTOR_PREFIX} onboarding: ${what}`, { deliverAs: "followUp" });
+    if (ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} onboarding: ${what}`);
     else ctx.ui.notify("send a message to continue", "info");
   }
   const checksRoot = (lang: string) => join(homedir(), "lazycourse", ".checks", lang);
@@ -1103,7 +1113,7 @@ export default function (pi: ExtensionAPI): void {
     return parts.join("\n\n");
   }
   function lessonKick(ctx: ExtensionContext, what: string) {
-    if (ctx.hasUI) pi.sendUserMessage(`${TUTOR_PREFIX} lesson: ${what}`, { deliverAs: "followUp" });
+    if (ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} lesson: ${what}`);
   }
 
   interface SpecJob { rounds: string[][]; about: Record<string, string>; level: number; project: { title: string; summary: string; concepts: string[] } }

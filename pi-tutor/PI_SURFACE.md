@@ -149,6 +149,10 @@ Re-verify every line when bumping versions.
 - `ctx.ui.select(title, options)` (types.d.ts:74), `ctx.ui.confirm(title, message)` → `Promise<boolean>`
   (types.d.ts:76), `ctx.ui.input(title, placeholder)` (types.d.ts:78): the fallback questions, the level
   read-back and the project pick. Called from `agent_end`, after the run has finished, never inside `turn_end`.
+- Observed live 2026-10-19 (Pi 1.3.0, agent-session.js:1533 "Messages queued by agent_end handlers require a
+  fresh run…"): a `pi.sendUserMessage(…, { deliverAs: "followUp" })` sent from an `agent_end` handler runs as a
+  follow-up in the ending loop WITHOUT `before_agent_start`, so its run gets none of the tutor's sections. The
+  extension sends such kicks once `ctx.isIdle()` (polled every 50 ms), which starts a fresh run.
 - `pi.on("agent_end", (event, ctx) => …)` (types.d.ts:1209, `AgentEndEvent` :748): the code-owned onboarding
   step runs here once per run. The intake note is read in `message_end` from the original reply, because the
   scrubbed reply (fence removed) is what `turn_end` and the session see.
