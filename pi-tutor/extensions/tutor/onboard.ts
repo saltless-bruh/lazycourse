@@ -77,18 +77,26 @@ export function parseIntake(text: string): Partial<Fields> | null {
 
 /** One reply: count it, merge what the note learned, and let the code pick Python for a newcomer (Q1). */
 export function applyTurn(o: Onboarding, note: Partial<Fields> | null): Onboarding {
-  const next: Onboarding = { ...o, exchanges: o.exchanges + 1, badNotes: o.badNotes + (note === null ? 1 : 0), fields: { ...o.fields, ...(note ?? {}) } };
+  // Live check 2026-10-19: a weak model fills in fields nobody asked about (it copied the example note).
+  // The build/learn choice counts only at the choose stage; a self-score only when the code asks for one.
+  const learned: Partial<Fields> = { ...(note ?? {}) };
+  if (o.stage !== "choose") delete learned.path;
+  const next: Onboarding = { ...o, exchanges: o.exchanges + 1, badNotes: o.badNotes + (note === null ? 1 : 0), fields: { ...o.fields, ...learned } };
   // A probe exchange counts only once the model has been told to ask (the score was known before this turn).
   if (lowScore(o)) next.probeTurns = o.probeTurns + 1;
-  if (next.fields.target === undefined && next.fields.known !== undefined && next.fields.known.length === 0) {
+  // Q1: for someone who knows no language, Python is the code's pick even when the model writes it down.
+  const none = next.fields.known !== undefined && next.fields.known.length === 0;
+  if (!o.named && none && (next.fields.target === undefined || next.fields.target === "python")) {
     next.fields.target = "python";
     next.targetByCode = true;
-  } else if (note?.target !== undefined) next.targetByCode = false;
+  } else if (learned.target !== undefined) next.targetByCode = false;
+  if (!selfScoreNeeded(next)) delete next.fields.selfScore;
   return next;
 }
 
 export function selfScoreNeeded(o: Onboarding): boolean {
-  return o.checkIn === null && o.fields.target !== undefined && !o.targetByCode && (o.named || (o.fields.known ?? []).length > 0);
+  // Q1: whoever chose the language (named it, or picked it over the tutor's Python) rates themselves in it.
+  return o.checkIn === null && o.fields.target !== undefined && !o.targetByCode;
 }
 
 /** Checklist items still unknown, in the order the tutor asks them; `path` belongs to the choose stage only. */
@@ -143,6 +151,12 @@ export function onboardPrompt(o: Onboarding): string {
   if (o.stage === "read" && o.level !== null) lines.push(`Tell the learner your read of them in two or three sentences: level ${o.level}/100 and what it is based on; ask whether that sounds right.`);
   if (o.stage === "project" && o.project) lines.push(`Suggest this one project and say why it suits them: "${o.project.title}" — ${o.project.summary}. They can ask for something else.`);
   if (o.stage === "choose") lines.push("Ask whether they want to start building now, or learn the ideas the project needs first (short lessons with small exercises).");
-  lines.push("End every reply with a fenced note the learner never sees, holding only what you learned this turn, for example:\n```tutor-intake\n{\"experience\":\"none yet\",\"known\":[],\"target\":\"python\",\"selfScore\":6,\"confidence\":\"unsure\",\"idea\":null,\"path\":\"learn\"}\n```\nexperience is one of: none yet, under a year, 1-3 years, over 3 years. idea is null when they have no idea yet.");
+  lines.push([
+    "End every reply with a fenced note the learner never sees: a JSON object with only what the learner told you in their own words this turn (an empty {} when they told you nothing new). Never guess and never fill in a field they did not answer.",
+    "```tutor-intake",
+    "{}",
+    "```",
+    "Keys you may use when the learner said so: experience (one of: none yet, under a year, 1-3 years, over 3 years), known (list of languages, [] when none), target (the language to learn), selfScore (1-10, only when you asked for it), confidence (their words), idea (what they want to build; null only when they said they have no idea), path (build or learn, only when you asked which).",
+  ].join("\n"));
   return lines.join("\n");
 }

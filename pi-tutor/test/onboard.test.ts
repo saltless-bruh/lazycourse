@@ -114,3 +114,25 @@ describe("onboarding, Task 6 additions (Q7, Q9)", () => {
     expect(onboardPrompt(o)).toMatch(/\/tutor-start check/);
   });
 });
+
+describe("live check 2026-10-19: a weak model copies the example note", () => {
+  it("the note example carries no sample answers to copy", () => {
+    const s = onboardPrompt(newOnboarding(null));
+    expect(s).not.toMatch(/"selfScore":\s*\d|"path":\s*"(learn|build)"|"idea":\s*null|"confidence":\s*"/);
+    expect(s).toMatch(/only what the learner told you/i);
+  });
+  it("ignores fields the code did not ask for: path before the choose stage, a self-score nobody needs", () => {
+    const o = applyTurn(newOnboarding(null), { experience: "none yet", known: [], selfScore: 6, path: "learn" });
+    expect(o.fields.path).toBeUndefined();
+    expect(o.fields.selfScore).toBeUndefined();
+    expect(applyTurn({ ...o, stage: "choose" }, { path: "build" }).fields.path).toBe("build");
+  });
+  it("python written by the model for someone who knows no language stays the code's pick (no self-score)", () => {
+    const o = applyTurn(newOnboarding(null), { experience: "none yet", known: [], target: "python" });
+    expect(o.targetByCode).toBe(true);
+    expect(missing(o)).toEqual(["idea"]);
+    const rust = applyTurn(newOnboarding(null), { experience: "none yet", known: [], target: "rust" });
+    expect(rust.targetByCode).toBe(false);
+    expect(missing(rust)).toContain("selfScore");
+  });
+});

@@ -1394,6 +1394,22 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(t.sections["tutor_onboard"]).toMatch(/check-in/i);
     expect(t.sections["tutor_onboard"]).toContain("Monthly Expense Logger");
   });
+  it("a run Pi continues from our kick (no before_agent_start) still counts and is never judged (live check 2026-10-19)", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello")); // fallback fills the checklist → stage read, the kick queues a follow-up
+    expect(b.sent.at(-1)?.text).toMatch(/level \d+\/100/); // the kick itself carries the stage's instruction
+    // Pi runs the queued follow-up in the same loop: no before_agent_start, then message_end, turn_end, agent_end.
+    const reply = assistant("Here is my read of you.");
+    await b.events["message_end"]({ type: "message_end", message: reply }, b.ctx);
+    await b.events["turn_end"]({ type: "turn_end", message: reply }, b.ctx);
+    b.replies.push(ONE);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    expect(b.widgets["tutor"]?.[1]).not.toMatch(/judged/);
+    expect((await saved()).stage).toBe("project");
+  });
   it("the project suggestion shows Pi's cancellable loader and passes its signal (final review I1)", async () => {
     const { initTheme, BorderedLoader } = await import("@earendil-works/pi-coding-agent");
     initTheme(undefined, false);

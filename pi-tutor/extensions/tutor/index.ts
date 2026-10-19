@@ -179,8 +179,6 @@ export default function (pi: ExtensionAPI): void {
   // Spec 2026-10-19 §5–6: /tutor-start as a conversation. The state lives in the profile (setting
   // "onboarding") so it survives /new, a Pi restart and the move into the project folder.
   let onboarding: Onboarding | null = null;
-  /** The current agent run is an onboarding exchange (no hint ladder, no judgment). */
-  let onboardRun = false;
   /** The last intake note read from this run's replies; undefined when the run had no reply text. */
   let intake: Partial<Fields> | null | undefined;
   /** Learn-first lessons for this project (spec 2026-10-19 §7), saved as profile setting `lesson:<project path>`. */
@@ -404,7 +402,7 @@ export default function (pi: ExtensionAPI): void {
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
     // Q23: the Pi that restarted in the new project folder carries the conversation on: build or learn.
-    if (onboarding?.stage === "choose" && project) kick(ctx, "ask whether to build now or learn first");
+    if (onboarding?.stage === "choose" && project) kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises");
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
@@ -467,12 +465,10 @@ export default function (pi: ExtensionAPI): void {
       event.systemPromptOptions.sections["tutor"] = systemText("onboard");
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
       if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
-      onboardRun = true;
       intake = undefined;
       run = { prompt: event.messageType === "user" ? event.prompt : "", rung: null, judged: true };
       return;
     }
-    onboardRun = false;
     const band = bandFor(level());
     if (lesson && project) event.systemPromptOptions.sections["tutor_lesson"] = lessonSection(lesson, project.language);
     const role = roleNamed(activeRole);
@@ -596,7 +592,9 @@ export default function (pi: ExtensionAPI): void {
   pi.on("message_end", (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
-    if (onboardRun) {
+    // Live check 2026-10-19: a run Pi continues from our kick has no before_agent_start, so the onboarding
+    // state, not a flag set there, decides what an exchange is.
+    if (onboardingActive()) {
       // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
       const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
       if (text.trim()) intake = parseIntake(text);
@@ -616,7 +614,7 @@ export default function (pi: ExtensionAPI): void {
   pi.on("turn_end", async (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
-    if (onboardRun) return; // onboarding exchanges carry no judgment
+    if (onboardingActive()) return; // onboarding exchanges carry no judgment
     // Aborted, errored and truncated turns carry no judgment.
     if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
     const cur = run ?? (run = { prompt: "", rung: episode ? episode.rung : null, judged: false });
@@ -1012,12 +1010,14 @@ export default function (pi: ExtensionAPI): void {
       if (needsFallback(o) && missing(o).length) o = await askMissing(ctx, o);
       if (missing(o).length) { saveOnboarding(o); return; }
       if (selfScoreNeeded(o) && (o.fields.selfScore ?? 0) >= 5 && !o.levelCheck && levelTasks(o.fields.target!).length) {
-        saveOnboarding(startLevelCheck(ctx, o));
-        kick(ctx, "tell the learner about the small task");
+        const c = startLevelCheck(ctx, o);
+        saveOnboarding(c);
+        kick(ctx, `a small task (${c.levelCheck!.task}) is in their ~/lazycourse/.checks folder: tell them it only sets where to start, no grade, and to type /tutor-start check when done`);
         return;
       }
-      saveOnboarding({ ...o, stage: "read", level: o.level ?? levelFrom(o), presented: "read" });
-      kick(ctx, "give the learner your read of them");
+      const lvl = o.level ?? levelFrom(o);
+      saveOnboarding({ ...o, stage: "read", level: lvl, presented: "read" });
+      kick(ctx, `give the learner your read of them in two or three sentences: level ${lvl}/100 (${bandFor(lvl)}), based on what they told you; ask whether that sounds right`);
       return;
     }
     if (o.stage === "read" && o.presented === "read") {
@@ -1036,7 +1036,7 @@ export default function (pi: ExtensionAPI): void {
         const s = await suggestOne({ profile, complete: modelComplete(ctx, () => "tutor: finding a project for you…") }, { language: o.fields.target!, level: o.level ?? levelFrom(o), about: aboutOf(o), exclude: o.shown });
         o = { ...o, project: { title: s.title, summary: s.summary, concepts: s.concepts }, shown: [...o.shown, s.title], presented: "project" };
         saveOnboarding(o);
-        kick(ctx, "suggest the project");
+        kick(ctx, `suggest this one project and say why it suits them: "${s.title}" — ${s.summary}; they can ask for something else`);
       } catch (e) {
         saveOnboarding(o);
         ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off" : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
@@ -1076,7 +1076,7 @@ export default function (pi: ExtensionAPI): void {
     next.level = levelFrom(next);
     saveOnboarding(next);
     ctx.ui.notify(passed ? `all tests pass; I'd start you at level ${next.level}` : `some tests fail, which is fine: it only tells me where to start (level ${next.level})`, "info");
-    kick(ctx, "give the learner your read of them");
+    kick(ctx, `give the learner your read of them in two or three sentences: level ${next.level}/100 (${bandFor(next.level!)}), from what they told you and the small task; ask whether that sounds right`);
   }
 
   // ---- build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22) ----
@@ -1232,9 +1232,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (!onboardRun) return;
-    onboardRun = false;
-    if (!onboarding) return;
+    if (!onboardingActive() || !onboarding) return;
     const note = intake;
     intake = undefined;
     saveOnboarding(applyTurn(onboarding, note === undefined ? null : note));
