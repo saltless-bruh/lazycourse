@@ -34,7 +34,7 @@ export function traceOf(stdout: string, stderr: string): string {
 export function spotOf(trace: string): string {
   const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines.at(-1) ?? "";
-  return line.replace(/\d+/g, "#").slice(0, 120);
+  return line.replace(/-?\d+(?:\.\d+)?/g, "#").slice(0, 120);
 }
 
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }

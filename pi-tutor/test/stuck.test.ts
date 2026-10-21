@@ -150,7 +150,10 @@ describe("final review I2: test runners print the failure on stdout", () => {
 describe("attempt spots (spec 2026-10-21 §5)", () => {
   it("spotOf keys a run by its error line", () => {
     expect(spotOf('Traceback…\n  File "src/main.py", line 12, in split_amount\nZeroDivisionError: division by zero\n')).toBe("ZeroDivisionError: division by zero");
-    expect(spotOf("AssertionError: expected 16.0, got 144 at line 3")).toBe("AssertionError: expected #.#, got # at line #");
+    expect(spotOf("AssertionError: expected 16.0, got 144 at line 3")).toBe("AssertionError: expected #, got # at line #");
+    // A wrong value that changes between tries (144, then 144.0, then -2.5) is still the same spot.
+    expect(spotOf("AssertionError: split_amount(48, 3) gave 144.0, expected 16.0")).toBe(spotOf("AssertionError: split_amount(48, 3) gave 144, expected 16.0"));
+    expect(spotOf("AssertionError: gave -2.5")).toBe(spotOf("AssertionError: gave 7"));
     expect(spotOf("all good\nbut nothing matched here")).toBe("but nothing matched here");
     expect(spotOf("x".repeat(300) + " error")).toHaveLength(120);
   });
