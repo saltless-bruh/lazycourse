@@ -64,4 +64,7 @@ describe("renderChecksMd", () => {
       "",
     ].join("\n"));
   });
+  it("adds a note under the heading when one is given", () => {
+    expect(renderChecksMd([], new Set(), { note: "These could not be tried." }).split("\n").slice(3, 6)).toEqual(["Run `:TutorDone <task>` when a task works. Checks marked (unverified) are shown but never block a tick.", "", "These could not be tried."]);
+  });
 });

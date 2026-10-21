@@ -66,7 +66,7 @@ export function liveChecks(all: Check[], milestone: number): Check[] {
 
 const show = (s: string) => JSON.stringify(s);
 
-export function renderChecksMd(checks: Check[], ticked: Set<string>): string {
+export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?: string } = {}): string {
   const out = [
     "<!-- The tutor rewrites this file from its own record; edits here are not kept. -->",
     "# Checks",
@@ -74,6 +74,7 @@ export function renderChecksMd(checks: Check[], ticked: Set<string>): string {
     "Run `:TutorDone <task>` when a task works. Checks marked (unverified) are shown but never block a tick.",
     "",
   ];
+  if (o.note) out.push(o.note, "");
   const tasks = [...new Set(checks.map((c) => c.task))];
   for (const t of tasks) {
     out.push(`## ${t}${ticked.has(t) ? " (done)" : ""}`);
@@ -84,4 +85,9 @@ export function renderChecksMd(checks: Check[], ticked: Set<string>): string {
     out.push("");
   }
   return out.join("\n");
+}
+
+/** Ids ticked in spec/tasks.md (`- [x] P1.T2 …`). */
+export function tickedIds(tasksMd: string): Set<string> {
+  return new Set([...tasksMd.matchAll(/^\s*- \[[xX]\] (P\d+\.T\d+(?:\.S\d+)?)\b/gm)].map((m) => m[1]));
 }

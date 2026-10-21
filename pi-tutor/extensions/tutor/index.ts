@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -20,6 +20,9 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
+import { liveChecks, renderChecksMd, tickedIds } from "./checks.js";
+import { projectRun } from "./check-run.js";
+import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -458,6 +461,7 @@ export default function (pi: ExtensionAPI): void {
       profileWrite(() => { pending = !!p.setting(key); });
       if (pending) specStatus = specRunning.has(project.path) ? "writing" : "failed";
     }
+    ensureChecks(ctx);
     episode = restoreEpisode(ctx);
     activeRole = restoreRole(ctx);
     workflow = restoreWorkflow(ctx);
@@ -1209,6 +1213,57 @@ export default function (pi: ExtensionAPI): void {
     }
   }
 
+  /**
+   * Spec 2026-10-21 §7: each milestone's checks are written in the background once the learner builds it (the
+   * plan of a build-now project, a lesson round reaching its milestone, or an older project at session start).
+   * Like the plan job, it keeps the model it started with and writes through the profile open when it ends.
+   */
+  const checksRunning = new Set<string>();
+  function ensureChecks(ctx: ExtensionContext) {
+    if (!project || !profile || checksRunning.has(project.path) || specRunning.has(project.path)) return;
+    const proj = project, p = profile, key = `checks:${proj.path}`, mine = generation;
+    let tasksMd: string;
+    try { tasksMd = readFileSync(join(proj.path, "spec", "tasks.md"), "utf8"); } catch { return; }
+    const current = currentMilestone(tasksMd, lesson);
+    let state: ChecksState = { milestones: {} };
+    profileWrite(() => { state = readChecksState(p.setting(key)); });
+    const todo = Array.from({ length: current }, (_, i) => i + 1).filter((k) => !state.milestones[k]);
+    if (todo.length === 0) return;
+    const { runCmd, entry } = projectRun(proj.path, proj.language);
+    const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
+    checksRunning.add(proj.path);
+    void (async () => {
+      try {
+        for (const k of todo) {
+          const m = await writeMilestoneChecks({
+            complete: rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(),
+            language: proj.language, tasksMd, milestone: k, entry, runCmd,
+          });
+          if (!profile) return;
+          const now = profile;
+          let saved: ChecksState = { milestones: {} };
+          profileWrite(() => { saved = readChecksState(now.setting(key)); saved.milestones[k] = m; now.setSetting(key, JSON.stringify(saved)); });
+          writeChecksMd(proj.path, saved, current);
+          const trusted = m.checks.filter((c) => c.status === "trusted").length;
+          if (generation === mine && m.checks.length) ui?.notify(`checks for milestone ${k}: spec/checks.md (${trusted} trusted, ${m.checks.length - trusted} unverified)`, "info");
+        }
+      } catch (e) {
+        if (generation === mine) ui?.notify(`the checks could not be written: ${e instanceof Error ? e.message : String(e)}; they are tried again next session`, "warning");
+      } finally {
+        checksRunning.delete(proj.path);
+      }
+    })();
+  }
+  /** spec/checks.md from the profile's record (Review Focus #4: the file is display only and rewritten each time). */
+  function writeChecksMd(root: string, state: ChecksState, current: number) {
+    let tasksMd = "";
+    try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { /* ticks unknown: none shown */ }
+    const all = Object.values(state.milestones).flatMap((m) => m.checks);
+    const untried = Object.values(state.milestones).some((m) => m.checks.length && !m.ran);
+    const note = untried ? "Some checks could not be tried against a reference here (no sandbox), so they are unverified." : undefined;
+    try { writeFileSync(join(root, "spec", "checks.md"), renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note })); } catch { /* spec/ is gone: nothing to show */ }
+  }
+
   /** Author 2026-10-21: the installed Lua as lua_ls names it, for a Lua project's .luarc.json; null when absent. */
   async function luaRuntimeFor(language: string): Promise<string | null> {
     if (language !== "lua") return null;
@@ -1246,6 +1301,7 @@ export default function (pi: ExtensionAPI): void {
     lesson = l;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => p.setSetting(key, l ? JSON.stringify(l) : "")); }
     paint();
+    if (session) ensureChecks(session); // a round that reached its milestone gets that milestone's checks
   }
   /** The hidden lesson section: the rules, the vendored lesson text, the exercise, and a step back after two fails (Q17). */
   function lessonSection(l: LessonState, lang: string): string {
@@ -1275,6 +1331,7 @@ export default function (pi: ExtensionAPI): void {
     paint();
     const meta = { language: proj.language, level: job.level, band: bandFor(job.level), title: job.project.title, summary: job.project.summary };
     void (async () => {
+      let written = false;
       try {
         const spec = await completeJson(rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
           scaffoldPrompt({ language: proj.language, level: job.level, band: meta.band, project: { ...job.project, size: "small" }, about: job.about, rounds: job.rounds }),
@@ -1282,6 +1339,7 @@ export default function (pi: ExtensionAPI): void {
         writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language) });
         if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
         if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
+        written = true;
       } catch (e) {
         if (generation === mine) {
           specStatus = "failed";
@@ -1291,6 +1349,7 @@ export default function (pi: ExtensionAPI): void {
         specRunning.delete(proj.path);
       }
       if (generation === mine) paint();
+      if (written && generation === mine) ensureChecks(frozen);
     })();
   }
 

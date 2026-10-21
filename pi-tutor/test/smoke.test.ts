@@ -1544,6 +1544,56 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(await setting(`lesson:${dir}`)).toBeNull();
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
+  describe("checks job (spec 2026-10-21 §7)", () => {
+    const CHECKS = 'check P1.T1: tip(40) == 8.0\nrun P1.T2: stdin "40\\n" -> stdout contains "8.00"';
+    const REF = "```python\ndef tip(x):\n    return x * 0.2\n```";
+    const files = (d: string): string[] => {
+      const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+      return readdirSync(d).flatMap((n) => { const f = pjoin(d, n); return statSync(f).isDirectory() ? files(f) : [f]; });
+    };
+    it("build now: milestone 1's checks follow the plan, live in the profile, show in spec/checks.md; the reference never enters the project", async () => {
+      const b = await boot({ cwd: dir });
+      b.replies.push(SPEC([]), CHECKS, REF);
+      await exchange(b, note({ path: "build" }));
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      const state = await setting(`checks:${dir}`);
+      expect(state.milestones["1"].checks.map((c: { task: string; status: string }) => [c.task, c.status])).toEqual([["P1.T1", "unverified"], ["P1.T2", "unverified"]]);
+      expect(state.milestones["1"].reference).toContain("return x * 0.2");
+      const md = readFileSync(pjoin(dir, "spec", "checks.md"), "utf8");
+      expect(md).toContain("- tip(40) == 8.0 (unverified)");
+      expect(md).toMatch(/could not be tried/);
+      for (const f of files(dir)) expect(readFileSync(f, "utf8"), f).not.toContain("x * 0.2");
+      expect(b.notes.some((n) => /checks for milestone 1: spec\/checks\.md/.test(n))).toBe(true);
+    });
+    it("learn first: no checks until the round reaches its milestone", async () => {
+      const b = await boot({ cwd: dir });
+      b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
+      await exchange(b, note({ path: "learn" }));
+      await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+      await new Promise((r) => setTimeout(r, 100));
+      expect(await setting(`checks:${dir}`)).toBeNull();
+      b.replies.push(CHECKS.split("\n")[0], REF);
+      for (let i = 0; i < 3; i++) await b.commands["tutor-lesson"].handler("skip", b.ctx);
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
+    });
+    it("an older project with a plan and no checks gets them at session start", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [x] P1.T2 print\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const f = fakePi();
+      extension(f.pi as never);
+      const c = fakeCtx([], dir);
+      c.replies.push(CHECKS, REF);
+      const saved = process.env.NVIM; delete process.env.NVIM;
+      await f.events["session_start"]({ type: "session_start", reason: "startup" }, c.ctx);
+      if (saved) process.env.NVIM = saved;
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("## P1.T2 (done)");
+    });
+  });
   it("no answer in the note: the code asks with a dialog", async () => {
     const b = await boot({ cwd: dir });
     b.replies.push(SPEC([]));
@@ -1655,9 +1705,13 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     try {
       const b = await boot({ cwd: dir });
       let calls = 0;
-      (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => (++calls === 1
-        ? { role: "assistant", stopReason: "error", errorMessage, content: [] }
-        : { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] });
+      // Only the plan job's calls: once the plan is written, the checks job asks the model too.
+      (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { systemPrompt: string }) => {
+        if (!c.systemPrompt.startsWith("You write the specification")) return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "" }] };
+        return ++calls === 1
+          ? { role: "assistant", stopReason: "error", errorMessage, content: [] }
+          : { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] };
+      };
       await exchange(b, note({ path: "build" }));
       await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")) || b.notes.some((n) => /could not be written/.test(n)));
       return { calls, written: existsSync(pjoin(dir, "spec", "tasks.md")) };
