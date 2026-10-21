@@ -7,6 +7,9 @@ import { PUSH_LUA } from "./push.lua.js";
 // The neovim client logs through winston and patches console; route it to a file
 // before it loads so nothing ever reaches Pi's terminal.
 /** Per-user log for the neovim client (M1b #6): never one /tmp file shared by every user. */
+/** A failed connect waits at most this long for its abandoned request before closing the socket. */
+const CLOSE_WAIT_MS = 10_000;
+
 export function nvimLogPath(env: NodeJS.ProcessEnv): string {
   const state = env.XDG_STATE_HOME || join(env.HOME || homedir(), ".local", "state");
   return join(state, "pi-tutor", "nvim.log");
@@ -122,24 +125,34 @@ export class NvimLink {
     const timeoutMs = opts.connectTimeoutMs ?? 3000;
     let raw: NeovimClient | undefined;
     let failed = false;
+    /** The request in flight; a failed connect closes only after it settles (see the catch). */
+    let pending: Promise<unknown> = Promise.resolve();
     try {
       const { attach } = await import("neovim");
       raw = attach({ socket });
       // Swallow transport errors: a stale socket must degrade to detached mode, never throw.
       raw.on("error", () => {});
-      const [channel] = (await bounded(raw.request("nvim_get_api_info", []), timeoutMs, "nvim connect")) as [number, unknown];
+      pending = raw.request("nvim_get_api_info", []);
+      const [channel] = (await bounded(pending, timeoutMs, "nvim connect")) as [number, unknown];
       const link = new NvimLink(raw, channel, root);
       raw.on("notification", (method: string, args: unknown[]) => {
         if (!failed && method === "tutor" && args[0]) opts.onPayload(args[0] as TutorPayload);
       });
       // A client whose connect failed was never handed out: its disconnect is not the caller's (pane #8).
       raw.on("disconnect", () => { link.connected = false; if (!failed) opts.onDisconnect?.(); });
-      await bounded(raw.lua(PUSH_LUA, [channel, { root, idle_ms: opts.idleMs ?? 30000, churn_edits: opts.churnEdits ?? 10 }]), timeoutMs, "nvim connect");
+      pending = raw.lua(PUSH_LUA, [channel, { root, idle_ms: opts.idleMs ?? 30000, churn_edits: opts.churnEdits ?? 10 }]);
+      await bounded(pending, timeoutMs, "nvim connect");
       return link;
     } catch {
       failed = true;
-      // Close our socket only; never quit() (that is :qa! in the user's editor).
-      if (raw) { const r = raw; void bounded(r.close(), timeoutMs, "nvim close").catch(() => {}); }
+      // Close our socket only; never quit() (that is :qa! in the user's editor). The client still holds the
+      // timed-out request and sends it once a blocked Neovim answers its handshake: closing first made that a
+      // "write after end" rejection nobody could catch. So close once it settles, or after CLOSE_WAIT_MS.
+      if (raw) {
+        const r = raw;
+        const wait = new Promise<void>((res) => { setTimeout(res, CLOSE_WAIT_MS).unref?.(); });
+        void Promise.race([pending.then(() => {}, () => {}), wait]).then(() => bounded(r.close(), timeoutMs, "nvim close")).catch(() => {});
+      }
       return null;
     }
   }
