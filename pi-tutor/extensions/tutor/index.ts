@@ -297,6 +297,17 @@ export default function (pi: ExtensionAPI): void {
    * typo run (LazyVim has it): no attempt, no nudge. The same spot again with changed code climbs; unchanged
    * code does not; a new spot starts a new episode. The nudge comes only when the count went up.
    */
+  /**
+   * Live check 2026-10-21: a different error in between (a typo) must not throw away the count on the spot the
+   * learner returns to. Counts per spot live until a run passes.
+   */
+  const spotMemory = new Map<string, { attempts: number; lastHash?: string }>();
+  const remember = (ep: Episode) => {
+    if (!ep.spot) return;
+    spotMemory.delete(ep.spot);
+    spotMemory.set(ep.spot, { attempts: ep.attempts, lastHash: ep.lastHash });
+    if (spotMemory.size > 20) spotMemory.delete(spotMemory.keys().next().value!);
+  };
   function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean) {
     const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
     if (detector.hasErrorsIn(root)) { signal = "run failed: fix the error marked in your file"; return; }
@@ -304,12 +315,16 @@ export default function (pi: ExtensionAPI): void {
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
       const before = episode.attempts;
       episode = recordAttempt({ ...episode, trigger }, { spot, hash });
+      remember(episode);
       pi.appendEntry("tutor_episode", episode);
       if (episode.attempts > before) nudgeFor(trigger, nudge, true);
       return;
     }
     if (episode) closeEp("superseded");
-    episode = recordAttempt(openEpisode(trigger, bandFor(level()), Date.now()), { spot, hash });
+    const fresh = openEpisode(trigger, bandFor(level()), Date.now());
+    const prior = spotMemory.get(spot);
+    episode = recordAttempt(prior ? { ...fresh, spot, attempts: prior.attempts, lastHash: prior.lastHash } : fresh, { spot, hash });
+    remember(episode);
     pi.appendEntry("tutor_episode", episode);
     nudgeFor(trigger, nudge, true);
   }
@@ -386,7 +401,7 @@ export default function (pi: ExtensionAPI): void {
   function onStuck(events: StuckEvent[]) {
     for (const e of events) {
       if (e.type === "open") openEp(e.trigger, true);
-      else if (e.type === "run_passed") { closeEp("run_passed"); void tickPending(); }
+      else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); void tickPending(); }
       else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");
     }
   }

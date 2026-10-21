@@ -251,6 +251,22 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
     await until(() => episodes(b.entries).some((e) => e.id === first.id && e.closeReason === "superseded"));
     expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "TypeError: unsupported operand", trigger: { kind: "run" } });
   }, 20000);
+  it("coming back to a spot after a different error resumes its count (live check 2026-10-21)", async () => {
+    const b = await linked();
+    await runPayload(1, "split_amount(48, 3) gave 144, expected 16.0");
+    await until(() => attempts(b) === 1);
+    edit("x = 4\n");
+    await runPayload(1, "split_amount(48, 3) gave 144.0, expected 16.0");
+    await until(() => attempts(b) === 2);
+    edit("x = (\n");
+    await runPayload(1, "lua: src/main.lua:4: ')' expected near 'end'");
+    await until(() => (episodes(b.entries).at(-1) as { spot?: string }).spot?.includes("expected near") === true);
+    expect(attempts(b)).toBe(1);
+    edit("x = 5\n");
+    await runPayload(1, "split_amount(10, 4) gave 2, expected 2.5");
+    await until(() => (episodes(b.entries).at(-1) as { spot?: string }).spot?.includes("gave") === true);
+    expect(attempts(b)).toBe(3);
+  }, 20000);
   it("a chat message never counts as an attempt, even after the code changed (only graded tries count)", async () => {
     const b = await linked();
     await runPayload(1, "ZeroDivisionError: division by zero");
