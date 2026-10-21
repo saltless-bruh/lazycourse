@@ -3,9 +3,14 @@ import { renderWidget, renderStatus } from "../extensions/tutor/ui.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 describe("renderWidget", () => {
-  it("renders language, level, rung, task on line 1 and state on line 2", () => {
-    const w = renderWidget({ language: "python", level: 30, rung: 2, task: "P1.T2.S1", state: "idle", connected: true });
-    expect(w).toEqual(["tutor  python · lvl 30 · rung 2 · P1.T2.S1", "idle"]);
+  const base = { language: "python", level: 30, state: "idle", connected: true };
+  it("the widget shows tries, never a rung (spec 2026-10-21 §5)", () => {
+    expect(renderWidget({ ...base, attempt: 2 }).join("\n")).toMatch(/try 2/);
+    expect(renderWidget({ ...base }).join("\n")).not.toMatch(/rung|try/);
+  });
+  it("renders language, level, tries, task on line 1 and state on line 2", () => {
+    const w = renderWidget({ language: "python", level: 30, attempt: 2, task: "P1.T2.S1", state: "idle", connected: true });
+    expect(w).toEqual(["tutor  python · lvl 30 · try 2 · P1.T2.S1", "idle"]);
   });
   it("appends the last judgment to line 2", () => {
     const w = renderWidget({ level: 30, state: "clean", connected: true, last: "correct" });
@@ -33,11 +38,11 @@ describe("renderWidget", () => {
     expect(w[1].endsWith("…")).toBe(true);
   });
   it("an exam label leads line 1, so clipping never hides the timer (M8)", () => {
-    const [l1] = renderWidget({ exam: "exam 01 19:59 left", role: "architect", language: "typescript", level: 50, rung: 2, state: "idle", connected: true });
+    const [l1] = renderWidget({ exam: "exam 01 19:59 left", role: "architect", language: "typescript", level: 50, attempt: 2, state: "idle", connected: true });
     expect(l1.startsWith("tutor  exam 01 19:59 left · ")).toBe(true);
   });
   it("keeps both lines within 44 cells", () => {
-    const w = renderWidget({ language: "typescript", level: 100, rung: 5, task: "P12.T34.S56", state: "stuck: cannot borrow `x` as mutable more than once at a time", connected: true, last: "partial" });
+    const w = renderWidget({ language: "typescript", level: 100, attempt: 5, task: "P12.T34.S56", state: "stuck: cannot borrow `x` as mutable more than once at a time", connected: true, last: "partial" });
     for (const l of w) expect(l.length).toBeLessThanOrEqual(44);
     expect(w[1].startsWith("stuck: cannot borrow")).toBe(true);
     expect(w[1].endsWith("… · judged partial")).toBe(true);
@@ -60,7 +65,7 @@ describe("renderStatus", () => {
 
 describe("lesson label (spec 2026-10-19 Q15)", () => {
   it("comes first on line 1, after an exam timer, so clipping never hides it", () => {
-    const [l1] = renderWidget({ lesson: "lesson: basics 1/2", language: "python", level: 10, rung: 3, state: "idle", connected: true });
+    const [l1] = renderWidget({ lesson: "lesson: basics 1/2", language: "python", level: 10, attempt: 3, state: "idle", connected: true });
     expect(l1.startsWith("tutor  lesson: basics 1/2 · python")).toBe(true);
   });
   it("the spec status fits beside the outside-nvim prefix", () => {

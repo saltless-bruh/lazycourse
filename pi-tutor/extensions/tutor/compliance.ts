@@ -1,7 +1,7 @@
 import { stripIntake } from "./onboard.js";
 import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
-import { RUNG_NAMES } from "./ladder.js";
+import type { TurnStep } from "./ladder.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -55,15 +55,14 @@ const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done
  */
 const QUOTES = new Set(["markdown", "md"]);
 
-function codeAllowed(o: { band: Band; rung: number | null; noCode: boolean }, lines: number): boolean {
+function codeAllowed(o: { band: Band; step: TurnStep | null; noCode: boolean }, lines: number): boolean {
   if (o.noCode) return false;
-  const rung = o.rung ?? 1;
-  if (rung >= 4) return true;
+  if (o.step === "fix") return true;
   return o.band === "beginner" && lines <= 3;
 }
 
 /** `cols`: the learner's real diagram width (diagramCols); prompts still ask for 40, the check allows what fits. */
-export function checkReply(text: string, o: { band: Band; rung: number | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
+export function checkReply(text: string, o: { band: Band; step: TurnStep | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
   const issues = new Set<Issue>();
   if (!o.judged) issues.add("missing-judgment");
   for (const m of text.matchAll(FENCES)) {
@@ -154,13 +153,13 @@ export function scrubInternals(raw: string): string {
 
 /**
  * Last line of every turn's hidden context. Golden round 1 (nemotron): 3 of 5 replies dropped the
- * judgment block that the system prompt asks for; round 2: a rung 2 reply stated the fix in words.
+ * judgment block that the system prompt asks for; round 2: a hint-level reply stated the fix in words.
  * A reminder next to the learner's message is read last.
  */
-export function replyReminder(rung: number | null, recipe = false): string {
+export function replyReminder(step: TurnStep | null, recipe = false): string {
   const hold = recipe
     ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
-    : rung !== null && rung < 5 ? ` At rung ${rung} (${RUNG_NAMES[rung - 1]}): do not state the fix, in code or in words.` : "";
+    : step !== null && step !== "fix" ? " Do not state the fix, in code or in words." : "";
   return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}`;
 }
 

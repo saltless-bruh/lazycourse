@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { retryAssistantCall } from "@earendil-works/pi-ai/compat";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
-import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "./policy.js";
+import { bandFor, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
@@ -19,10 +19,10 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { easeStart, episodeScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, rebandEpisode, describeTrigger, rungCap, capRung, EXAM_RUNG_CAP, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { easeDelay, attemptScore, stepFor, restoreAttempts, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
-import { FEEDBACK_KINDS, activeFeedback, feedbackRung, formatFeedback } from "./feedback.js";
+import { FEEDBACK_KINDS, activeFeedback, formatFeedback } from "./feedback.js";
 import { suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, LANGUAGES } from "./start.js";
 import { newOnboarding, checkInOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, type Onboarding, type Fields } from "./onboard.js";
 import { EXPERIENCE } from "./interview.js";
@@ -103,11 +103,11 @@ function restoreWorkflow(ctx: ExtensionContext): Workflow | null {
 
 /** Last `tutor_episode` entry on the active branch, if it is still open. */
 function restoreEpisode(ctx: ExtensionContext): Episode | null {
-  let ep: Episode | undefined;
+  let ep: unknown;
   for (const e of ctx.sessionManager.getBranch()) {
-    if (e.type === "custom" && e.customType === "tutor_episode") ep = e.data as Episode;
+    if (e.type === "custom" && e.customType === "tutor_episode") ep = e.data;
   }
-  return ep && typeof ep.rung === "number" && ep.trigger && ep.closed === undefined ? ep : null;
+  return ep === undefined ? null : restoreAttempts(ep);
 }
 
 function realCwd(cwd: string): string {
@@ -162,11 +162,12 @@ export default function (pi: ExtensionAPI): void {
   /**
    * The agent run in flight (before_agent_start → turn_end…): the learner message it answers and
    * whether a judgment was already applied. One judgment per run: a model that "calls" tutor-judgment
-   * and then writes the fence must not move the rung twice.
+   * and then writes the fence must not count twice.
    */
   /** `episodeId`: the episode a ladder-role run answers, `null` when it started without one (M6c M6). */
   /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
-  let run: { prompt: string; rung: number | null; judged: boolean; episodeId?: string | null; lang?: string | null } | null = null;
+  /** `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role. */
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null } | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
   let pendingSteers = 0;
   /** M8 D6: task ids the model reported done, ticked in spec/tasks.md by the next passing run. */
@@ -235,8 +236,6 @@ export default function (pi: ExtensionAPI): void {
     try { await run(); } finally { examBusy = false; }
   }
 
-  /** Spec §6: during an exam every episode's rung stays at EXAM_RUNG_CAP or lower. */
-  const examCap = (ep: Episode) => (exam ? capRung(ep, EXAM_RUNG_CAP) : ep);
   /** One repaint a second while an exam runs (spec §6 mm:ss); unref'd, cleared when the exam ends. */
   let examTimer: ReturnType<typeof setInterval> | null = null;
   function examClock() {
@@ -245,14 +244,13 @@ export default function (pi: ExtensionAPI): void {
   }
 
   function paint() {
-    state.rung = episode ? episode.rung : startRung(bandFor(level()));
-    if (exam) state.rung = Math.min(state.rung, EXAM_RUNG_CAP);
+    state.attempt = episode?.attempts || undefined;
     state.exam = exam ? examLabel(exam, Date.now()) : undefined;
     state.state = episode ? `stuck: ${describeTrigger(episode.trigger)}`
       : specStatus === "writing" ? "spec: writing…" : specStatus === "failed" ? "spec error: /tutor-start spec" : signal;
     const r = roleNamed(activeRole);
     state.role = r.name === DEFAULT_ROLE ? undefined : r.name;
-    if (!r.ladder) state.rung = undefined;
+    if (!r.ladder) state.attempt = undefined;
     state.task = workflow ? workflowLabel(workflow) : undefined;
     state.lesson = lesson ? lessonLabel(lesson) : undefined;
     if (!ui) return;
@@ -269,7 +267,7 @@ export default function (pi: ExtensionAPI): void {
   function setLevel(n: number) {
     state.level = n;
     if (episode) {
-      episode = examCap(rebandEpisode(episode, bandFor(n)));
+      episode = { ...episode, band: bandFor(n) };
       pi.appendEntry("tutor_episode", episode);
     }
   }
@@ -279,7 +277,7 @@ export default function (pi: ExtensionAPI): void {
     const run = trigger.kind === "run";
     // Final review I1: re-running a still-failing program keeps the hint level; only the trace is new.
     if (run && episode?.trigger.kind === "run") {
-      episode = examCap({ ...episode, trigger });
+      episode = { ...episode, trigger };
       pi.appendEntry("tutor_episode", episode);
       nudgeFor(trigger, nudge, true);
       return;
@@ -289,7 +287,7 @@ export default function (pi: ExtensionAPI): void {
       if (!nudge || !(run || yieldsTo(episode))) return;
       closeEp("superseded");
     }
-    episode = examCap(openEpisode(trigger, bandFor(level()), Date.now()));
+    episode = openEpisode(trigger, bandFor(level()), Date.now());
     pi.appendEntry("tutor_episode", episode);
     nudgeFor(trigger, nudge, run);
   }
@@ -324,14 +322,14 @@ export default function (pi: ExtensionAPI): void {
 
   function mirror(closed: Episode) {
     if (!profile || !project || closed.closed === undefined) return;
-    const score = episodeScore(closed);
+    const score = attemptScore(closed);
     if (score === null) return;
     const p = profile, proj = project, closedAt = closed.closed;
     profileWrite(() => p.recordEpisode({
       language: proj.language,
       project: proj.path,
       concept_tags: closed.concept_tags,
-      rungs_used: Math.max(1, closed.rung - startRung(closed.band) + 1), // M5 #40: an eased start can sit below the band's
+      rungs_used: closed.attempts + 1, // spec 2026-10-21 §11a: the column now counts failed attempts (+1)
       turns: closed.turns, opened: closed.opened, closed: closedAt,
     }, score));
   }
@@ -485,7 +483,7 @@ export default function (pi: ExtensionAPI): void {
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
       if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
       intake = undefined;
-      run = { prompt: event.messageType === "user" ? event.prompt : "", rung: null, judged: true };
+      run = { prompt: event.messageType === "user" ? event.prompt : "", step: null, judged: true };
       return;
     }
     const band = bandFor(level());
@@ -498,7 +496,7 @@ export default function (pi: ExtensionAPI): void {
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
-    run = { prompt, rung: role.ladder && episode ? episode.rung : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined };
+    run = { prompt, step: role.ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -528,7 +526,7 @@ export default function (pi: ExtensionAPI): void {
     if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(replyReminder(run.rung, workflow !== null && role.ladder));
+    parts.push(replyReminder(run.step, workflow !== null && role.ladder));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -560,7 +558,6 @@ export default function (pi: ExtensionAPI): void {
       ui?.notify(`${newIds.join(", ")} done? It is ticked when :TutorRun passes`, "info");
     }
     const ladder = roleNamed(activeRole).ladder;
-    const inRecipe = workflow !== null && ladder;
     if (ladder) advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     // M3 #17: the reply answered an episode an editor trigger has since replaced (or, M6c M6, none:
@@ -571,13 +568,9 @@ export default function (pi: ExtensionAPI): void {
       const p = profile, lang = project.language;
       const vocab = pack ? vocabOf(pack, loadPack("editor")) : null;
       profileWrite(() => { known = new Map(remapConcepts(p.concepts(lang), vocab).map((c) => [c.tag, c.ease])); });
-      episode = easeStart(episode, j.concept_tags, (t) => known.get(t));
+      episode = easeDelay(episode, j.concept_tags, (t) => known.get(t));
     }
-    const rung = episode.rung;
-    episode = examCap(applyJudgment(episode, j, Date.now()));
-    // Spec §4: in the design recipe the learner writes every artifact; good step answers must not
-    // climb the ladder toward reveal (final review I2: the rung went 3 → 5 in the live walk).
-    if (inRecipe) episode = { ...episode, rung };
+    episode = applyJudgment(episode, j, Date.now());
     pi.appendEntry("tutor_episode", episode);
     if (episode.closed !== undefined) { mirror(episode); episode = null; signal = "episode closed (judged)"; }
   }
@@ -636,7 +629,7 @@ export default function (pi: ExtensionAPI): void {
     if (onboardingActive()) return; // onboarding exchanges carry no judgment
     // Aborted, errored and truncated turns carry no judgment.
     if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
-    const cur = run ?? (run = { prompt: "", rung: episode ? episode.rung : null, judged: false });
+    const cur = run ?? (run = { prompt: "", step: roleNamed(activeRole).ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false });
     let callArgs: unknown;
     for (const c of m.content) if (c.type === "toolCall" && isJudgmentTool(c.name)) callArgs = c.arguments;
     const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
@@ -646,7 +639,7 @@ export default function (pi: ExtensionAPI): void {
     if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId, cur.lang); }
     if (final) {
       if (!cur.judged) state.last = "missing";
-      lastIssues = checkReply(text, { band: bandFor(level()), rung: cur.rung, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
+      lastIssues = checkReply(text, { band: bandFor(level()), step: cur.step, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
       if (lastIssues.length) pi.appendEntry("tutor_check", { issues: lastIssues });
     }
     paint();
@@ -780,7 +773,6 @@ export default function (pi: ExtensionAPI): void {
         setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
         exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts };
         saveExam(exam);
-        if (episode) { episode = examCap(episode); pi.appendEntry("tutor_episode", episode); }
         examClock();
         paint();
         ctx.ui.notify(`exam ${made.id}: ${exam.limit} minutes. Brief: ${made.dir}/brief.md · write ${made.dir}/${lay.stub} · :TutorExam check · :TutorSubmit`, "info");
@@ -890,11 +882,11 @@ export default function (pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const kind = args.trim() as FeedbackKind;
       if (!FEEDBACK_KINDS.includes(kind)) { ctx.ui.notify("usage: /tutor-feedback too-long|too-vague|too-much-help|good", "warning"); return; }
-      const rung = episode ? episode.rung : null;
-      if (episode && roleNamed(activeRole).ladder) {
-        const next = feedbackRung(kind, episode.rung, rungCap(episode.band));
-        const capped = examCap({ ...episode, rung: next }); // final review I4: feedback never lifts an exam's cap
-        if (capped.rung !== episode.rung) { episode = capped; pi.appendEntry("tutor_episode", episode); }
+      const rung = episode ? episode.attempts : null; // the profile column keeps its name; it holds the attempt count now
+      // Spec 2026-10-21 §5: only graded tries move help. Feedback can only slow it down (too-much-help).
+      if (episode && roleNamed(activeRole).ladder && kind === "too-much-help" && episode.delay !== 1) {
+        episode = { ...episode, delay: 1 };
+        pi.appendEntry("tutor_episode", episode);
       }
       feedbackHistory.push(kind);
       pi.appendEntry("tutor_feedback", { kind, rung });

@@ -39,18 +39,18 @@ describe("formatEditorContext", () => {
 });
 
 describe("formatEpisodeContext", () => {
-  it("states the trigger, the rung with its name and cap, turns and concepts", () => {
-    const ep = { ...openEpisode({ kind: "error", path: "/p/a.py", line: 3, msg: "boom" }, "pro", 1), turns: 2, concept_tags: ["types", "casts"] };
+  it("states the trigger, the failed attempts, turns and concepts", () => {
+    const ep = { ...openEpisode({ kind: "error", path: "/p/a.py", line: 3, msg: "boom" }, "pro", 1), attempts: 2, turns: 2, concept_tags: ["types", "casts"] };
     expect(formatEpisodeContext(ep).split("\n")).toEqual([
       '[episode] stuck on: error "boom" at a.py:3',
-      "hint rung 1/4 (question), 2 turn(s) so far",
+      "failed attempts on this spot: 2, 2 turn(s) so far",
       "concepts: types, casts",
     ]);
   });
   it("omits the concepts line when there are none", () => {
     expect(formatEpisodeContext(openEpisode({ kind: "chat" }, "beginner", 1)).split("\n")).toEqual([
       "[episode] stuck on: learner question",
-      "hint rung 3/5 (pointer), 0 turn(s) so far",
+      "failed attempts on this spot: 0, 0 turn(s) so far",
     ]);
   });
 });

@@ -1,6 +1,7 @@
 import type { FeedbackKind } from "./profile.js";
 
-// `/tutor-feedback` (spec 2026-10-13 §7 #7): adjusts style and rung, logged in the profile.
+// `/tutor-feedback` (spec 2026-10-13 §7 #7): adjusts style, logged in the profile. Help moves only with
+// graded tries (spec 2026-10-21 §5); too-much-help can only slow it (index.ts sets the episode's delay).
 export const FEEDBACK_KINDS: readonly FeedbackKind[] = ["too-long", "too-vague", "too-much-help", "good"];
 
 const NOTES: Record<Exclude<FeedbackKind, "good">, string> = {
@@ -17,12 +18,6 @@ export function activeFeedback(history: FeedbackKind[]): FeedbackKind[] {
     else if (!active.includes(k)) active.push(k);
   }
   return active;
-}
-
-export function feedbackRung(kind: FeedbackKind, rung: number, cap: number): number {
-  if (kind === "too-much-help") return Math.max(1, rung - 1);
-  if (kind === "too-vague") return Math.min(cap, rung + 1);
-  return rung;
 }
 
 /** The hidden per-turn note; shorter never means dropping needed detail (spec §2 "Complete"). */

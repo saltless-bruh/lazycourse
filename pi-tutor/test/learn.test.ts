@@ -6,7 +6,7 @@ import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned
 import { openEpisode, closeEpisode } from "../extensions/tutor/ladder.js";
 
 const ep = (closed: boolean) => {
-  const e = { ...openEpisode({ kind: "error", path: "/p/src/main.rs", line: 4, msg: "borrow of moved value" }, "beginner", 1), rung: 4, turns: 3, concept_tags: ["ownership", "move-semantics"] };
+  const e = { ...openEpisode({ kind: "error", path: "/p/src/main.rs", line: 4, msg: "borrow of moved value" }, "beginner", 1), attempts: 4, turns: 3, concept_tags: ["ownership", "move-semantics"] };
   return closed ? closeEpisode(e, "judged", 9) : e;
 };
 const entry = (data: unknown) => ({ type: "custom", customType: "tutor_episode", data });
@@ -17,6 +17,12 @@ describe("lastClosedEpisode / transcript", () => {
     expect(lastClosedEpisode([entry(ep(true)), entry(ep(false))])).toMatchObject({ closeReason: "judged" });
     expect(lastClosedEpisode([entry(ep(false))])).toBeNull();
     expect(lastClosedEpisode([])).toBeNull();
+  });
+  it("an episode closed before attempts existed (saved with a rung) reads as 0 failed attempts", () => {
+    const old = { type: "custom", customType: "tutor_episode", data: { id: "ep-9", trigger: { kind: "chat" }, band: "beginner", rung: 4, opened: 1, turns: 2, concept_tags: [], closed: 3, closeReason: "judged" } };
+    const ep = lastClosedEpisode([old])!;
+    expect(ep.attempts).toBe(0);
+    expect(learnPrompt("rust", ep, "")).toContain("after 0 failed attempt(s)");
   });
   it("keeps the newest user/assistant text within the budget and skips tool calls and custom messages", () => {
     const branch = [
@@ -35,7 +41,7 @@ describe("lastClosedEpisode / transcript", () => {
 describe("learnPrompt / checkLearned / renderLearned", () => {
   it("puts the episode facts and conversation into the prompt", () => {
     const p = learnPrompt("rust", ep(true), "learner: why?");
-    for (const s of ["language: rust", 'error "borrow of moved value" at main.rs:4', "ownership, move-semantics", "rung 4 (pseudocode)", "3 turn(s)", "learner: why?"]) expect(p).toContain(s);
+    for (const s of ["language: rust", 'error "borrow of moved value" at main.rs:4', "ownership, move-semantics", "after 4 failed attempt(s)", "3 turn(s)", "learner: why?"]) expect(p).toContain(s);
   });
   it("accepts a well-formed draft and rejects bad slugs, multi-line descriptions and empty bodies", () => {
     const good = { slug: "moved-string", description: "Moving a String into a function. Use when the learner sees 'borrow of moved value'.", body: "## Misconception\n..." };

@@ -1,4 +1,4 @@
-// Level policy (spec §4): one integer 0-100 → band, start rung, stuck thresholds.
+// Level policy (spec §4): one integer 0-100 → band and stuck thresholds.
 export type Band = "beginner" | "intermediate" | "pro";
 
 export const DEFAULT_LEVEL = 50;
@@ -21,9 +21,6 @@ export function bandFor(level: number): Band {
   return l <= 33 ? "beginner" : l <= 66 ? "intermediate" : "pro";
 }
 
-export function startRung(band: Band): 1 | 2 | 3 {
-  return band === "beginner" ? 3 : band === "intermediate" ? 2 : 1;
-}
 
 export function thresholds(level: number): { errorMs: number; idleMs: number } {
   const l = clamp(level);

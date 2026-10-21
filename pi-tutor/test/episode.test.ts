@@ -220,18 +220,18 @@ describe("architect role and stuck signals (M6a minor)", () => {
   }, 20000);
 });
 
-describe("final review I1: a failing re-run keeps the hint level", () => {
-  it("a second failing run refreshes the run episode's trace in place and keeps its rung, turns and tags", async () => {
+describe("final review I1: a failing re-run keeps its episode", () => {
+  it("a second failing run refreshes the run episode's trace in place and keeps its turns and tags", async () => {
     const b = await linked();
     await runPayload(1, "KeyError: 'x'");
     await until(() => b.sent.length === 1);
-    await turn(b.events, b.ctx, REASONED, judged("correct")); // beginner start rung 3 → 4
+    await turn(b.events, b.ctx, REASONED, judged("correct"));
     const before = episodes(b.entries).at(-1)!;
-    expect(before).toMatchObject({ rung: 4, turns: 1 });
+    expect(before).toMatchObject({ turns: 1 });
     await runPayload(1, "KeyError: 'y'");
     await until(() => b.sent.length === 2); // still nudged
     const after = episodes(b.entries).at(-1)!;
-    expect(after).toMatchObject({ id: before.id, rung: 4, turns: 1, trigger: { kind: "run", trace: "KeyError: 'y'" } });
+    expect(after).toMatchObject({ id: before.id, turns: 1, trigger: { kind: "run", trace: "KeyError: 'y'" } });
     expect(episodes(b.entries).some((e) => e.closeReason === "superseded")).toBe(false);
   }, 20000);
 });
@@ -283,7 +283,7 @@ describe("M6c: episodes against a real Neovim", () => {
     await setError("boom"); // replaces it mid-reply
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, attempts: 0, turns: 0 });
   }, 20000);
   it("a run that started without an episode does not judge one opened mid-reply (M6c M6)", async () => {
     const b = await linked(); // beginner: error threshold 0
@@ -293,7 +293,7 @@ describe("M6c: episodes against a real Neovim", () => {
     await setError("boom"); // an editor episode opens mid-reply
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("wrong") }, b.ctx);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, attempts: 0, turns: 0 });
   }, 20000);
   it("display-only filetypes are not languages for /tutor-docs and memory (M5 #38, M6b #57)", async () => {
     const b = await linked();

@@ -31,12 +31,12 @@ describe("extension wiring", () => {
     expect(statuses["tutor"]).toBe("tutor lvl 50 · intermediate");
   });
 
-  it("/tutor-level validates, persists a tutor_level entry, and sets the start rung", async () => {
+  it("/tutor-level validates and persists a tutor_level entry", async () => {
     const { commands, ctx, widgets, notes, entries } = await boot();
     await commands["tutor-level"].handler("abc", ctx);
     expect(notes.at(-1)).toMatch(/0-100/);
     await commands["tutor-level"].handler("20", ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 20 · rung 3");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 20");
     expect(entries).toContainEqual({ type: "tutor_level", data: { level: 20 } });
   });
 
@@ -46,7 +46,7 @@ describe("extension wiring", () => {
       { type: "custom", customType: "tutor_signal", data: {} },
       { type: "custom", customType: "tutor_level", data: { level: 80 } },
     ] });
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 80 · rung 1");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 80");
   });
 
   it("before_agent_start sets the band section; detached turns carry the episode but no editor snapshot", async () => {
@@ -58,7 +58,7 @@ describe("extension wiring", () => {
     expect(opts.sections["tutor"]).toContain("```tutor-judgment");
     expect(r1.message.customType).toBe("tutor_editor");
     expect(r1.message.display).toBe(false);
-    expect(r1.message.content).toMatch(/^\[episode\] stuck on: learner question\nhint rung 2\/5/);
+    expect(r1.message.content).toMatch(/^\[episode\] stuck on: learner question\nfailed attempts on this spot: 0/);
     expect(r1.message.content).not.toContain("[editor]");
     await commands["tutor-level"].handler("5", ctx);
     await events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "hi", systemPromptOptions: opts }, ctx);
@@ -117,20 +117,19 @@ describe("M2 review fixes", () => {
 describe("M3 episodes, ladder and guard", () => {
   const bas = (prompt: string) => ({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: { sections: {} } });
 
-  it("a chat message opens an episode; correct advances, wrong holds, episode_closed closes", async () => {
+  it("a chat message opens an episode; judgments never move help (spec 2026-10-21 §5); episode_closed closes", async () => {
     const { events, ctx, entries, widgets } = await boot();
     await events["before_agent_start"](bas(REASONED), ctx);
-    expect(episodes(entries).at(-1)).toMatchObject({ trigger: { kind: "chat" }, rung: 2, turns: 0 });
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2"); // line 2 says "detached" in these boots
+    expect(episodes(entries).at(-1)).toMatchObject({ trigger: { kind: "chat" }, attempts: 0, turns: 0 });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50"); // line 2 says "detached" in these boots
     await events["turn_end"]({ type: "turn_end", message: judged("correct") }, ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
     await events["before_agent_start"](bas(REASONED), ctx);
     await events["turn_end"]({ type: "turn_end", message: judged("wrong") }, ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
     await events["before_agent_start"](bas(REASONED), ctx);
     await events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, ctx);
-    expect(episodes(entries).at(-1)).toMatchObject({ rung: 4, turns: 3, closeReason: "judged" });
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+    expect(episodes(entries).at(-1)).toMatchObject({ attempts: 0, turns: 3, closeReason: "judged" });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
   });
 
   it("[tutor] nudges never open a chat episode, and a second chat message joins the open one", async () => {
@@ -142,7 +141,7 @@ describe("M3 episodes, ladder and guard", () => {
     expect(episodes(entries)).toHaveLength(1);
   });
 
-  it("aborted, errored and truncated replies leave the rung and the widget alone", async () => {
+  it("aborted, errored and truncated replies leave the episode and the widget alone", async () => {
     const { events, ctx, entries, widgets } = await boot();
     await events["before_agent_start"](bas("q"), ctx);
     const n = entries.length;
@@ -150,25 +149,26 @@ describe("M3 episodes, ladder and guard", () => {
       await events["turn_end"]({ type: "turn_end", message: judged("correct", true, stop) }, ctx);
     }
     expect(entries.length).toBe(n);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
   });
 
-  it("restores an open episode on resume and ignores a closed one", async () => {
-    const ep = { id: "ep-1", trigger: { kind: "chat" }, band: "intermediate", rung: 4, opened: 1, turns: 3, concept_tags: [] };
+  it("restores an open episode on resume and ignores a closed one; one saved with a rung loads at 0 tries", async () => {
+    const ep = { id: "ep-1", trigger: { kind: "chat" }, band: "intermediate", attempts: 2, opened: 1, turns: 3, concept_tags: [] };
     const entry = (data: unknown) => ({ type: "custom", customType: "tutor_episode", data });
     const open = await boot({ branch: [entry(ep)] });
-    expect(open.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 4");
+    expect(open.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · try 2");
+    const old = await boot({ branch: [entry({ id: "ep-0", trigger: { kind: "chat" }, band: "intermediate", rung: 4, opened: 1, turns: 3, concept_tags: [] })] });
+    expect(old.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
     const closed = await boot({ branch: [entry(ep), entry({ ...ep, closed: 5, closeReason: "judged" })] });
-    expect(closed.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+    expect(closed.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
   });
 
-  it("/tutor-level into pro re-caps an open episode's rung and persists it", async () => {
+  it("/tutor-level into pro moves an open episode's band and persists it", async () => {
     const { events, commands, ctx, entries, widgets } = await boot();
     for (let i = 0; i < 3; i++) await turn(events, ctx, REASONED, judged("correct"));
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 5");
     await commands["tutor-level"].handler("90", ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 90 · rung 4");
-    expect(episodes(entries).at(-1)).toMatchObject({ band: "pro", rung: 4 });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 90");
+    expect(episodes(entries).at(-1)).toMatchObject({ band: "pro", attempts: 0 });
   });
 
   it("tool_call blocks bash and paths outside ctx.cwd, allows reads inside", async () => {
@@ -208,14 +208,15 @@ describe("M4 profile and /tutor-start", () => {
     process.env.PI_TUTOR_PROFILE = file;
     try {
       const b = await boot({ cwd: dir });
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20");
       await turn(b.events, b.ctx, REASONED, assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["traits"],"episode_closed":true}\n```'));
       await b.commands["tutor-level"].handler("70", b.ctx);
       await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
       const check = Profile.open(file);
       expect(check.language("rust")?.level).toBe(70);
-      expect(check.episodes("rust")).toEqual([expect.objectContaining({ project: dir, concept_tags: ["traits"], turns: 1, rungs_used: 2 })]);
-      expect(check.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: expect.closeTo(2 / 3), episodes: 1 }]);
+      // spec 2026-10-21 §11a: no failed attempt → rungs_used (attempts + 1) is 1 and the ease sample is 1
+      expect(check.episodes("rust")).toEqual([expect.objectContaining({ project: dir, concept_tags: ["traits"], turns: 1, rungs_used: 1 })]);
+      expect(check.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: 1, episodes: 1 }]);
       check.close();
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
@@ -234,7 +235,7 @@ describe("M4 profile and /tutor-start", () => {
     try {
       const b = await boot();
       expect(b.notes.some((n) => /newer/.test(n))).toBe(true);
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
       await b.commands["tutor-start"].handler("python", b.ctx);
       expect(b.notes.at(-1)).toMatch(/profile/i);
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
@@ -284,7 +285,7 @@ describe("M5 skill reads", () => {
 });
 
 describe("M5 /tutor-learn", () => {
-  const closedEp = { id: "ep-1", trigger: { kind: "error", path: "/p/main.rs", line: 4, msg: "borrow of moved value" }, band: "beginner", rung: 4, opened: 1, turns: 2, concept_tags: ["ownership"], closed: 5, closeReason: "judged" };
+  const closedEp = { id: "ep-1", trigger: { kind: "error", path: "/p/main.rs", line: 4, msg: "borrow of moved value" }, band: "beginner", attempts: 3, opened: 1, turns: 2, concept_tags: ["ownership"], closed: 5, closeReason: "judged" };
   const branch = [
     { type: "custom", customType: "tutor_episode", data: closedEp },
     { type: "message", message: { role: "user", content: "why is s moved?" } },
@@ -332,8 +333,8 @@ describe("M5 /tutor-learn", () => {
   });
 });
 
-describe("M5 ease start rung", () => {
-  it("a first judgment on concepts with ease ≥ 0.7 starts the episode one rung lower", async () => {
+describe("M5 ease: well-known concepts get help one attempt later (spec 2026-10-21 §11a)", () => {
+  it("a first judgment on concepts with ease ≥ 0.7 sets the episode's delay", async () => {
     const { mkdtempSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
@@ -350,9 +351,9 @@ describe("M5 ease start rung", () => {
     try {
       const b = await boot({ cwd: dir });
       await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
+      expect(episodes(b.entries).at(-1)?.delay).toBeUndefined();
       await b.events["turn_end"]({ type: "turn_end", message: assistant('hm\n```tutor-judgment\n{"judgment":"wrong","concept_tags":["traits"]}\n```') }, b.ctx);
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 2");
+      expect(episodes(b.entries).at(-1)).toMatchObject({ delay: 1, attempts: 0 });
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
 });
@@ -441,12 +442,12 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
 });
 
 describe("one judgment per run", () => {
-  it("a tool-call judgment followed by a fenced one moves the rung once", async () => {
+  it("a tool-call judgment followed by a fenced one is applied once", async () => {
     const b = await boot();
     const call = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "1", name: "tutor-judgment", arguments: { judgment: "correct", concept_tags: ["loops"] } }] };
     await turn(b.events, b.ctx, REASONED, call, judged("correct"));
     const eps = episodes(b.entries);
-    expect(eps.at(-1)?.rung).toBe(3); // intermediate starts at 2; one step
+    expect(eps.at(-1)?.turns).toBe(1);
     expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(1);
   });
   it("a turn_end without a before_agent_start still applies (Pi always sends one; defensive)", async () => {
@@ -457,10 +458,10 @@ describe("one judgment per run", () => {
 });
 
 describe("compliance in the turn loop", () => {
-  it("a correct judgment on a bare question does not advance the rung", async () => {
+  it("a correct judgment on a bare question is read as none and moves nothing", async () => {
     const b = await boot();
     await turn(b.events, b.ctx, "what does KeyError mean?", judged("correct"));
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(episodes(b.entries).at(-1)?.attempts).toBe(0);
     expect(b.entries.filter((e) => e.type === "tutor_judgment").at(-1)?.data).toMatchObject({ judgment: "none" });
   });
   it("records rule breaks and quotes them to the model on the next turn", async () => {
@@ -539,7 +540,7 @@ describe("roles in the turn loop", () => {
   });
   it("architect turns leave the episode alone and never open one", async () => {
     const b = await boot();
-    await turn(b.events, b.ctx, REASONED, judged("none")); // opens a chat episode at rung 2
+    await turn(b.events, b.ctx, REASONED, judged("none")); // opens a chat episode
     const before = episodes(b.entries).length;
     await b.commands["tutor-architect"].handler("", b.ctx);
     const opts = await turn(b.events, b.ctx, REASONED, judged("correct", true));
@@ -631,7 +632,7 @@ describe("per-turn reply reminder (golden round 1: 3 of 5 replies dropped the ju
     await b.commands["tutor-architect"].handler("off", b.ctx);
     const tutor = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(tutor.message?.content.startsWith("[episode]")).toBe(true);
-    expect(tutor.message?.content.endsWith(replyReminder(2))).toBe(true);
+    expect(tutor.message?.content.endsWith(replyReminder("teach"))).toBe(true);
   });
 });
 
@@ -683,13 +684,13 @@ describe("final review fixes (workflow)", () => {
     return dir;
   };
   const stepDone = (judgment: string) => assistant('ok\n```tutor-judgment\n{"judgment":"' + judgment + '","step_done":true}\n```');
-  it("I2: correct step answers move the recipe on but leave the hint rung frozen", async () => {
+  it("I2: correct step answers move the recipe on and never move help (only graded tries do)", async () => {
     const b = await boot({ cwd: project() });
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
     for (let i = 0; i < 3; i++) await turn(b.events, b.ctx, REASONED, stepDone("correct"));
     expect(b.widgets["tutor"]?.[0]).toContain("plan 4/6");
-    expect(b.widgets["tutor"]?.[0]).toContain("rung 2");
-    expect(episodes(b.entries).at(-1)).toMatchObject({ rung: 2 });
+    expect(b.widgets["tutor"]?.[0]).not.toContain("try");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 0 });
   });
   it("I4: /tutor-plan off ends the recipe; the context and widget label go away and stay away on resume", async () => {
     const b = await boot({ cwd: project() });
@@ -744,7 +745,7 @@ describe("tutor memory in the extension (spec 2026-10-13 §7.1)", () => {
 });
 
 describe("/tutor-feedback in the extension", () => {
-  it("logs to the profile in a project, adjusts the open episode's rung, and notes the style next turn", async () => {
+  it("logs to the profile in a project, slows help for too-much-help, and notes the style next turn", async () => {
     const dir = mkd(pjoin(tmp(), "pitutor-fb-"));
     const file = pjoin(dir, "profile.sqlite");
     const { Profile } = await import("../extensions/tutor/profile.js");
@@ -752,15 +753,16 @@ describe("/tutor-feedback in the extension", () => {
     const saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = file;
     try {
       const b = await boot({ cwd: dir });
-      await turn(b.events, b.ctx, REASONED, judged("correct")); // chat episode, rung 2 → 3
+      await turn(b.events, b.ctx, REASONED, judged("correct")); // chat episode
       await b.commands["tutor-feedback"].handler("too-much-help", b.ctx);
-      expect(episodes(b.entries).at(-1)).toMatchObject({ rung: 2 });
+      expect(episodes(b.entries).at(-1)).toMatchObject({ delay: 1, attempts: 0 });
       await b.commands["tutor-feedback"].handler("too-long", b.ctx);
       const next = await turn(b.events, b.ctx, "hi", judged("none"));
       expect(next.message?.content).toMatch(/\[tutor-feedback\][\s\S]*too long/);
       await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
       const check = Profile.open(file);
-      expect(check.feedback("python").map((f) => [f.kind, f.rung])).toEqual([["too-much-help", 3], ["too-long", 2]]);
+      // the profile's rung column holds the attempt count now (spec 2026-10-21 §11a)
+      expect(check.feedback("python").map((f) => [f.kind, f.rung])).toEqual([["too-much-help", 0], ["too-long", 0]]);
       check.close();
       const again = await boot({ cwd: dir }); // a new session in the same project keeps the note
       const t = await turn(again.events, again.ctx, "hi", judged("none"));
@@ -773,7 +775,7 @@ describe("/tutor-feedback in the extension", () => {
       if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
     }
   });
-  it("/tutor-feedback edge cases: bad kind warns; no episode or architect role logs without a rung change", async () => {
+  it("/tutor-feedback edge cases: bad kind warns; no episode or architect role logs without changing help", async () => {
     const b = await boot();
     await b.commands["tutor-feedback"].handler("meh", b.ctx);
     expect(b.notes.at(-1)).toMatch(/usage: \/tutor-feedback too-long\|too-vague\|too-much-help\|good/);
@@ -997,8 +999,8 @@ describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
     p.close();
     const b = await boot({ cwd });
     await turn(b.events, b.ctx, REASONED, assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "none", concept_tags: ["dicts"] }) + "\n```"));
-    const ep = b.entries.filter((e) => e.type === "tutor_episode").at(-1)?.data as { rung: number };
-    expect(ep.rung).toBe(1); // intermediate (level 50) starts at rung 2; ease 1.0 on dicts eases it by one
+    const ep = b.entries.filter((e) => e.type === "tutor_episode").at(-1)?.data as { delay?: number };
+    expect(ep.delay).toBe(1); // ease 1.0 saved under "keyerror" counts for dicts: help comes one attempt later
   });
   it("tags follow the language the question was asked in, even if the session moved mid-reply (M7 minor)", async () => {
     const b = await boot({ cwd: await projectDir("python") });
@@ -1044,14 +1046,14 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     expect(b.notes.at(-1)).toMatch(/exam 01-x is running/);
   });
   const running = (over: object = {}) => [{ type: "custom", customType: "tutor_exam", data: { id: "01-word-frequency", dir: "exam/01-word-frequency", language: "python", topic: null, size: "small", started: Date.now(), limit: 20, concepts: ["dicts"], ...over } }];
-  it("during an exam, hints are capped at rung 2 and every turn carries the [exam] line", async () => {
+  it("during an exam, every turn carries the [exam] line and holds back the fix; judgments never move help", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running() });
-    await b.commands["tutor-level"].handler("10", b.ctx); // beginner: would start at rung 3
+    await b.commands["tutor-level"].handler("10", b.ctx);
     const t = await turn(b.events, b.ctx, "how do I start?", judged("none"));
     expect(t.message?.content).toMatch(/\[exam\] timed exam 01-word-frequency/);
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(t.message?.content).toMatch(/do not state the fix/i);
     await turn(b.events, b.ctx, REASONED, judged("correct"));
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(episodes(b.entries).at(-1)?.attempts).toBe(0);
   });
   it("a resumed exam keeps its real start: one that began an hour ago is late (Review Focus #3)", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running({ started: Date.now() - 3_600_000 }) });
@@ -1180,12 +1182,12 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     await b.events["session_start"]({ type: "session_start", reason: "resume" }, old.ctx);
     expect(old.widgets["tutor"]?.[0]).not.toMatch(/exam/);
   }, 30_000);
-  it("/tutor-feedback too-vague cannot lift hints above the exam cap (final review I4)", async () => {
+  it("/tutor-feedback too-vague never lifts help (final review I4; spec 2026-10-21: only graded tries do)", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running() });
     await turn(b.events, b.ctx, "how do I start?", judged("none"));
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    const before = episodes(b.entries).at(-1);
     await b.commands["tutor-feedback"].handler("too-vague", b.ctx);
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(episodes(b.entries).at(-1)).toEqual(before);
   });
   it("a second /tutor-submit while one runs is refused; the exam is recorded once (final review M1, re-graded)", async () => {
     const cwd = await projectDir("python");
