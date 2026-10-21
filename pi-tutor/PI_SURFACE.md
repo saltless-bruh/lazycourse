@@ -214,6 +214,10 @@ Re-verify every line when bumping versions.
   `vim.defer_fn(…, 500)` so the restart that kills this Pi happens after `/tutor-start` returns.
 - The client logs via winston and patches `console`; `NVIM_NODE_LOG_FILE` is set before import
   so nothing is written to Pi's terminal.
+- `NvimLink.isModified(path)` / `reloadFile(path)`: `vim.fn.bufnr(path)`, `nvim_buf_is_loaded(b)`,
+  `vim.bo[b].modified`, `vim.cmd.checktime(b)`, one `nvim_exec_lua` each, bounded at 2 s (verified
+  0.12.6, 2026-10-22). `/tutor-done` asks `isModified` before its checks and again right before the
+  tick writes spec/tasks.md (pane check 2026-10-22): `checktime` on a modified buffer raises W12.
 - Push autocmds live in `extensions/tutor/push.lua.ts` and are installed with `nvim_exec_lua`;
   `vim.g.tutor_chan` holds the extension's channel for `:TutorRun`.
 
