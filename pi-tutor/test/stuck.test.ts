@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StuckDetector, traceOf, spotOf, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
+import { StuckDetector, traceOf, spotOf, spotLine, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
 import type { TutorPayload } from "../extensions/tutor/nvim.js";
 
 const diag = (path: string, errors: number, msg = "boom", line = 1): TutorPayload =>
@@ -163,6 +163,9 @@ describe("attempt spots (spec 2026-10-21 §5)", () => {
     expect(spotOf("panic: runtime error: integer divide by zero\n\ngoroutine 1 [running]:\nmain.split(...)\n\t/p/main.go:5 +0x1d")).toBe("panic: runtime error: integer divide by zero");
     expect(spotOf("all good\nbut nothing matched here")).toBe("all good"); // no error word: the first line (Lua prints its message first)
     expect(spotOf("x".repeat(300) + " error")).toHaveLength(120);
+  });
+  it("spotLine is the same line as spotOf, as printed", () => {
+    expect(spotLine("lua: split_amount(10, 4) gave 2, expected 2.5\nstack traceback:\n\t[C]: in ?")).toBe("lua: split_amount(10, 4) gave 2, expected 2.5");
   });
   it("hasErrorsIn only counts errors inside the project (Review Focus #4)", () => {
     const d = new StuckDetector(() => ({ errorMs: 1, idleMs: 1 }));

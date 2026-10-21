@@ -82,6 +82,13 @@ describe("applyJudgment", () => {
   });
 });
 
+describe("run episodes close only when a run passes (live check 2026-10-21)", () => {
+  it("the model's episode_closed does not close a run episode", () => {
+    const run = { ...openEpisode({ kind: "run", cmd: ["lua", "check.lua"], code: 1, trace: "x" }, "beginner", 1), attempts: 4 };
+    expect(applyJudgment(run, j("correct", { episode_closed: true }), 9).closed).toBeUndefined();
+  });
+});
+
 describe("closeEpisode", () => {
   it("stamps close time and reason", () => {
     expect(closeEpisode(openEpisode(err, "pro", 1), "cleared", 5)).toMatchObject({ closed: 5, closeReason: "cleared" });

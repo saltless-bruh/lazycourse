@@ -32,7 +32,7 @@ export function turnInstruction(step: TurnStep): string {
 
 /** Shown when every re-ask of a reply failed its check: written by code, so it can never hold code or the fix. */
 export function fallbackReply(step: TurnStep, spot?: string): string {
-  const at = spot ? ` (${spot.replace(/[`*_]/g, "").slice(0, 80)})` : "";
+  const at = spot ? ` (${spot.replace(/`/g, "").slice(0, 120)})` : "";
   switch (step) {
     case "teach": return "Tell me which step you are on and what you tried so far, and I will show the idea on a small example.";
     case "hint": return `Look again at the spot the last run points to${at}: what does that part do with its values? Change it, then run again.`;

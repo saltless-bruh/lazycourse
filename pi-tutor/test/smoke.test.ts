@@ -1707,6 +1707,17 @@ describe("held replies (spec 2026-10-21 §6)", () => {
   const judgments = (b: { entries: { type: string }[] }) => b.entries.filter((e) => e.type === "tutor_judgment").length;
   const level10 = async (b: Awaited<ReturnType<typeof boot>>) => b.commands["tutor-level"].handler("10", b.ctx);
   const settle = () => new Promise((r) => setTimeout(r, 120));
+  /** A run Pi starts from a custom message (sendMessage with triggerTurn): before_agent_start with messageType "custom". */
+  const customTurn = async (b: Awaited<ReturnType<typeof boot>>, message: object, ...replies: unknown[]) => {
+    const opts = { sections: {} as Record<string, string> };
+    const r = (await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, b.ctx)) as { message?: { content: string } } | undefined;
+    for (const m of replies) {
+      const e = (await b.events["message_end"]({ type: "message_end", message: m }, b.ctx)) as { message?: object } | undefined;
+      if (e?.message) { for (const k of Object.keys(m as object)) delete (m as Record<string, unknown>)[k]; Object.assign(m as object, e.message); }
+      await b.events["turn_end"]({ type: "turn_end", message: m }, b.ctx);
+    }
+    return Object.assign(opts, { message: r?.message });
+  };
 
   it("a leaking hint is replaced, re-asked through a fresh run, and the second reply is checked too", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
@@ -1718,11 +1729,12 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     const sentBefore = b.sent.length;
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
     await settle();
-    expect(b.sent.length).toBe(sentBefore + 1);
-    const ask = b.sent.at(-1)!.text;
-    expect(ask).toMatch(/^\[tutor\] rewrite:/);
+    expect(b.sent.length).toBe(sentBefore); // nothing typed into the learner's chat (live check 2026-10-21)
+    const ask = b.messages.at(-1) as { message: { customType: string; display: boolean; content: string }; options: { triggerTurn?: boolean } };
+    expect(ask.message).toMatchObject({ customType: "tutor_rewrite", display: false });
+    expect(ask.options.triggerTurn).toBe(true);
     const good = reply("Look at the operator inside `split_amount`.");
-    const t2 = await turn(b.events, b.ctx, ask, good);
+    const t2 = await customTurn(b, ask.message, good);
     expect(t2.message?.content).toMatch(/\[tutor-check\]/);
     expect(textOf(good)).toContain("Look at the operator inside `split_amount`.");
     expect(judgments(b)).toBe(1);
@@ -1730,20 +1742,20 @@ describe("held replies (spec 2026-10-21 §6)", () => {
   it("Review Focus #2/#5: after two failed re-asks the learner sees the fallback, with no code, and no fourth ask", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);
-    let prompt = "help";
     const shown: string[] = [];
     for (let i = 0; i < 3; i++) {
       const leak = reply("Write `return total / people`.");
-      await turn(b.events, b.ctx, prompt, leak);
+      const rewrites = b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite");
+      if (i === 0) await turn(b.events, b.ctx, "help", leak);
+      else await customTurn(b, (rewrites.at(-1) as { message: object }).message, leak);
       shown.push(textOf(leak));
       await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
       await settle();
-      prompt = b.sent.at(-1)!.text;
     }
     expect(shown.slice(0, 2)).toEqual([REWRITE_TEXT, REWRITE_TEXT]);
     expect(shown[2]).toBe(fallbackReply("hint", "ZeroDivisionError: x"));
     expect(shown[2]).not.toMatch(/`/);
-    expect(b.sent.filter((m) => /^\[tutor\] rewrite:/.test(m.text))).toHaveLength(2);
+    expect(b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite")).toHaveLength(2);
   });
   it("the transformer holds a streaming reply and hides the judgment block after it", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });

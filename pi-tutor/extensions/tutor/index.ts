@@ -19,7 +19,7 @@ import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
-import { StuckDetector, spotOf, type StuckEvent } from "./stuck.js";
+import { StuckDetector, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -534,7 +534,7 @@ export default function (pi: ExtensionAPI): void {
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
     // Spec 2026-10-21 §6: a rewrite run keeps the re-ask count of the reply it replaces; any other run starts at 0.
-    const isRewrite = prompt.startsWith(`${TUTOR_PREFIX} rewrite:`);
+    const isRewrite = event.messageType === "custom" && event.message.customType === "tutor_rewrite";
     if (!isRewrite) rewrite = null;
     run = { prompt, step: role.ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
     let snap: EditorSnapshot | null = null;
@@ -689,7 +689,7 @@ export default function (pi: ExtensionAPI): void {
           rewrite = { reasks: (cur.reasks ?? 0) + 1, issues };
           pendingRewrite = issues;
         } else if (final) {
-          replacement = fallbackReply(cur.step, episode?.spot);
+          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined);
           rewrite = null;
         }
         // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.
@@ -1076,6 +1076,11 @@ export default function (pi: ExtensionAPI): void {
    * in that loop with no before_agent_start, so the model never gets the onboarding or lesson section.
    * Sent once Pi is idle, it starts a fresh run.
    */
+  function rewriteWhenIdle(ctx: ExtensionContext, text: string, tries = 0) {
+    if (closing) return;
+    if (ctx.isIdle() || tries >= 600) { pi.sendMessage({ customType: "tutor_rewrite", content: text, display: false }, { triggerTurn: true }); return; }
+    setTimeout(() => rewriteWhenIdle(ctx, text, tries + 1), 50).unref?.();
+  }
   function sendWhenIdle(ctx: ExtensionContext, text: string, tries = 0) {
     if (closing) return;
     if (ctx.isIdle() || tries >= 600) { pi.sendUserMessage(text, { deliverAs: "followUp" }); return; }
@@ -1380,8 +1385,9 @@ export default function (pi: ExtensionAPI): void {
     if (pendingRewrite) {
       const issues = pendingRewrite;
       pendingRewrite = null;
-      // A fresh run (before_agent_start builds its context), started once Pi is idle (live check 2026-10-19).
-      sendWhenIdle(ctx, `${TUTOR_PREFIX} rewrite: your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
+      // A fresh run from a hidden message (live check 2026-10-21: a typed "[tutor] rewrite:" showed the machinery
+      // in the learner's chat); before_agent_start builds its context; started once Pi is idle (2026-10-19).
+      rewriteWhenIdle(ctx, `Your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
     }
     if (!onboardingActive() || !onboarding) return;
     const note = intake;

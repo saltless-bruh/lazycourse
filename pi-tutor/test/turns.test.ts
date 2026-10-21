@@ -12,6 +12,10 @@ describe("turns (spec 2026-10-21 §6)", () => {
     expect(turnInstruction("ask")).toMatch(/what they were thinking/);
     expect(turnInstruction("hint")).toBe("One small hint that points at the spot (the line or the value that is off). At most 2 sentences. No code with the learner's names and no fix.");
   });
+  it("a fallback quotes the error line as the learner saw it (live check: '#' and stripped underscores)", () => {
+    expect(fallbackReply("why", "split_amount(10, 4) gave 2, expected 2.5")).toContain("split_amount(10, 4) gave 2, expected 2.5");
+    expect(fallbackReply("why", "use `x` here")).not.toMatch(/`/);
+  });
   it("fallbacks hold no code and no fix", () => {
     for (const s of ["teach", "hint", "why", "ask", "fix"] as const) {
       expect(fallbackReply(s, "ZeroDivisionError")).not.toMatch(/`|```/);

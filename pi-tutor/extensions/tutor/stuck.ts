@@ -32,6 +32,11 @@ export function traceOf(stdout: string, stderr: string): string {
 
 /** What a run's attempts are on (spec 2026-10-21 §5): its error line, numbers blurred so a new value is the same spot. */
 export function spotOf(trace: string): string {
+  return spotLine(trace).replace(/-?\d+(?:\.\d+)?/g, "#").slice(0, 120);
+}
+
+/** The error line spotOf keys on, as the run printed it (what a learner-facing fallback quotes). */
+export function spotLine(trace: string): string {
   // Stack frames name functions, not what went wrong: Lua's "[C]: in function 'error'", Node's "at …", Go's
   // goroutine dump, Python's "File …" lines.
   // Lua frames also read "check.lua:6: in local 'check'" or "in global 'require'".
@@ -39,7 +44,7 @@ export function spotOf(trace: string): string {
   const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !frame.test(l));
   // A message without an error word (Lua's error(msg, 0)) comes first, before its frames.
   const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines[0] ?? "";
-  return line.replace(/-?\d+(?:\.\d+)?/g, "#").slice(0, 120);
+  return line.slice(0, 200);
 }
 
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }

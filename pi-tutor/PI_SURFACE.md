@@ -34,6 +34,11 @@ Re-verify every line when bumping versions.
   agent-session.js:1782 `sendCustomMessage`): while idle it appends the message to the session now and renders it
   with the default CustomMessageComponent (a labelled Markdown box, custom-message.js); while streaming it is
   deferred to the end of the turn. Custom messages are in the model's context. M8: tutor_grade, tutor_progress.
+- `pi.sendMessage({ customType: "tutor_rewrite", content, display: false }, { triggerTurn: true })` (Pi 1.3.0,
+  types.d.ts:330, 736-742; verified 2026-10-21): while idle it starts a run whose `before_agent_start` has
+  `messageType: "custom"` and the `message`; `display: false` keeps it out of the learner's chat while the model
+  still reads it. Used to re-ask a held reply that failed its check (spec 2026-10-21 §6); the live check showed a
+  typed "[tutor] rewrite:" message in the chat.
 - `ctx.isIdle()` (types.d.ts:236): nudges are sent only when true. The session_start `ctx` is kept.
   Since 1.2.0 it is also false while a run starts.
 - `pi.on("tool_call", (event, ctx) => ToolCallEventResult | undefined)` (types.d.ts:1200);

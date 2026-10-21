@@ -84,7 +84,8 @@ export function recordAttempt(ep: Episode, a: { spot: string; hash: string }): E
 /** The judgment counts the turn and records concepts; it never moves help (spec §5). */
 export function applyJudgment(ep: Episode, j: Judgment, now: number): Episode {
   const next: Episode = { ...ep, turns: ep.turns + 1, concept_tags: [...new Set([...ep.concept_tags, ...j.concept_tags])] };
-  return j.episode_closed ? closeEpisode(next, "judged", now) : next;
+  // Live check 2026-10-21: a run's episode closes only when a run passes (code decides), never by the model's word.
+  return j.episode_closed && ep.trigger.kind !== "run" ? closeEpisode(next, "judged", now) : next;
 }
 
 export function closeEpisode(ep: Episode, reason: CloseReason, now: number): Episode {
