@@ -185,7 +185,7 @@ export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS):
 export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery";
 
 /** Parameter-ish names every example uses; never the learner's own. */
-const COMMON = new Set(["self", "this", "cls", "args", "kwargs"]);
+const COMMON = new Set(["self", "this", "cls", "args", "kwargs", "main"]);
 const SIGNATURE = /([A-Za-z_][\w.:]*)\s*\(([^)]*)\)/g;
 const DEFINITION = /\b(?:def|function|fn|func)\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w.:]*)\s*\(([^)]*)\)/g;
 
@@ -203,7 +203,8 @@ function addSignature(out: Set<string>, name: string, params: string) {
 export function ownNames(i: { tasksMd: string | null; sources: string[] }): Set<string> {
   const out = new Set<string>();
   for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) for (const m of span[1].matchAll(SIGNATURE)) addSignature(out, m[1], m[2]);
-  for (const src of i.sources) for (const m of src.matchAll(DEFINITION)) addSignature(out, m[1], m[2]);
+  // Final review I6: from their files only function names; every parameter (`value`, `items`) flagged examples.
+  for (const src of i.sources) for (const m of src.matchAll(DEFINITION)) addSignature(out, m[1], "");
   return out;
 }
 
@@ -220,20 +221,26 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 
 /** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
  *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
-export function checkTurn(text: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[] }): TurnIssue[] {
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[] }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
+  // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
+  const text = hideJudgment(raw);
   const quoted = new Set(o.sourceLines.map((l) => l.trim()).filter(Boolean));
   const leaks = (line: string) => {
-    const t = line.trim();
-    return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && usesOwnName(t, o.names);
+    // Final review I6: a quote may carry the editor's line number ("  3| …"); a caret line is an annotation.
+    const t = line.replace(/^\s*\d+\s*[|:]\s?/, "").trim();
+    return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && !/^\^/.test(t) && usesOwnName(t, o.names);
   };
+  let quotedProse = "";
   for (const m of text.matchAll(FENCES)) {
     const tag = m[2].trim().toLowerCase();
-    if (tag === "tutor-judgment" || QUOTES.has(tag) || m[3].includes('"judgment"')) continue;
+    if (tag === "tutor-judgment") continue;
+    // Final review I1: a ```markdown fence is checked too (style.md asks for quotes in one); its text also counts as prose.
+    if (QUOTES.has(tag)) quotedProse += `\n${m[3]}`;
     if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
   }
-  const prose = text.replace(FENCES, "");
+  const prose = text.replace(FENCES, "") + quotedProse;
   // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
   const seen = [...quoted];
   const spanLeaks = (span: string) => leaks(span) && !seen.some((l) => l.includes(span.trim()));
@@ -254,10 +261,18 @@ export function foldPreamble(text: string): string {
   return /`{3}|~{3}/.test(before) ? text : text.slice(m.index);
 }
 
-/** D: the judgment block is for the extension only; the screen never shows it (the stored reply keeps it). */
+/** D: the judgment block is for the extension only; the screen never shows it (the stored reply keeps it).
+ *  Final review C1: only a fence whose OWN body holds "judgment" goes; a diagram fence before it stays. */
 export function hideJudgment(md: string): string {
-  let out = md.replace(/^ {0,3}(`{3,}|~{3,})(?:tutor-judgment|json)?[ \t]*\r?\n[\s\S]*?"judgment"[\s\S]*?^ {0,3}\1[`~]*[ \t]*$\r?\n?/gm, "");
-  out = out.replace(/(`{3,}|~{3,})tutor-judgment[ \t]*\r?\n[\s\S]*?(?:\1|$)/g, "");
+  let out = "", last = 0;
+  for (const m of md.matchAll(FENCES)) {
+    const tag = m[2].trim().toLowerCase();
+    if (tag === "tutor-judgment" || ((tag === "" || tag === "json") && m[3].includes('"judgment"'))) {
+      out += md.slice(last, m.index);
+      last = m.index + m[0].length;
+    }
+  }
+  out += md.slice(last);
   out = out.replace(/\{[^{}]*"judgment"[^{}]*\}\s*$/, "");
   return out === md ? md : out.trimEnd();
 }

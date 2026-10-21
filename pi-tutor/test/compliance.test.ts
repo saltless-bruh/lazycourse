@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble } from "../extensions/tutor/compliance.js";
+import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -268,12 +268,12 @@ describe("M6c: closing fence length (M6b #61)", () => {
 // Spec 2026-10-21 §6, §10: code checks a reply against this turn (strings from the 2026-10-20/21 spike).
 const names = ownNames({ tasksMd: "- [ ] P2.T2 add `split_amount(total, people)` = total / people", sources: ["def tip_rate(generous):\n    return 0.1\n"] });
 describe("ownNames", () => {
-  it("task signatures and the learner's definitions, with their parameters", () => {
-    expect([...names].sort()).toEqual(["generous", "people", "split_amount", "tip_rate", "total"]);
+  it("task signatures with their parameters, and the learner's function names (final review I6: not every parameter)", () => {
+    expect([...names].sort()).toEqual(["people", "split_amount", "tip_rate", "total"]);
   });
-  it("reads typed and defaulted parameters in other languages, and leaves out short names and self", () => {
-    const n = ownNames({ tasksMd: null, sources: ["fn split(total: f64, people: u32) -> f64 {}", "func (r Bill) Share(amount float64) float64 {}", "function M.ask_number(read) end", "def area(self, w, height=2): pass"] });
-    expect([...n].sort()).toEqual(["Share", "amount", "area", "ask_number", "height", "people", "read", "split", "total"]);
+  it("reads function names in other languages, and leaves out main, short names and self", () => {
+    const n = ownNames({ tasksMd: null, sources: ["fn split(total: f64, people: u32) -> f64 {}", "func (r Bill) Share(amount float64) float64 {}", "function M.ask_number(read) end", "def area(self, w, height=2): pass", "def main(value, items): pass"] });
+    expect([...n].sort()).toEqual(["Share", "area", "ask_number", "split"]);
   });
 });
 describe("checkTurn (spec 2026-10-21 §6)", () => {
@@ -320,5 +320,36 @@ describe("foldPreamble (C)", () => {
 describe("scrubInternals rung forms (spike run 2)", () => {
   it("'hint rung 3/5 (pointer)' is reworded whole", () => {
     expect(scrubInternals("You're at hint rung 3/5 (pointer) of the Map step.")).toBe("You're at this stage of the Map step.");
+  });
+});
+
+describe("hideJudgment (final review C1: a diagram fence before the judgment must survive)", () => {
+  it("removes only the judgment block, never a diagram or the parts after it", () => {
+    const reply = "**What's happening**:\n```\nbill\n  |\n  v\nshare\n```\n**Why**: dividing.\n**In short**: divide.\n```tutor-judgment\n{\"judgment\":\"none\"}\n```";
+    const shown = hideJudgment(reply);
+    expect(shown).toContain("share");
+    expect(shown).toContain("**Why**: dividing.");
+    expect(shown).toContain("**In short**: divide.");
+    expect(shown).not.toMatch(/tutor-judgment|"judgment"/);
+  });
+  it("also hides a json fence or a bare trailing object that carries the judgment", () => {
+    expect(hideJudgment("Hi.\n```json\n{\"judgment\":\"none\"}\n```")).toBe("Hi.");
+    expect(hideJudgment("Hi.\n{\"judgment\":\"none\",\"step_done\":false}")).toBe("Hi.");
+  });
+});
+
+describe("checkTurn after the final review (I1, I6, I7)", () => {
+  const src = ["local M = {}", "function M.split_amount(total, people)", "  local share = total * people", "  return share", "end"];
+  it("I1: a ```markdown fence is checked like any other; an exact quote in it still passes", () => {
+    expect(checkTurn("Try this:\n```markdown\nlocal share = total / people\n```", { step: "hint", names, sourceLines: src })).toContain("own-code");
+    expect(checkTurn("Your line:\n```markdown\nlocal share = total * people\n```", { step: "hint", names, sourceLines: src })).not.toContain("own-code");
+  });
+  it("I6: a line-numbered quote and a labelled caret are quotes; an example with a common name is not own code", () => {
+    expect(checkTurn("```\n   3|   local share = total * people\n      ^ total times people\n```\nWhich one?", { step: "hint", names, sourceLines: src })).not.toContain("own-code");
+    const n = ownNames({ tasksMd: null, sources: ["def main(value, items):\n    return value\n"] });
+    expect(checkTurn("```python\nfor value in [1, 2, 3]:\n    print(value)\n```", { step: "teach", names: n, sourceLines: [] })).not.toContain("own-code");
+  });
+  it("I7: a bare JSON judgment after a clean hint is not machinery", () => {
+    expect(checkTurn('Look at line 3.\n{"judgment":"none","concept_tags":[],"step_done":false}', { step: "hint", names, sourceLines: src })).toEqual([]);
   });
 });
