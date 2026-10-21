@@ -118,13 +118,22 @@ Tutor, ASSISTments, autograders all count a submission judged against a known an
 question: it is answered at the current step and never moves help forward, even when the learner says it is
 still wrong or their code changed, because nothing grades it.
 
-Which runs count (author's decision, 2026-10-21):
+Which runs count (author's decision, 2026-10-21; **changed later that day**, see below):
 
 ```
-run fails, and the editor shows an error in the learner's file ──▶ not an attempt (a typo; LazyVim has it)
-run fails, no error shown in the file                         ──▶ an attempt
-run succeeds but the answer is wrong                          ──▶ caught only by the task's checks
+run fails with a syntax error in its own output   ──▶ not an attempt (a typo)
+run fails any other way                           ──▶ an attempt
+run succeeds but the answer is wrong              ──▶ caught only by the task's checks
 ```
+
+The first version keyed on "the editor shows an error in the learner's file". The phase 1 live check and
+review showed editor marks are unreliable three ways: no Python language server was installed (typos never
+marked, so each counted as a try); pyright, if added, also marks misspelled names and wrong types (real
+mistakes would go silent); and lua_ls set up for LuaJIT marks valid Lua 5.4 `//` as an error. So the author
+chose (2026-10-21): the tutor reads the run's own output, and only a true syntax error (Python `SyntaxError`
+or `IndentationError`, Lua `'…' expected near` or `unexpected symbol`, JS/TS `SyntaxError`, the compilers'
+syntax/parse errors) makes a typo run. Editor marks no longer silence a run. Lua projects the tutor creates
+also get a `.luarc.json` naming the Lua version they run, so lua_ls checks the right language.
 
 This replaces today's rule that the hint level rises only when the model judges the learner `correct`
 (`ladder.ts` `nextRung`); that rule never fired with a weak model.
