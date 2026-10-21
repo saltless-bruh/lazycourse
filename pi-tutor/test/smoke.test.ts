@@ -1768,6 +1768,14 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     expect(after).toContain("Look here.");
     expect(after).not.toMatch(/tutor-judgment|"judgment"/);
   });
+  it("final review I2: only the reply to the failed run gets the fix; a chat question after it is at why", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(4)] });
+    await level10(b);
+    const nudge = await turn(b.events, b.ctx, "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", reply("ok"));
+    expect(nudge.message?.content).toContain("this turn: Give the fix for only the stuck part");
+    const chat = await turn(b.events, b.ctx, "thanks, and what about the next task?", reply("ok"));
+    expect(chat.message?.content).toContain("this turn: Say clearly why it is wrong");
+  });
   it("thinking is hidden while the fix is not allowed, whatever the setting", async () => {
     const think = { messageType: "assistant-thinking", isStreaming: true, availableWidth: 68 };
     const hint = await boot({ cwd: project(), branch: [ep(1)] });
@@ -1778,7 +1786,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     const fix = await boot({ cwd: project(), branch: [ep(4)] });
     await level10(fix);
     await fix.commands["tutor-thinking"].handler("show", fix.ctx);
-    await fix.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, fix.ctx);
+    await fix.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", systemPromptOptions: { sections: {} } }, fix.ctx);
     expect(fix.transformers[0]("so it is total / people", think)).toBe("so it is total / people");
   });
 });

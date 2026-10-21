@@ -172,7 +172,7 @@ export default function (pi: ExtensionAPI): void {
   /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
   let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[] } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
-  let rewrite: { reasks: number; issues: TurnIssue[] } | null = null;
+  let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
   let pendingRewrite: TurnIssue[] | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
@@ -536,7 +536,12 @@ export default function (pi: ExtensionAPI): void {
     // Spec 2026-10-21 §6: a rewrite run keeps the re-ask count of the reply it replaces; any other run starts at 0.
     const isRewrite = event.messageType === "custom" && event.message.customType === "tutor_rewrite";
     if (!isRewrite) rewrite = null;
-    run = { prompt, step: role.ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
+    // Final review I2: on a run's episode the fix answers the failed run's own nudge (or its rewrite, or a pro's
+    // /tutor-fix); a chat question after it is at why, so a later unrelated question never runs with the leak check off.
+    let step = role.ladder ? stepFor(episode, { exam: exam !== null }) : null;
+    const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
+    if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
+    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -689,7 +694,7 @@ export default function (pi: ExtensionAPI): void {
         let replacement = "";
         if (final && (cur.reasks ?? 0) < MAX_REASKS) {
           replacement = REWRITE_TEXT;
-          rewrite = { reasks: (cur.reasks ?? 0) + 1, issues };
+          rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step };
           pendingRewrite = issues;
         } else if (final) {
           replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined);
