@@ -1577,6 +1577,28 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
       expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
     });
+    it("/tutor-done with no sandbox ticks as self-checked; a task with no checks too; a deleted spec/checks.md is rewritten (Review Focus #4)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file);
+      p.setSetting("onboarding", "");
+      p.setSetting(`checks:${dir}`, JSON.stringify({ milestones: { 1: { ran: false, reference: "", checks: [{ task: "P1.T1", kind: "value", expr: "tip(40)", expected: "8.0", milestone: 1, status: "unverified" }] } } }));
+      p.close();
+      const b = await boot({ cwd: dir });
+      await b.commands["tutor-done"].handler("P1.T1", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/ticked P1\.T1 \(self-checked: .*bubblewrap/);
+      const { rmSync } = await import("node:fs");
+      rmSync(pjoin(dir, "spec", "checks.md"));
+      await b.commands["tutor-done"].handler("", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/ticked P1\.T2 \(self-checked: it has no checks\)/);
+      expect(readFileSync(pjoin(dir, "spec", "tasks.md"), "utf8")).toBe("- [x] P1.T1 tip\n- [x] P1.T2 print\n");
+      expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("## P1.T1 (done, self-checked)");
+      expect(b.entries.filter((e) => e.type === "tutor_tick").map((e) => e.data)).toEqual([{ ids: ["P1.T1"], how: "self" }, { ids: ["P1.T2"], how: "self" }]);
+      await b.commands["tutor-done"].handler("", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/every task in spec\/tasks\.md is ticked/);
+    });
     it("an older project with a plan and no checks gets them at session start", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [x] P1.T2 print\n");

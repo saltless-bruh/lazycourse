@@ -67,4 +67,9 @@ describe("renderChecksMd", () => {
   it("adds a note under the heading when one is given", () => {
     expect(renderChecksMd([], new Set(), { note: "These could not be tried." }).split("\n").slice(3, 6)).toEqual(["Run `:TutorDone <task>` when a task works. Checks marked (unverified) are shown but never block a tick.", "", "These could not be tried."]);
   });
+  it("labels how a done task was ticked", () => {
+    const c: Check = { task: "P2.T2", kind: "value", expr: "f()", expected: "1", milestone: 1, status: "trusted" };
+    expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "you" } })).toContain("## P2.T2 (done, ticked by you)");
+    expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "self" } })).toContain("## P2.T2 (done, self-checked)");
+  });
 });

@@ -4,7 +4,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { parseChecks, VALUE_LANGUAGES, type Check } from "./checks.js";
+import { parseChecks, VALUE_LANGUAGES, type Check, type TickHow } from "./checks.js";
 import { runChecks, type CheckResult } from "./check-run.js";
 import { systemText } from "./prompts.js";
 import { taskIds } from "./scaffold.js";
@@ -14,7 +14,11 @@ import type { SandboxHost } from "./exam/sandbox.js";
 import type { LessonState } from "./lessons.js";
 
 export interface MilestoneChecks { checks: Check[]; reference: string; ran: boolean }
-export interface ChecksState { milestones: Record<string, MilestoneChecks> }
+export interface ChecksState {
+  milestones: Record<string, MilestoneChecks>;
+  /** How each task was ticked by /tutor-done (spec §7: self-checked and "ticked by you" are labelled). */
+  ticks?: Record<string, TickHow>;
+}
 
 export function readChecksState(raw: string | null | undefined): ChecksState {
   if (!raw) return { milestones: {} };

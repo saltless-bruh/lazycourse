@@ -57,6 +57,20 @@ function M.front_matter(dir)
   return {}
 end
 
+--- Open task ids in `dir`/spec/tasks.md (`- [ ] P1.T2 …`, subtasks left out), for :TutorDone completion.
+---@param dir string
+---@return string[]
+function M.open_tasks(dir)
+  local ok, lines = pcall(vim.fn.readfile, vim.fs.joinpath(dir, "spec", "tasks.md"))
+  local ids = {}
+  if not ok then return ids end
+  for _, l in ipairs(lines) do
+    local id = l:match("^%s*%- %[ %] (P%d+%.T%d+)%s")
+    if id then ids[#ids + 1] = id end
+  end
+  return ids
+end
+
 ---@param kind? "run"|"test"
 function M.run(kind)
   kind = kind or "run"
@@ -190,6 +204,8 @@ function M.setup(user_opts)
     complete = function() return { "auto", "show", "hide" } end })
   cmd("TutorExam", slash("/tutor-exam"), { nargs = "*",
     complete = function() return { "small", "medium", "check", "off", "sandbox" } end })
+  cmd("TutorDone", slash("/tutor-done"), { nargs = "*",
+    complete = function() return vim.list_extend(M.open_tasks(opts.cwd), { "anyway" }) end })
   cmd("TutorSubmit", slash("/tutor-submit"), {})
   cmd("TutorProgress", slash("/tutor-progress"), { nargs = "?" })
   cmd("TutorReload", slash("/reload"), {})

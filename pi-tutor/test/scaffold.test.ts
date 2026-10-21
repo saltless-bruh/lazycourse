@@ -144,6 +144,7 @@ describe("build or learn: milestones and the existing project folder (spec 2026-
     writeFileSync(join(dir, "learn", "basics", "solution.py"), "mine");
     writeScaffold(dir, spec(), meta, { existing: true });
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/run: cargo run/);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/`:TutorDone` runs its checks and ticks it/);
     expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).not.toBe("old");
     expect(readFileSync(join(dir, "learn", "basics", "solution.py"), "utf8")).toBe("mine");
     expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);

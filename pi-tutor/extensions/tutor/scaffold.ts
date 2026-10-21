@@ -89,7 +89,7 @@ export function readme(s: ScaffoldSpec, m: ScaffoldMeta): string {
   return `---\nrun: ${s.run_cmd}\n${test ? `test: ${test}\n` : ""}language: ${m.language}\n---\n# ${m.title}\n\n${m.summary}\n\n` +
     `## Run\n\n\`${s.run_cmd}\`\n\n## Working with the tutor\n\n` +
     `- Run it with \`:TutorRun\`${test ? ", test it with `:TutorRun test`" : ""}.\n` +
-    `- The plan is in \`spec/\`: start with \`spec/tasks.md\`, tick tasks as you finish them.\n` +
+    `- The plan is in \`spec/\`: start with \`spec/tasks.md\`; when a task works, \`:TutorDone\` runs its checks and ticks it (\`spec/checks.md\` lists them).\n` +
     `- Open the tutor with \`:Tutor\`; ask it anything, it answers with hints, not code.\n` +
     `- Change how much help you get with \`:TutorLevel <0-100>\`.\n`;
 }

@@ -108,6 +108,11 @@ export function describeTrigger(t: Trigger): string {
     case "churn": return `rewriting ${basename(t.path)}:${t.region[0]}-${t.region[1]}`;
     case "chat": return "learner question";
     case "run": {
+      // Spec 2026-10-21 §7: a failed check (/tutor-done) names the task and what the code gave.
+      if (t.cmd[0] === "/tutor-done") {
+        const what = (t.trace.split("\n")[0] ?? "").replace(/^check \S+: /, "");
+        return `run failed (check ${t.cmd[1]}): ${what.length > 120 ? `${what.slice(0, 119)}…` : what}`;
+      }
       const cmd = t.cmd.join(" ");
       return `run failed (exit ${t.code}): ${cmd.length > 60 ? `${cmd.slice(0, 59)}…` : cmd}`;
     }

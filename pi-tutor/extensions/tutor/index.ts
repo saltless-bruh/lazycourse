@@ -20,8 +20,8 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
-import { liveChecks, renderChecksMd, tickedIds } from "./checks.js";
-import { projectRun } from "./check-run.js";
+import { liveChecks, renderChecksMd, tickedIds, type TickHow } from "./checks.js";
+import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
@@ -33,7 +33,7 @@ import { suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, L
 import { newOnboarding, checkInOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, type Onboarding, type Fields } from "./onboard.js";
 import { EXPERIENCE } from "./interview.js";
 import { levelTasks, writeExercise, loadLessons, planRounds, startLessons, nextConcept, nextRound, type Lesson, type LessonState } from "./lessons.js";
-import { scaffoldPrompt, checkScaffold, writeScaffold } from "./scaffold.js";
+import { scaffoldPrompt, checkScaffold, writeScaffold, taskIds } from "./scaffold.js";
 import { completeJson, type Complete } from "./llm.js";
 import { withLoader, Cancelled, MODEL_TIMEOUT_MS, SPEC_JOB_TIMEOUT_MS, PROVIDER_RETRY, type CustomUi } from "./progress.js";
 import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned, parseSkillHeader, saveSkill, type Learned } from "./learn.js";
@@ -181,8 +181,6 @@ export default function (pi: ExtensionAPI): void {
   let pendingRewrite: TurnIssue[] | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
   let pendingSteers = 0;
-  /** M8 D6: task ids the model reported done, ticked in spec/tasks.md by the next passing run. */
-  const pendingTicks = new Set<string>();
   /** Rule breaks in the last reply (spec 2026-10-13 §7 #2), quoted to the model on the next turn. */
   let lastIssues: Issue[] = [];
   /** Markdown width Pi last rendered a reply at; undefined until the TUI draws one (print mode never does). */
@@ -312,10 +310,10 @@ export default function (pi: ExtensionAPI): void {
     spotMemory.set(ep.spot, { attempts: ep.attempts, lastHash: ep.lastHash });
     if (spotMemory.size > 20) spotMemory.delete(spotMemory.keys().next().value!);
   };
-  function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean) {
+  function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean, spotKey?: string) {
     const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
     if (isSyntaxError(trigger.trace)) { signal = "run failed: a syntax error (fix the line it names)"; paint(); return; }
-    const spot = spotOf(trigger.trace), hash = sourceHash(root);
+    const spot = spotKey ?? spotOf(trigger.trace), hash = sourceHash(root);
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
       const before = episode.attempts;
       episode = recordAttempt({ ...episode, trigger }, { spot, hash });
@@ -384,28 +382,10 @@ export default function (pi: ExtensionAPI): void {
     signal = `episode closed (${reason})`;
   }
 
-  /** M8 D6: a passing run ticks the pending task ids in spec/tasks.md (inside the root, never under unsaved edits). */
-  async function tickPending() {
-    if (!pendingTicks.size || !session) return;
-    const root = session.cwd;
-    const path = join(realCwd(root), "spec", "tasks.md");
-    let md: string;
-    try { md = readFileSync(path, "utf8"); } catch { pendingTicks.clear(); return; }
-    try { if (link && await link.isModified(path)) { ui?.notify("spec/tasks.md has unsaved edits in Neovim; save it and run again to tick", "warning"); return; } } catch { /* busy editor: write anyway */ }
-    const r = tickTasks(md, [...pendingTicks]);
-    pendingTicks.clear();
-    if (r.missing.length) ui?.notify(`not an open task in spec/tasks.md: ${r.missing.join(", ")}`, "info");
-    if (!r.ticked.length) return;
-    try { writeInRoot(root, "spec/tasks.md", r.text); } catch (e) { ui?.notify(`tutor: could not tick tasks: ${e instanceof Error ? e.message : String(e)}`, "warning"); return; }
-    pi.appendEntry("tutor_tick", { ids: r.ticked });
-    ui?.notify(`ticked ${r.ticked.join(", ")} in spec/tasks.md`, "info");
-    try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
-  }
-
   function onStuck(events: StuckEvent[]) {
     for (const e of events) {
       if (e.type === "open") openEp(e.trigger, true);
-      else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); void tickPending(); }
+      else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); }
       else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");
     }
   }
@@ -615,11 +595,7 @@ export default function (pi: ExtensionAPI): void {
     const j: Judgment = { ...raw, concept_tags: normalizeTags(raw.concept_tags, pack ? vocabOf(pack, loadPack("editor")) : null) };
     state.last = j.judgment;
     pi.appendEntry("tutor_judgment", j);
-    const newIds = j.task_done_ids.filter((id) => TASK_ID.test(id) && !pendingTicks.has(id));
-    if (newIds.length) {
-      for (const id of newIds) pendingTicks.add(id);
-      ui?.notify(`${newIds.join(", ")} done? It is ticked when :TutorRun passes`, "info");
-    }
+    // Spec 2026-10-21 §7: tasks are ticked from evidence (/tutor-done), never by the model; task_done_ids is ignored.
     const ladder = roleNamed(activeRole).ladder;
     if (ladder) advanceWorkflow(j.step_done);
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
@@ -999,6 +975,86 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // Spec 2026-10-21 §5: at pro the fix comes only when the learner asks for it.
+  /**
+   * Spec 2026-10-21 §7: `/tutor-done [task] [anyway]` ticks a task from evidence. Its trusted checks run in the
+   * sandbox: all pass → ticked; one fails → a graded try on that check's spot. Unverified checks never block;
+   * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
+   */
+  pi.registerCommand("tutor-done", {
+    description: "Tick a task when its checks pass: /tutor-done [task id] [anyway]",
+    handler: (args, ctx) => exclusive(ctx, async () => {
+      if (!project || !profile) { ctx.ui.notify("/tutor-done works inside a project: /tutor-start makes one", "warning"); return; }
+      const proj = project, p = profile, root = proj.path, key = `checks:${root}`, path = join(root, "spec", "tasks.md");
+      const words = args.trim().split(/\s+/).filter(Boolean);
+      const anyway = words.includes("anyway");
+      const asked = words.find((w) => w !== "anyway");
+      let tasksMd: string;
+      try { tasksMd = readFileSync(path, "utf8"); } catch { ctx.ui.notify("no spec/tasks.md here yet", "info"); return; }
+      const open = [...tasksMd.matchAll(/^\s*- \[ \] (P\d+\.T\d+)\s/gm)].map((m) => m[1]);
+      if (asked && !/^P\d+\.T\d+$/.test(asked)) { ctx.ui.notify("usage: /tutor-done [task id like P1.T2] [anyway]", "warning"); return; }
+      const id = asked ?? open[0];
+      if (!id) { ctx.ui.notify("every task in spec/tasks.md is ticked", "info"); return; }
+      if (!open.includes(id)) { ctx.ui.notify(`${id} is not an open task in spec/tasks.md`, "info"); return; }
+      try { if (link && await link.isModified(path)) { ctx.ui.notify("spec/tasks.md has unsaved edits in Neovim; save it, then /tutor-done again", "warning"); return; } } catch { /* busy editor: go on */ }
+      let state: ChecksState = { milestones: {} };
+      profileWrite(() => { state = readChecksState(p.setting(key)); });
+      const current = currentMilestone(tasksMd, lesson);
+      const tick = (how: TickHow, why: string) => tickDone(root, id, how, why);
+      if (anyway) return tick("you", "ticked by you");
+      const checks = liveChecks(Object.values(state.milestones).flatMap((m) => m.checks), current).filter((c) => c.task === id);
+      if (checks.length === 0) {
+        if (checksRunning.has(root)) { ctx.ui.notify(`the checks for this milestone are still being written; try again in a minute, or /tutor-done ${id} anyway`, "info"); return; }
+        return tick("self", "self-checked: it has no checks");
+      }
+      const { runCmd, entry } = projectRun(root, proj.language);
+      ctx.ui.notify(`running ${checks.length} check(s) for ${id}…`, "info");
+      const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: proj.language, root, entry, runCmd, checks, sandbox: sandboxHost() });
+      if (r.missing) return tick("self", `self-checked: ${r.missing}`);
+      const failed = r.results.filter((x) => !x.pass && x.check.status === "trusted");
+      const shaky = r.results.filter((x) => !x.pass && x.check.status === "unverified");
+      if (failed.length === 0) {
+        const extra = shaky.length ? `; ${shaky.length} unverified check(s) failed and do not block: ${shaky.map((x) => x.check.expr ?? JSON.stringify(x.check.stdin)).join(", ")}` : "";
+        return tick("checks", `${r.results.length - shaky.length} check(s) passed${extra}`);
+      }
+      failedCheck(id, failed[0]);
+    }),
+  });
+
+  /** A failed trusted check (spec §7): a graded try on its spot, unless the file does not even load (a typo). */
+  function failedCheck(id: string, f: CheckResult) {
+    const c = f.check;
+    if (f.error && isSyntaxError(f.error.replace(/^your file stopped while loading: /, ""))) {
+      ui?.notify(`your file has a syntax error, so ${id} could not be checked: ${f.error}`, "warning");
+      return;
+    }
+    const line = c.kind === "value"
+      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${f.got}, expected ${c.expected}`}`
+      : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
+    ui?.notify(`${id} not yet: ${line.replace(/^check \S+: /, "")}`, "warning");
+    failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `check:${id}:${c.expr ?? c.stdin}`);
+    paint();
+  }
+
+  /** Tick `id` and its open subtasks in spec/tasks.md, record how, refresh spec/checks.md, close its check episode. */
+  async function tickDone(root: string, id: string, how: TickHow, why: string) {
+    const path = join(root, "spec", "tasks.md");
+    let md: string;
+    try { md = readFileSync(path, "utf8"); } catch { return; }
+    const r = tickTasks(md, [id, ...taskIds(md).filter((x) => x.startsWith(`${id}.S`))]);
+    if (!r.ticked.length) return;
+    try { writeInRoot(root, "spec/tasks.md", r.text); } catch (e) { ui?.notify(`tutor: could not tick ${id}: ${e instanceof Error ? e.message : String(e)}`, "warning"); return; }
+    pi.appendEntry("tutor_tick", { ids: [id], how });
+    let state: ChecksState = { milestones: {} };
+    const key = `checks:${root}`;
+    if (profile) { const p = profile; profileWrite(() => { state = readChecksState(p.setting(key)); state.ticks = { ...state.ticks, [id]: how }; p.setSetting(key, JSON.stringify(state)); }); }
+    writeChecksMd(root, state, currentMilestone(r.text, lesson));
+    if (episode?.spot?.startsWith(`check:${id}:`)) closeEp("run_passed");
+    for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
+    ui?.notify(`ticked ${id} (${why})`, "info");
+    try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
+    paint();
+  }
+
   pi.registerCommand("tutor-fix", {
     description: "Pro: show the fix for the spot you are stuck on (other levels get it after a few tries)",
     handler: async (_args, ctx) => {
@@ -1261,7 +1317,7 @@ export default function (pi: ExtensionAPI): void {
     const all = Object.values(state.milestones).flatMap((m) => m.checks);
     const untried = Object.values(state.milestones).some((m) => m.checks.length && !m.ran);
     const note = untried ? "Some checks could not be tried against a reference here (no sandbox), so they are unverified." : undefined;
-    try { writeFileSync(join(root, "spec", "checks.md"), renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note })); } catch { /* spec/ is gone: nothing to show */ }
+    try { writeFileSync(join(root, "spec", "checks.md"), renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks })); } catch { /* spec/ is gone: nothing to show */ }
   }
 
   /** Author 2026-10-21: the installed Lua as lua_ls names it, for a Lua project's .luarc.json; null when absent. */

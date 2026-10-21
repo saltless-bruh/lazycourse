@@ -134,4 +134,8 @@ describe("run episodes", () => {
     expect(yieldsTo(openEpisode(run, "beginner", 1))).toBe(false);
     expect(describeTrigger(run)).toBe("run failed (exit 101): cargo run");
   });
+  it("a failed check names the task and what it gave (spec 2026-10-21 §7)", () => {
+    expect(describeTrigger({ kind: "run", cmd: ["/tutor-done", "P2.T2"], code: 1, trace: "check P2.T2: split_amount(48, 3) gave 144, expected 16.0" }))
+      .toBe("run failed (check P2.T2): split_amount(48, 3) gave 144, expected 16.0");
+  });
 });
