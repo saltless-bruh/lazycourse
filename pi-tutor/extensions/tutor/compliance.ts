@@ -225,16 +225,18 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 
 /** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
  *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
-export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[] }): TurnIssue[] {
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[] }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
   const text = hideJudgment(raw);
   const quoted = new Set(o.sourceLines.map((l) => l.trim()).filter(Boolean));
+  // Spec 2026-10-21 §7: a line of the hidden reference solution (8+ characters) is the answer, named or not.
+  const answer = new Set((o.referenceLines ?? []).map((l) => l.trim()).filter((l) => l.length >= 8));
   const leaks = (line: string) => {
     // Final review I6: a quote may carry the editor's line number ("  3| …"); a caret line is an annotation.
     const t = line.replace(/^\s*\d+\s*[|:]\s?/, "").trim();
-    return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && !/^\^/.test(t) && usesOwnName(t, o.names);
+    return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && !/^\^/.test(t) && (usesOwnName(t, o.names) || answer.has(t));
   };
   let quotedProse = "";
   for (const m of text.matchAll(FENCES)) {

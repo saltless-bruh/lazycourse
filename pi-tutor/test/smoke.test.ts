@@ -1806,6 +1806,29 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     return Object.assign(opts, { message: r?.message });
   };
 
+  it("a hint showing a line of the hidden reference is held, though no task names it (spec 2026-10-21 §7)", async () => {
+    const { realpathSync } = await import("node:fs");
+    const dir = realpathSync(mkd(pjoin(tmp(), "pitutor-ref-")));
+    mkdir(pjoin(dir, "spec")); mkdir(pjoin(dir, "src"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 share the bill\n");
+    wfile(pjoin(dir, "src", "main.py"), "print('hi')\n");
+    const file = pjoin(mkd(pjoin(tmp(), "pitutor-refprof-")), "p.sqlite");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(file);
+    p.saveLanguage("python", 10, {}, 1); p.addProject("python", dir, "Split", 1);
+    p.setSetting(`checks:${dir}`, JSON.stringify({ milestones: { 1: { ran: true, checks: [], reference: "def share(total, people):\n    return round(total / people, 2)\n" } } }));
+    p.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ cwd: dir, branch: [ep(1)] });
+      await level10(b);
+      const leak = reply("Try `return round(total / people, 2)` there.");
+      await turn(b.events, b.ctx, "help", leak);
+      expect(textOf(leak)).toBe(REWRITE_TEXT);
+      expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["own-code"] });
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
   it("a leaking hint is replaced, re-asked through a fresh run, and the second reply is checked too", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);

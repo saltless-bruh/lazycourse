@@ -174,7 +174,7 @@ export default function (pi: ExtensionAPI): void {
   /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
   /** `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role. */
   /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[] } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[] } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -543,6 +543,14 @@ export default function (pi: ExtensionAPI): void {
       // The failed run's output is what the learner saw too: quoting it is not a leak.
       const trace = episode?.trigger.kind === "run" ? episode.trigger.trace : "";
       run.sourceLines = [...sources, trace].flatMap((t) => t.split(/\r?\n/));
+      // Spec §7: the current milestone's hidden reference; its lines are the answer until the fix step.
+      if (project && profile && tasksMd !== null) {
+        const p = profile, key = `checks:${project.path}`, now = currentMilestone(tasksMd, lesson);
+        let state: ChecksState = { milestones: {} };
+        profileWrite(() => { state = readChecksState(p.setting(key)); });
+        const k = Object.keys(state.milestones).map(Number).filter((n) => n <= now).sort((a, b) => b - a)[0];
+        run.referenceLines = k ? state.milestones[k].reference.split(/\r?\n/) : [];
+      }
     }
     // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
     const lang = project?.language ?? editorLanguage();
@@ -667,7 +675,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [] });
+      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines });
       if (issues.length) {
         // The session keeps what was rejected (never shown) so a live audit can tell a leak from a too-strict check.
         pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000) });

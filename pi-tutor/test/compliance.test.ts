@@ -363,3 +363,16 @@ describe("final review I5: the prompt never asks for what the check rejects", ()
     expect(replyReminder("teach")).toMatch(/Use the bold parts/);
   });
 });
+
+describe("checkTurn and the hidden reference (spec 2026-10-21 §6, §7)", () => {
+  const reference = ["def split_amount(total, people):", "    return total / people"];
+  it("a line of the reference before the fix step is own code, even with no task names known", () => {
+    expect(checkTurn("Try this: `return total / people`.", { step: "hint", names: new Set(), sourceLines: [], referenceLines: reference })).toContain("own-code");
+    expect(checkTurn("Look:\n```python\n    return total / people\n```\nWhat changes?", { step: "ask", names: new Set(), sourceLines: [], referenceLines: reference })).toContain("own-code");
+  });
+  it("not when the learner already has that line, when it is short, or at the fix step", () => {
+    expect(checkTurn("Your `return total / people` is right.", { step: "hint", names: new Set(), sourceLines: ["    return total / people"], referenceLines: reference })).not.toContain("own-code");
+    expect(checkTurn("Use `x`.", { step: "hint", names: new Set(), sourceLines: [], referenceLines: ["x"] })).not.toContain("own-code");
+    expect(checkTurn("Change it to `return total / people`.", { step: "fix", names: new Set(), sourceLines: [], referenceLines: reference })).not.toContain("own-code");
+  });
+});
