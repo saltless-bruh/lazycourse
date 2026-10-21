@@ -30,6 +30,13 @@ export function traceOf(stdout: string, stderr: string): string {
   return `stdout:\n${tail(out, TRACE_LINES / 2, half)}\nstderr:\n${tail(err, TRACE_LINES / 2, half)}`;
 }
 
+/** What a run's attempts are on (spec 2026-10-21 §5): its error line, numbers blurred so a new value is the same spot. */
+export function spotOf(trace: string): string {
+  const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines.at(-1) ?? "";
+  return line.replace(/\d+/g, "#").slice(0, 120);
+}
+
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }
 
 export class StuckDetector {
@@ -44,6 +51,13 @@ export class StuckDetector {
     private readonly limits: () => { errorMs: number; idleMs: number },
     private readonly canOpen: () => boolean = () => true,
   ) {}
+
+  /** Spec 2026-10-21 §5: an error shown in a project file makes a failed run a typo run (LazyVim has it). */
+  hasErrorsIn(root: string): boolean {
+    const r = root.replace(/\/+$/, "");
+    for (const path of this.errors.keys()) if (path === r || path.startsWith(r + "/")) return true;
+    return false;
+  }
 
   /** Track an error whose episode was restored from the session, already fired. */
   adopt(t: Trigger, now: number): void {

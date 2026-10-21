@@ -220,19 +220,47 @@ describe("architect role and stuck signals (M6a minor)", () => {
   }, 20000);
 });
 
-describe("final review I1: a failing re-run keeps its episode", () => {
-  it("a second failing run refreshes the run episode's trace in place and keeps its turns and tags", async () => {
+describe("attempts from runs (spec 2026-10-21 §5)", () => {
+  const attempts = (b: { entries: { type: string; data: unknown }[] }) => (episodes(b.entries).at(-1) as { attempts?: number } | undefined)?.attempts;
+  const edit = (text: string) => writeFileSync(join(h!.root, "a.py"), text);
+  it("failed runs on one spot climb; an unchanged rerun and a typo run do not", async () => {
+    const b = await linked();
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => attempts(b) === 1 && b.sent.length === 1);
+    edit("x = 1\n");
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => attempts(b) === 2 && b.sent.length === 2);
+    await runPayload(1, "ZeroDivisionError: division by zero"); // nothing changed
+    await new Promise((r) => setTimeout(r, 300));
+    expect(attempts(b)).toBe(2);
+    expect(b.sent).toHaveLength(2);
+    await setError("invalid syntax");
+    await until(() => /error: invalid syntax/.test(b.widgets["tutor"]?.[1] ?? "") || /stuck/.test(b.widgets["tutor"]?.[1] ?? ""));
+    edit("x = (\n");
+    await runPayload(1, "SyntaxError: invalid syntax");
+    await until(() => b.widgets["tutor"]?.[1] === "stuck: run failed (exit 1): python3 a.py" || /fix the error marked/.test(b.widgets["tutor"]?.[1] ?? ""));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(attempts(b)).toBe(2); // a typo run: LazyVim already shows it
+    expect(b.sent).toHaveLength(2);
+  }, 30000);
+  it("a run that fails on a new spot starts over on a new episode", async () => {
     const b = await linked();
     await runPayload(1, "KeyError: 'x'");
-    await until(() => b.sent.length === 1);
-    await turn(b.events, b.ctx, REASONED, judged("correct"));
-    const before = episodes(b.entries).at(-1)!;
-    expect(before).toMatchObject({ turns: 1 });
-    await runPayload(1, "KeyError: 'y'");
-    await until(() => b.sent.length === 2); // still nudged
-    const after = episodes(b.entries).at(-1)!;
-    expect(after).toMatchObject({ id: before.id, turns: 1, trigger: { kind: "run", trace: "KeyError: 'y'" } });
-    expect(episodes(b.entries).some((e) => e.closeReason === "superseded")).toBe(false);
+    await until(() => attempts(b) === 1);
+    const first = episodes(b.entries).at(-1)!;
+    edit("x = 2\n");
+    await runPayload(1, "TypeError: unsupported operand");
+    await until(() => episodes(b.entries).some((e) => e.id === first.id && e.closeReason === "superseded"));
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "TypeError: unsupported operand", trigger: { kind: "run" } });
+  }, 20000);
+  it("a chat message never counts as an attempt, even after the code changed (only graded tries count)", async () => {
+    const b = await linked();
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => attempts(b) === 1);
+    edit("x = 3\n");
+    const t = await turn(b.events, b.ctx, "I changed it and it is still wrong", judged("wrong"));
+    expect(attempts(b)).toBe(1);
+    expect(t.message?.content).toContain("this turn: One small hint");
   }, 20000);
 });
 

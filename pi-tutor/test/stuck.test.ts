@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StuckDetector, traceOf, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
+import { StuckDetector, traceOf, spotOf, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
 import type { TutorPayload } from "../extensions/tutor/nvim.js";
 
 const diag = (path: string, errors: number, msg = "boom", line = 1): TutorPayload =>
@@ -144,5 +144,23 @@ describe("final review I2: test runners print the failure on stdout", () => {
     expect(t).toContain("stderr:\n");
     expect(t).toContain("error: test failed");
     expect(t.length).toBeLessThanOrEqual(TRACE_CHARS + 20);
+  });
+});
+
+describe("attempt spots (spec 2026-10-21 §5)", () => {
+  it("spotOf keys a run by its error line", () => {
+    expect(spotOf('Traceback…\n  File "src/main.py", line 12, in split_amount\nZeroDivisionError: division by zero\n')).toBe("ZeroDivisionError: division by zero");
+    expect(spotOf("AssertionError: expected 16.0, got 144 at line 3")).toBe("AssertionError: expected #.#, got # at line #");
+    expect(spotOf("all good\nbut nothing matched here")).toBe("but nothing matched here");
+    expect(spotOf("x".repeat(300) + " error")).toHaveLength(120);
+  });
+  it("hasErrorsIn only counts errors inside the project (Review Focus #4)", () => {
+    const d = new StuckDetector(() => ({ errorMs: 1, idleMs: 1 }));
+    d.observe({ kind: "diagnostics", buf: 1, path: "/elsewhere/x.py", errors: 1, warnings: 0, first: { line: 1, msg: "e" } }, 0);
+    expect(d.hasErrorsIn("/proj")).toBe(false);
+    d.observe({ kind: "diagnostics", buf: 2, path: "/proj/src/main.py", errors: 1, warnings: 0, first: { line: 1, msg: "e" } }, 0);
+    expect(d.hasErrorsIn("/proj")).toBe(true);
+    d.observe({ kind: "diagnostics", buf: 2, path: "/proj/src/main.py", errors: 0, warnings: 0 }, 0);
+    expect(d.hasErrorsIn("/proj")).toBe(false);
   });
 });

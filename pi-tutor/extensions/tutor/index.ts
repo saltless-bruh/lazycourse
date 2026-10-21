@@ -18,8 +18,9 @@ import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
-import { StuckDetector, type StuckEvent } from "./stuck.js";
-import { easeDelay, attemptScore, stepFor, restoreAttempts, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { StuckDetector, spotOf, type StuckEvent } from "./stuck.js";
+import { sourceHash } from "./source-hash.js";
+import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, formatFeedback } from "./feedback.js";
@@ -274,22 +275,37 @@ export default function (pi: ExtensionAPI): void {
 
   function openEp(trigger: Trigger, nudge: boolean) {
     // Spec 2026-10-13 §7 #4: a failed run is the learner's explicit check; it replaces any episode and nudges without the gap.
-    const run = trigger.kind === "run";
-    // Final review I1: re-running a still-failing program keeps the hint level; only the trace is new.
-    if (run && episode?.trigger.kind === "run") {
-      episode = { ...episode, trigger };
-      pi.appendEntry("tutor_episode", episode);
-      nudgeFor(trigger, nudge, true);
-      return;
-    }
+    if (trigger.kind === "run") { failedRun(trigger, nudge); return; }
     if (episode) {
       // Chat, idle and churn episodes may never close on their own; editor triggers must not be lost behind them.
-      if (!nudge || !(run || yieldsTo(episode))) return;
+      if (!nudge || !yieldsTo(episode)) return;
       closeEp("superseded");
     }
     episode = openEpisode(trigger, bandFor(level()), Date.now());
     pi.appendEntry("tutor_episode", episode);
-    nudgeFor(trigger, nudge, run);
+    nudgeFor(trigger, nudge, false);
+  }
+
+  /**
+   * Spec 2026-10-21 §5: a failed run is a graded try on its spot. With an error shown in a project file it is a
+   * typo run (LazyVim has it): no attempt, no nudge. The same spot again with changed code climbs; unchanged
+   * code does not; a new spot starts a new episode. The nudge comes only when the count went up.
+   */
+  function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean) {
+    const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
+    if (detector.hasErrorsIn(root)) { signal = "run failed: fix the error marked in your file"; return; }
+    const spot = spotOf(trigger.trace), hash = sourceHash(root);
+    if (episode?.trigger.kind === "run" && episode.spot === spot) {
+      const before = episode.attempts;
+      episode = recordAttempt({ ...episode, trigger }, { spot, hash });
+      pi.appendEntry("tutor_episode", episode);
+      if (episode.attempts > before) nudgeFor(trigger, nudge, true);
+      return;
+    }
+    if (episode) closeEp("superseded");
+    episode = recordAttempt(openEpisode(trigger, bandFor(level()), Date.now()), { spot, hash });
+    pi.appendEntry("tutor_episode", episode);
+    nudgeFor(trigger, nudge, true);
   }
 
   /**
@@ -893,6 +909,18 @@ export default function (pi: ExtensionAPI): void {
       if (project && profile) { const p = profile, proj = project; profileWrite(() => p.recordFeedback({ kind, language: proj.language, project: proj.path, rung }, Date.now())); }
       paint();
       ctx.ui.notify(kind === "good" ? "thanks — the tutor keeps going like this" : `noted: ${kind}; the tutor adjusts from the next reply`, "info");
+    },
+  });
+
+  // Spec 2026-10-21 §5: at pro the fix comes only when the learner asks for it.
+  pi.registerCommand("tutor-fix", {
+    description: "Pro: show the fix for the spot you are stuck on (other levels get it after a few tries)",
+    handler: async (_args, ctx) => {
+      if (!episode || !roleNamed(activeRole).ladder) { ctx.ui.notify("nothing to fix: run your program first", "info"); return; }
+      if (bandFor(level()) !== "pro") { ctx.ui.notify("the fix comes after a few tries on the same spot", "info"); return; }
+      episode = { ...episode, fixAsked: true };
+      pi.appendEntry("tutor_episode", episode);
+      ctx.ui.notify("the next reply shows the fix for this spot", "info");
     },
   });
 

@@ -1668,3 +1668,26 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect((await setting(`lesson:${dir}`))).toMatchObject({ round: 1, concept: "numbers", building: false });
   });
 });
+
+describe("/tutor-fix (spec 2026-10-21 §5: at pro the fix comes only when asked)", () => {
+  const ep = (band: string) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "chat" }, band, attempts: 4, opened: 1, turns: 0, concept_tags: [] } });
+  it("pro: marks the open episode, so the next turn is the fix", async () => {
+    const b = await boot({ branch: [ep("pro")] });
+    await b.commands["tutor-level"].handler("90", b.ctx);
+    await b.commands["tutor-fix"].handler("", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ fixAsked: true });
+    const t = await turn(b.events, b.ctx, "go on", judged("none"));
+    expect(t.message?.content).toContain("this turn: Give the fix for only the stuck part");
+  });
+  it("other levels and no episode: a note, nothing changes", async () => {
+    const b = await boot({ branch: [ep("beginner")] });
+    await b.commands["tutor-level"].handler("10", b.ctx);
+    const before = episodes(b.entries).length;
+    await b.commands["tutor-fix"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toBe("the fix comes after a few tries on the same spot");
+    expect(episodes(b.entries).length).toBe(before);
+    const none = await boot();
+    await none.commands["tutor-fix"].handler("", none.ctx);
+    expect(none.notes.at(-1)).toMatch(/nothing to fix/);
+  });
+});
