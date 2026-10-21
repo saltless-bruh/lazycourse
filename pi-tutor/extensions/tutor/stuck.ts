@@ -34,9 +34,11 @@ export function traceOf(stdout: string, stderr: string): string {
 export function spotOf(trace: string): string {
   // Stack frames name functions, not what went wrong: Lua's "[C]: in function 'error'", Node's "at …", Go's
   // goroutine dump, Python's "File …" lines.
-  const frame = /^(?:at |\[C\]|stack traceback|goroutine |File "|.*\bin (?:function|main chunk|\?)|\/.*:\d+ \+0x)/;
+  // Lua frames also read "check.lua:6: in local 'check'" or "in global 'require'".
+  const frame = /^(?:at |\[C\]|stack traceback|Traceback \(most recent call last\)|goroutine |File "|\S+:\d+: in |.*\bin (?:function|main chunk|\?)|\/.*:\d+ \+0x)/;
   const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !frame.test(l));
-  const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines.at(-1) ?? "";
+  // A message without an error word (Lua's error(msg, 0)) comes first, before its frames.
+  const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines[0] ?? "";
   return line.replace(/-?\d+(?:\.\d+)?/g, "#").slice(0, 120);
 }
 

@@ -154,11 +154,14 @@ describe("attempt spots (spec 2026-10-21 §5)", () => {
     // A wrong value that changes between tries (144, then 144.0, then -2.5) is still the same spot.
     expect(spotOf("AssertionError: split_amount(48, 3) gave 144.0, expected 16.0")).toBe(spotOf("AssertionError: split_amount(48, 3) gave 144, expected 16.0"));
     expect(spotOf("AssertionError: gave -2.5")).toBe(spotOf("AssertionError: gave 7"));
+    // Live check 2026-10-21: Lua's error(msg, 0) message has no "error" word, and frames say "in local", "in global".
+    expect(spotOf("lua: split_amount(48, 3) gave 144, expected 16.0\nstack traceback:\n\t[C]: in function 'error'\n\tcheck.lua:6: in local 'check'\n\tcheck.lua:9: in main chunk\n\t[C]: in ?")).toBe("lua: split_amount(#, #) gave #, expected #");
+    expect(spotOf("lua: error loading module 'main' from file 'src/main.lua':\n\tsrc/main.lua:5: ')' expected near 'end'\nstack traceback:\n\t[C]: in ?\n\t[C]: in global 'require'\n\tcheck.lua:2: in main chunk")).toMatch(/^lua: error loading module|'\)' expected/);
     // Stack frames after the message (Lua, Node, Go) are not the spot.
     expect(spotOf("lua: check.lua:5: split_amount(48, 3) gave 144, expected 16.0\nstack traceback:\n\t[C]: in function 'error'\n\tcheck.lua:5: in main chunk\n\t[C]: in ?")).toBe("lua: check.lua:#: split_amount(#, #) gave #, expected #");
     expect(spotOf("TypeError: total is not a function\n    at split (/p/src/main.js:3:10)\n    at Object.<anonymous> (/p/check.js:2:1)")).toBe("TypeError: total is not a function");
     expect(spotOf("panic: runtime error: integer divide by zero\n\ngoroutine 1 [running]:\nmain.split(...)\n\t/p/main.go:5 +0x1d")).toBe("panic: runtime error: integer divide by zero");
-    expect(spotOf("all good\nbut nothing matched here")).toBe("but nothing matched here");
+    expect(spotOf("all good\nbut nothing matched here")).toBe("all good"); // no error word: the first line (Lua prints its message first)
     expect(spotOf("x".repeat(300) + " error")).toHaveLength(120);
   });
   it("hasErrorsIn only counts errors inside the project (Review Focus #4)", () => {
