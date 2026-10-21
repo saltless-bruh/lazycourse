@@ -65,8 +65,10 @@ function M.open_tasks(dir)
   local ids = {}
   if not ok then return ids end
   for _, l in ipairs(lines) do
-    local id = l:match("^%s*%- %[ %] (P%d+%.T%d+)%s")
-    if id then ids[#ids + 1] = id end
+    -- However the model wrapped the id (`**P1.T2**`, `P1.T2:`); subtasks left out (final review I4).
+    local id, after = nil, nil
+    if l:match("^%s*[-*+] %[ %]") then id, after = l:match("%f[%w](P%d+%.T%d+)(.?.?)") end
+    if id and after ~= ".S" and not vim.tbl_contains(ids, id) then ids[#ids + 1] = id end
   end
   return ids
 end

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -20,7 +20,7 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
-import { liveChecks, renderChecksMd, tickedIds, type TickHow } from "./checks.js";
+import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
@@ -998,7 +998,7 @@ export default function (pi: ExtensionAPI): void {
       const asked = words.find((w) => w !== "anyway");
       let tasksMd: string;
       try { tasksMd = readFileSync(path, "utf8"); } catch { ctx.ui.notify("no spec/tasks.md here yet", "info"); return; }
-      const open = [...tasksMd.matchAll(/^\s*- \[ \] (P\d+\.T\d+)\s/gm)].map((m) => m[1]);
+      const open = openTaskIds(tasksMd);
       if (asked && !/^P\d+\.T\d+$/.test(asked)) { ctx.ui.notify("usage: /tutor-done [task id like P1.T2] [anyway]", "warning"); return; }
       const id = asked ?? open[0];
       if (!id) { ctx.ui.notify("every task in spec/tasks.md is ticked", "info"); return; }
@@ -1009,7 +1009,7 @@ export default function (pi: ExtensionAPI): void {
       const current = currentMilestone(tasksMd, lesson);
       const tick = (how: TickHow, why: string) => tickDone(root, id, how, why);
       if (anyway) return tick("you", "ticked by you");
-      const checks = liveChecks(Object.values(state.milestones).flatMap((m) => m.checks), current).filter((c) => c.task === id);
+      const checks = liveChecks(Object.values(state.milestones).flatMap((m) => m.checks), current).filter((c) => c.task === id || c.task.startsWith(`${id}.`));
       if (checks.length === 0) {
         if (checksRunning.has(root)) { ctx.ui.notify(`the checks for this milestone are still being written; try again in a minute, or /tutor-done ${id} anyway`, "info"); return; }
         return tick("self", "self-checked: it has no checks");
@@ -1022,6 +1022,8 @@ export default function (pi: ExtensionAPI): void {
       const shaky = r.results.filter((x) => !x.pass && x.check.status === "unverified");
       if (failed.length === 0) {
         const extra = shaky.length ? `; ${shaky.length} unverified check(s) failed and do not block: ${shaky.map((x) => x.check.expr ?? JSON.stringify(x.check.stdin)).join(", ")}` : "";
+        // Only a trusted check proves it; unverified ones alone make it self-checked (final review I5).
+        if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
         return tick("checks", `${r.results.length - shaky.length} check(s) passed${extra}`);
       }
       failedCheck(id, failed[0]);
@@ -1056,7 +1058,8 @@ export default function (pi: ExtensionAPI): void {
     const key = `checks:${root}`;
     if (profile) { const p = profile; profileWrite(() => { state = readChecksState(p.setting(key)); state.ticks = { ...state.ticks, [id]: how }; p.setSetting(key, JSON.stringify(state)); }); }
     writeChecksMd(root, state, currentMilestone(r.text, lesson));
-    if (episode?.spot?.startsWith(`check:${id}:`)) closeEp("run_passed");
+    // Only passing checks solve it; a self-checked or `anyway` tick gives the episode up (final review I2).
+    if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
     try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
@@ -1324,8 +1327,8 @@ export default function (pi: ExtensionAPI): void {
     try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { /* ticks unknown: none shown */ }
     const all = Object.values(state.milestones).flatMap((m) => m.checks);
     const untried = Object.values(state.milestones).some((m) => m.checks.length && !m.ran);
-    const note = untried ? "Some checks could not be tried against a reference here (no sandbox), so they are unverified." : undefined;
-    try { writeFileSync(join(root, "spec", "checks.md"), renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks })); } catch { /* spec/ is gone: nothing to show */ }
+    const note = untried ? "Some checks could not be tried against a reference here (no sandbox, or README.md's `run:` names no source file), so they are unverified." : undefined;
+    try { writeInRoot(root, "spec/checks.md", renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks })); } catch { /* spec/ is gone or points outside the project: nothing to show */ }
   }
 
   /** Author 2026-10-21: the installed Lua as lua_ls names it, for a Lua project's .luarc.json; null when absent. */

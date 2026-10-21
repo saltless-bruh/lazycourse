@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { writeFileSync, mkdtempSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
@@ -170,7 +170,7 @@ describe("ticking (spec 2026-10-21 §7: evidence, never the model)", () => {
 
 /** A python project with a trusted check on P2.T2, a real sandbox and real commands (spec 2026-10-21 §7). */
 const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync("python3", ["--version"]).status === 0;
-async function doneProject(code: string) {
+async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }]) {
   const { Profile } = await import("../extensions/tutor/profile.js");
   const { realpathSync } = await import("node:fs");
   h = await startHeadlessNvim();
@@ -184,7 +184,7 @@ async function doneProject(code: string) {
   seed.saveLanguage("python", 10, {}, 1);
   seed.addProject("python", root, "Split", 1);
   seed.setSetting(`checks:${root}`, JSON.stringify({ milestones: { 1: { ran: true, reference: "def split_amount(t, p):\n    return t / p\n",
-    checks: [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }] } } }));
+    checks } } }));
   seed.close();
   const saved = process.env.PI_TUTOR_PROFILE;
   process.env.PI_TUTOR_PROFILE = file;
@@ -224,6 +224,36 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
     expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(ticked by you\)/);
     expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done, ticked by you)");
+  }, 30000);
+  it("anyway after a failed try closes the check episode as given up, not solved (final review I2)", async () => {
+    const { b } = await doneProject("def split_amount(total, people):\n    return total * people\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1 });
+    await b.commands["tutor-done"].handler("P2.T2 anyway", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ closeReason: "superseded" });
+  }, 30000);
+  it("a subtask's checks run when its task is done (final review I3)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total * people\n",
+      [{ task: "P2.T2.S1", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [ ] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 not yet: split_amount\(48, 3\) gave 144/);
+  }, 30000);
+  it("a tick where no trusted check passed is labelled self-checked, not done by checks (final review I5)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
+      [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "unverified" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(self-checked: /);
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done, self-checked)");
+  }, 30000);
+  it("spec/checks.md is written only inside the project (final review I6)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    const outside = join(mkdtempSync(join(tmpdir(), "outside-")), "victim.txt");
+    writeFileSync(outside, "keep me\n");
+    symlinkSync(outside, join(root, "spec", "checks.md"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(readFileSync(outside, "utf8")).toBe("keep me\n");
   }, 30000);
   it("waits while spec/tasks.md has unsaved edits in Neovim, and runs nothing", async () => {
     const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");

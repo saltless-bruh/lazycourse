@@ -13,9 +13,17 @@ export interface CheckResult { check: Check; pass: boolean; got?: string; error?
 export const CHECKS_SANDBOX_OFF = "checks run only in the sandbox, and it is off (/tutor-exam sandbox on turns it back on)";
 export const TOO_LONG = "took too long (an endless loop?)";
 export const INPUT_AT_LOAD = "your file reads input when it is loaded; move that into main()";
+export const PRINTED_TOO_MUCH = "printed too much (an endless loop?)";
 
 const CHECK_LIMIT_SEC = 20;
 const MARK = "\x1eTUTOR\t";
+// Final review C1: pi.exec keeps a command's whole output in memory, and a loop that prints forever crashed Pi
+// at ~700 MB. Output is cut inside the sandbox; a program that reaches the cap stops on its next write.
+const OUT_CAP = 65536;
+const ERR_CAP = 8192;
+const CAPPED = `{ { { "$@" </dev/null; echo $? >&4; } | head -c ${OUT_CAP}; } 2>&1 >&3 | head -c ${ERR_CAP} >&2; } 3>&1 4>/tmp/.tutor-code; c=$(cat /tmp/.tutor-code 2>/dev/null); exit \${c:-1}`;
+const capped = (argv: string[]) => ["sh", "-c", CAPPED, "sh", ...argv];
+const flooded = (stdout: string) => Buffer.byteLength(stdout) >= OUT_CAP;
 const SOURCE_EXT: Record<string, RegExp> = {
   python: /\.py$/, lua: /\.lua$/, javascript: /\.(m?js|cjs)$/, typescript: /\.(ts|mts)$/, go: /\.go$/, rust: /\.rs$/,
 };
@@ -162,6 +170,8 @@ if not f then out({ error = "the check does not parse: " .. tostring(ferr) }) re
 local ok, got = pcall(f)
 if ok then out({ pass = same(got, want), got = show(got, 0) }) return end
 if got == INPUT then out({ error = "it waited for typed input; a check types nothing" }) return end
+-- A file that did not load explains any failure (final review I1: \`M.tip(10)\` fails on a nil M, not a missing name).
+if stopped then out({ error = missing("") }) return end
 local name = tostring(got):match("attempt to call a nil value %(%a+ '([%w_]+)'%)")
 out({ error = name and missing(name) or tostring(got) })
 `;
@@ -179,7 +189,7 @@ interface Sandboxed { run(argv: string[], timeoutMs: number): Promise<{ stdout: 
 async function sandboxFor(exec: RunExec, root: string, language: string, tools: string[], host: SandboxHost): Promise<Sandboxed | { missing: string }> {
   let real = root;
   try { real = realpathSync(root); } catch { /* bwrap cannot mount it: the probe reports it */ }
-  const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", "sh"], host), host);
+  const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", "sh", "head", "cat"], host), host);
   if ((await exec("bwrap", [...prefix, "true"], { cwd: real, timeout: 10_000 })).code !== 0) return { missing: SANDBOX_MISSING };
   const run = (argv: string[], timeout: number) => exec("bwrap", [...prefix, ...argv], { cwd: real, timeout });
   const limited = (await run(["timeout", "--version"], 10_000)).code === 0;
@@ -197,6 +207,7 @@ const tail = (s: string, n = 300) => (s.length > n ? `…${s.slice(-n)}` : s).tr
 
 function valueResult(check: Check, r: { stdout: string; stderr: string; code: number; killed: boolean }): CheckResult {
   if (r.killed) return { check, pass: false, error: TOO_LONG };
+  if (flooded(r.stdout)) return { check, pass: false, error: PRINTED_TOO_MUCH };
   const line = r.stdout.split("\n").filter((l) => l.startsWith(MARK)).at(-1);
   if (!line) return { check, pass: false, error: `the check could not run: ${tail(r.stderr || r.stdout, 200) || `exit ${r.code}`}` };
   const o = JSON.parse(line.slice(MARK.length)) as { pass?: boolean; got?: string; error?: string };
@@ -214,8 +225,9 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
   for (const check of i.checks) {
     if (check.kind === "io") {
       if (!i.runCmd) { results.push({ check, pass: false, error: "no run command: add `run:` to README.md's front matter" }); continue; }
-      const r = await limitedRun(sb, ["sh", "-c", 'printf "%s" "$1" | sh -c "$2"', "sh", check.stdin ?? "", i.runCmd], limit);
+      const r = await limitedRun(sb, capped(["sh", "-c", 'printf "%s" "$1" | sh -c "$2"', "sh", check.stdin ?? "", i.runCmd]), limit);
       if (r.killed) { results.push({ check, pass: false, error: TOO_LONG }); continue; }
+      if (flooded(r.stdout)) { results.push({ check, pass: false, error: PRINTED_TOO_MUCH }); continue; }
       const pass = r.stdout.includes(check.contains ?? "");
       results.push({ check, pass, got: tail(r.stdout), ...(pass || r.code === 0 ? {} : { error: tail(r.stderr, 200) || `exit ${r.code}` }) });
       continue;
@@ -225,9 +237,8 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
       continue;
     }
     const argv = i.language === "python"
-      ? ["sh", "-c", 'exec "$@" </dev/null', "sh", interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? ""]
-      : ["sh", "-c", 'exec "$@" </dev/null', "sh", interp, "-e",
-        `local ENTRY, EXPR, EXPECTED = ${luaString(i.entry)}, ${luaString(check.expr ?? "")}, ${luaString(check.expected ?? "")}\n${LUA_HARNESS}`];
+      ? capped([interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? ""])
+      : capped([interp, "-e", `local ENTRY, EXPR, EXPECTED = ${luaString(i.entry)}, ${luaString(check.expr ?? "")}, ${luaString(check.expected ?? "")}\n${LUA_HARNESS}`]);
     results.push(valueResult(check, await limitedRun(sb, argv, limit)));
   }
   return { results };

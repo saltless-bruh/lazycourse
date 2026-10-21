@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { runChecks, projectRun, CHECKS_SANDBOX_OFF } from "../extensions/tutor/check-run.js";
+import { runChecks, projectRun, CHECKS_SANDBOX_OFF, PRINTED_TOO_MUCH } from "../extensions/tutor/check-run.js";
+import type { RunExec } from "../extensions/tutor/exam/layout.js";
 import { SANDBOX_MISSING, type SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import type { Check } from "../extensions/tutor/checks.js";
 import { realExec } from "./fake-pi.js";
@@ -20,6 +21,12 @@ function project(files: Record<string, string>) {
 }
 const py = (root: string, checks: Check[], limitSec?: number) =>
   runChecks(realExec, { language: "python", root, entry: "src/main.py", runCmd: "python3 src/main.py", checks, sandbox: host(), limitSec });
+// Final review C1: Pi's exec keeps all output in memory; ~700 MB of it crashed Pi. Records the most any run returned.
+function counting() {
+  const seen = { max: 0 };
+  const exec: RunExec = async (c, a, o) => { const r = await realExec(c, a, o); seen.max = Math.max(seen.max, r.stdout.length + r.stderr.length); return r; };
+  return { exec, seen };
+}
 const lua = (root: string, checks: Check[], limitSec?: number) =>
   runChecks(realExec, { language: "lua", root, entry: "src/main.lua", runCmd: "lua src/main.lua", checks, sandbox: host(), limitSec });
 
@@ -86,6 +93,13 @@ describe.skipIf(!bwrapReady || !has("python3"))("runChecks: Python in the sandbo
     expect((await py(root, [value("save()", "True")])).results[0].pass).toBe(true);
     expect(readdirSync(root).sort()).toEqual(["src"]);
   }, 30_000);
+  it("a program that prints forever is cut short and reported; Pi never receives the flood (final review C1)", async () => {
+    const root = project({ "src/main.py": "def f():\n    while True:\n        print('balance left: 10')\n\nif __name__ == '__main__':\n    f()\n" });
+    const { exec, seen } = counting();
+    const r = (await runChecks(exec, { language: "python", root, entry: "src/main.py", runCmd: "python3 src/main.py", checks: [value("f()", "1"), io("", "done")], sandbox: host(), limitSec: 3 })).results;
+    expect(r.map((x) => x.error)).toEqual([PRINTED_TOO_MUCH, PRINTED_TOO_MUCH]);
+    expect(seen.max).toBeLessThan(200_000);
+  }, 30_000);
   it("typed input → output: the run command with stdin fed", async () => {
     const root = project({ "src/main.py": "total = float(input('total: '))\nprint(f'each: {total / 3:.2f}')\n" });
     const r = (await py(root, [io("52.8\n", "17.60"), io("52.8\n", "99")])).results;
@@ -102,6 +116,19 @@ describe.skipIf(!bwrapReady || !has("lua", "-v"))("runChecks: Lua in the sandbox
     expect(r[0]).toMatchObject({ pass: false, got: "144" });
     expect(r[1].pass).toBe(true);
     expect(r[2].pass).toBe(true);
+  }, 30_000);
+  it("a check written as M.fn still says the file did not load or read input while loading (final review I1)", async () => {
+    const broken = project({ "src/main.lua": "local M = {}\nfunction M.tip(x) return x * end\nreturn M\n" });
+    expect((await lua(broken, [value("M.tip(10)", "2")])).results[0].error).toMatch(/^your file stopped while loading: .*unexpected symbol/);
+    const reads = project({ "src/main.lua": "local M = {}\nfunction M.tip(x) return x * 0.2 end\nlocal n = io.read()\nreturn M\n" });
+    expect((await lua(reads, [value("M.tip(10)", "2")])).results[0].error).toBe("your file reads input when it is loaded; move that into main()");
+  }, 30_000);
+  it("a menu loop that prints forever after the typed input runs out is cut short (final review C1)", async () => {
+    const root = project({ "src/main.lua": "while true do\n  io.write('menu> ')\n  local l = io.read()\nend\n" });
+    const { exec, seen } = counting();
+    const r = (await runChecks(exec, { language: "lua", root, entry: "src/main.lua", runCmd: "lua src/main.lua", checks: [io("1\n", "done")], sandbox: host(), limitSec: 3 })).results;
+    expect(r[0].error).toBe(PRINTED_TOO_MUCH);
+    expect(seen.max).toBeLessThan(200_000);
   }, 30_000);
   it("Review Focus #1-#3 in Lua", async () => {
     const root = project({ "src/main.lua": "function double(x) return x * 2 end\nfunction spin() while true do end end\nlocal n = tonumber(io.read())\nfunction half(x) return x / 2 end\n" });

@@ -92,5 +92,15 @@ export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?:
 
 /** Ids ticked in spec/tasks.md (`- [x] P1.T2 …`). */
 export function tickedIds(tasksMd: string): Set<string> {
-  return new Set([...tasksMd.matchAll(/^\s*- \[[xX]\] (P\d+\.T\d+(?:\.S\d+)?)\b/gm)].map((m) => m[1]));
+  return new Set(boxedIds(tasksMd, /^\s*[-*+] \[[xX]\]/));
+}
+
+/** Unticked tasks (not subtasks), in file order. */
+export function openTaskIds(tasksMd: string): string[] {
+  return [...new Set(boxedIds(tasksMd, /^\s*[-*+] \[ \]/).filter((id) => !id.includes(".S")))];
+}
+
+// The first task id on each checkbox line, however the model wrapped it (`**P1.T2**`, `P1.T2:`): final review I4.
+function boxedIds(tasksMd: string, box: RegExp): string[] {
+  return tasksMd.split(/\r?\n/).flatMap((l) => (box.test(l) ? /\bP\d+\.T\d+(?:\.S\d+)?\b/.exec(l)?.[0] ?? [] : []));
 }

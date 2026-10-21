@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseChecks, liveChecks, renderChecksMd, type Check } from "../extensions/tutor/checks.js";
+import { parseChecks, liveChecks, renderChecksMd, openTaskIds, tickedIds, type Check } from "../extensions/tutor/checks.js";
 
 const ids = ["P2.T1", "P2.T2", "P2.T3", "P3.T2"];
 
@@ -71,5 +71,16 @@ describe("renderChecksMd", () => {
     const c: Check = { task: "P2.T2", kind: "value", expr: "f()", expected: "1", milestone: 1, status: "trusted" };
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "you" } })).toContain("## P2.T2 (done, ticked by you)");
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "self" } })).toContain("## P2.T2 (done, self-checked)");
+  });
+});
+
+describe("task lines a weak model wrote loosely (final review I4)", () => {
+  const md = "## Milestone 1: x\n- [x] **P1.T1** done\n- [ ] **P1.T2** open\n  - [ ] P1.T2.S1: sub\n* [ ] P1.T3: starred\n- [ ] P2.T1 later\n- [X] P2.T2. done too\n";
+  it("open tasks are the unticked lines' task ids, subtasks left out, in order", () => {
+    expect(openTaskIds(md)).toEqual(["P1.T2", "P1.T3", "P2.T1"]);
+  });
+  it("ticked ids include subtasks", () => {
+    expect([...tickedIds(md)].sort()).toEqual(["P1.T1", "P2.T2"]);
+    expect([...tickedIds("- [x] P1.T2.S1: sub\n")]).toEqual(["P1.T2.S1"]);
   });
 });
