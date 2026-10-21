@@ -32,7 +32,10 @@ export function traceOf(stdout: string, stderr: string): string {
 
 /** What a run's attempts are on (spec 2026-10-21 §5): its error line, numbers blurred so a new value is the same spot. */
 export function spotOf(trace: string): string {
-  const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // Stack frames name functions, not what went wrong: Lua's "[C]: in function 'error'", Node's "at …", Go's
+  // goroutine dump, Python's "File …" lines.
+  const frame = /^(?:at |\[C\]|stack traceback|goroutine |File "|.*\bin (?:function|main chunk|\?)|\/.*:\d+ \+0x)/;
+  const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !frame.test(l));
   const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines.at(-1) ?? "";
   return line.replace(/-?\d+(?:\.\d+)?/g, "#").slice(0, 120);
 }
