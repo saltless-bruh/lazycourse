@@ -19,7 +19,7 @@ import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
-import { StuckDetector, spotOf, spotLine, type StuckEvent } from "./stuck.js";
+import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -293,8 +293,8 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /**
-   * Spec 2026-10-21 §5: a failed run is a graded try on its spot. With an error shown in a project file it is a
-   * typo run (LazyVim has it): no attempt, no nudge. The same spot again with changed code climbs; unchanged
+   * Spec 2026-10-21 §5: a failed run is a graded try on its spot. A syntax error in the run's own output makes
+   * it a typo run (author 2026-10-21): no attempt, no nudge. The same spot again with changed code climbs; unchanged
    * code does not; a new spot starts a new episode. The nudge comes only when the count went up.
    */
   /**
@@ -310,7 +310,7 @@ export default function (pi: ExtensionAPI): void {
   };
   function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean) {
     const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
-    if (detector.hasErrorsIn(root)) { signal = "run failed: fix the error marked in your file"; return; }
+    if (isSyntaxError(trigger.trace)) { signal = "run failed: a syntax error (fix the line it names)"; paint(); return; }
     const spot = spotOf(trigger.trace), hash = sourceHash(root);
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
       const before = episode.attempts;

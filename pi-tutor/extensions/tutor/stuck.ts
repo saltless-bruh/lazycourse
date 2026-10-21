@@ -54,6 +54,20 @@ export function spotLine(trace: string): string {
 
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }
 
+/**
+ * Author 2026-10-21: a failed run is a typo run when its own output is a syntax error (Python, Lua, JS/TS,
+ * Go, Rust). Runtime and type errors are not: they are graded tries.
+ */
+const SYNTAX = [
+  /^\s*(SyntaxError|IndentationError|TabError)\b/m,
+  /'[^']*' expected near |unexpected symbol near |unfinished (string|long string|long comment) near /,
+  /\bsyntax error\b/,
+  /^error: (expected|unexpected|mismatched closing delimiter|this file contains an unclosed delimiter)\b/m,
+];
+export function isSyntaxError(trace: string): boolean {
+  return SYNTAX.some((re) => re.test(trace));
+}
+
 export class StuckDetector {
   /** First error per file. Identity is the message; the line may move. */
   private errors = new Map<string, ErrorWatch>();
@@ -66,13 +80,6 @@ export class StuckDetector {
     private readonly limits: () => { errorMs: number; idleMs: number },
     private readonly canOpen: () => boolean = () => true,
   ) {}
-
-  /** Spec 2026-10-21 §5: an error shown in a project file makes a failed run a typo run (LazyVim has it). */
-  hasErrorsIn(root: string): boolean {
-    const r = root.replace(/\/+$/, "");
-    for (const path of this.errors.keys()) if (path === r || path.startsWith(r + "/")) return true;
-    return false;
-  }
 
   /** Track an error whose episode was restored from the session, already fired. */
   adopt(t: Trigger, now: number): void {

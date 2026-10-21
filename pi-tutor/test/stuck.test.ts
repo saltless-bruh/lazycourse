@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StuckDetector, traceOf, spotOf, spotLine, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
+import { StuckDetector, traceOf, spotOf, spotLine, isSyntaxError, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
 import type { TutorPayload } from "../extensions/tutor/nvim.js";
 
 const diag = (path: string, errors: number, msg = "boom", line = 1): TutorPayload =>
@@ -174,13 +174,19 @@ describe("attempt spots (spec 2026-10-21 §5)", () => {
   it("spotLine is the same line as spotOf, as printed", () => {
     expect(spotLine("lua: split_amount(10, 4) gave 2, expected 2.5\nstack traceback:\n\t[C]: in ?")).toBe("lua: split_amount(10, 4) gave 2, expected 2.5");
   });
-  it("hasErrorsIn only counts errors inside the project (Review Focus #4)", () => {
-    const d = new StuckDetector(() => ({ errorMs: 1, idleMs: 1 }));
-    d.observe({ kind: "diagnostics", buf: 1, path: "/elsewhere/x.py", errors: 1, warnings: 0, first: { line: 1, msg: "e" } }, 0);
-    expect(d.hasErrorsIn("/proj")).toBe(false);
-    d.observe({ kind: "diagnostics", buf: 2, path: "/proj/src/main.py", errors: 1, warnings: 0, first: { line: 1, msg: "e" } }, 0);
-    expect(d.hasErrorsIn("/proj")).toBe(true);
-    d.observe({ kind: "diagnostics", buf: 2, path: "/proj/src/main.py", errors: 0, warnings: 0 }, 0);
-    expect(d.hasErrorsIn("/proj")).toBe(false);
+  it("isSyntaxError: syntax errors in the run's own output, never runtime or type errors (author 2026-10-21)", () => {
+    expect(isSyntaxError('  File "src/main.py", line 3\n    def f(\n         ^\nSyntaxError: \'(\' was never closed')).toBe(true);
+    expect(isSyntaxError("IndentationError: expected an indented block after function definition on line 1")).toBe(true);
+    expect(isSyntaxError("TabError: inconsistent use of tabs and spaces in indentation")).toBe(true);
+    expect(isSyntaxError("lua: error loading module 'main' from file 'src/main.lua':\n\tsrc/main.lua:4: ')' expected near 'end'")).toBe(true);
+    expect(isSyntaxError("lua: src/main.lua:2: unexpected symbol near '+'")).toBe(true);
+    expect(isSyntaxError("lua: src/main.lua:2: unfinished string near '\"hi'")).toBe(true);
+    expect(isSyntaxError("SyntaxError: Unexpected token '}'")).toBe(true);
+    expect(isSyntaxError("./main.go:5:2: syntax error: unexpected newline, expected comma or }")).toBe(true);
+    expect(isSyntaxError("error: expected one of `,`, `:`, or `}`, found `{`")).toBe(true);
+    expect(isSyntaxError("error: unexpected closing delimiter: `}`")).toBe(true);
+    expect(isSyntaxError("error: mismatched closing delimiter: `)`")).toBe(true);
+    for (const t of ["NameError: name 'totl' is not defined", "TypeError: total is not a function", "lua: src/main.lua:4: attempt to call a nil value (global 'splt')", "error[E0308]: mismatched types", "split_amount(48, 3) gave 144, expected 16.0", "ValueError: could not convert string to float: 'abc'"])
+      expect(isSyntaxError(t), t).toBe(false);
   });
 });

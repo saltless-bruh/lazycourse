@@ -184,15 +184,21 @@ describe("task ticking (M8 D6)", () => {
 });
 
 describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
-  it("a failing run while the file shows an error is a typo run: the error episode stays, no attempt, no nudge (spec 2026-10-21 §5)", async () => {
+  it("a run whose own output is a syntax error is a typo run: no attempt, no nudge, even with no editor mark (author 2026-10-21)", async () => {
+    const b = await linked();
+    await runPayload(1, '  File "a.py", line 1\n    x = (\n        ^\nSyntaxError: \'(\' was never closed');
+    await until(() => /syntax error/.test(b.widgets["tutor"]?.[1] ?? ""));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(b.sent).toEqual([]);
+    expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
+  }, 20000);
+  it("an error marked in the editor no longer makes a runtime error a typo run (author 2026-10-21)", async () => {
     const b = await linked();
     await setError("boom");
     await until(() => b.sent.length === 1); // the error episode's own nudge
-    await runPayload(1, "Traceback (most recent call last):\n  File \"a.py\", line 1\nKeyError: 'x'");
-    await new Promise((r) => setTimeout(r, 400));
-    expect(b.sent).toHaveLength(1);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error", msg: "boom" }, attempts: 0 });
-    expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
+    await runPayload(1, "NameError: name 'totl' is not defined");
+    await until(() => (episodes(b.entries).at(-1) as { attempts?: number; trigger: { kind: string } }).trigger.kind === "run");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "NameError: name 'totl' is not defined" });
   }, 20000);
 
   it("a passing run closes the run episode; an editor error does not replace it", async () => {
@@ -232,13 +238,12 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2);
     expect(b.sent).toHaveLength(2);
-    await setError("invalid syntax");
-    await until(() => /error: invalid syntax/.test(b.widgets["tutor"]?.[1] ?? "") || /stuck/.test(b.widgets["tutor"]?.[1] ?? ""));
     edit("x = (\n");
+    const runs = b.entries.filter((e) => e.type === "tutor_signal").length;
     await runPayload(1, "SyntaxError: invalid syntax");
-    await until(() => b.widgets["tutor"]?.[1] === "stuck: run failed (exit 1): python3 a.py" || /fix the error marked/.test(b.widgets["tutor"]?.[1] ?? ""));
+    await until(() => b.entries.filter((e) => e.type === "tutor_signal").length > runs);
     await new Promise((r) => setTimeout(r, 300));
-    expect(attempts(b)).toBe(2); // a typo run: LazyVim already shows it
+    expect(attempts(b)).toBe(2); // a typo run: the run's own output is a syntax error
     expect(b.sent).toHaveLength(2);
   }, 30000);
   it("a run that fails on a new spot starts over on a new episode", async () => {
@@ -259,8 +264,8 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
     await runPayload(1, "split_amount(48, 3) gave 144.0, expected 16.0");
     await until(() => attempts(b) === 2);
     edit("x = (\n");
-    await runPayload(1, "lua: src/main.lua:4: ')' expected near 'end'");
-    await until(() => (episodes(b.entries).at(-1) as { spot?: string }).spot?.includes("expected near") === true);
+    await runPayload(1, "lua: src/main.lua:4: attempt to call a nil value (global 'splt')");
+    await until(() => (episodes(b.entries).at(-1) as { spot?: string }).spot?.includes("nil value") === true);
     expect(attempts(b)).toBe(1);
     edit("x = 5\n");
     await runPayload(1, "split_amount(10, 4) gave 2, expected 2.5");
