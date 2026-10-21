@@ -4,7 +4,7 @@
 // one check cannot hide the others.
 import { readFileSync, realpathSync } from "node:fs";
 import { LANGS } from "./knowledge/versions.js";
-import { SANDBOX_MISSING, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
+import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
 import type { Check } from "./checks.js";
 
@@ -17,13 +17,11 @@ export const PRINTED_TOO_MUCH = "printed too much (an endless loop?)";
 
 const CHECK_LIMIT_SEC = 20;
 const MARK = "\x1eTUTOR\t";
-// Final review C1: pi.exec keeps a command's whole output in memory, and a loop that prints forever crashed Pi
-// at ~700 MB. Output is cut inside the sandbox; a program that reaches the cap stops on its next write.
+// Final review C1: a check's output is cut inside the sandbox (cappedArgv).
 const OUT_CAP = 65536;
 const ERR_CAP = 8192;
-const CAPPED = `{ { { "$@" </dev/null; echo $? >&4; } | head -c ${OUT_CAP}; } 2>&1 >&3 | head -c ${ERR_CAP} >&2; } 3>&1 4>/tmp/.tutor-code; c=$(cat /tmp/.tutor-code 2>/dev/null); exit \${c:-1}`;
-const capped = (argv: string[]) => ["sh", "-c", CAPPED, "sh", ...argv];
-const flooded = (stdout: string) => Buffer.byteLength(stdout) >= OUT_CAP;
+const capped = (argv: string[]) => cappedArgv(argv, OUT_CAP, ERR_CAP);
+const flooded = (stdout: string) => reachedCap(stdout, OUT_CAP);
 const SOURCE_EXT: Record<string, RegExp> = {
   python: /\.py$/, lua: /\.lua$/, javascript: /\.(m?js|cjs)$/, typescript: /\.(ts|mts)$/, go: /\.go$/, rust: /\.rs$/,
 };
@@ -189,7 +187,7 @@ interface Sandboxed { run(argv: string[], timeoutMs: number): Promise<{ stdout: 
 async function sandboxFor(exec: RunExec, root: string, language: string, tools: string[], host: SandboxHost): Promise<Sandboxed | { missing: string }> {
   let real = root;
   try { real = realpathSync(root); } catch { /* bwrap cannot mount it: the probe reports it */ }
-  const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", "sh", "head", "cat"], host), host);
+  const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", ...CAP_TOOLS], host), host);
   if ((await exec("bwrap", [...prefix, "true"], { cwd: real, timeout: 10_000 })).code !== 0) return { missing: SANDBOX_MISSING };
   const run = (argv: string[], timeout: number) => exec("bwrap", [...prefix, ...argv], { cwd: real, timeout });
   const limited = (await run(["timeout", "--version"], 10_000)).code === 0;

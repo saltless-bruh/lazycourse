@@ -10,6 +10,19 @@ export interface SandboxHost { env: NodeJS.ProcessEnv; home: string; cacheDir: s
 export const BWRAP_PROBE: [string, string[]] = ["bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--die-with-parent", "true"]];
 export const SANDBOX_MISSING = "exam tests run in a sandbox and bubblewrap (bwrap) cannot start here: install it (Arch: pacman -S bubblewrap) or run /tutor-exam sandbox off";
 
+/**
+ * `argv` with stdin closed and stdout/stderr cut at the caps, keeping the command's exit code (phase 2 final
+ * review C1: pi.exec keeps a command's whole output in memory, and a loop that printed forever crashed Pi at
+ * ~700 MB). A program that reaches a cap stops on its next write. The tools are sh, head, cat, mktemp and rm.
+ */
+export function cappedArgv(argv: string[], outCap: number, errCap: number): string[] {
+  const script = `f=$(mktemp) || exit 125; { { { "$@" </dev/null; echo $? >&4; } | head -c ${outCap}; } 2>&1 >&3 | head -c ${errCap} >&2; } 3>&1 4>"$f"; c=$(cat "$f"); rm -f "$f"; exit \${c:-1}`;
+  return ["sh", "-c", script, "sh", ...argv];
+}
+export const CAP_TOOLS = ["sh", "head", "cat", "mktemp", "rm"];
+/** Whether a capped stream was cut. */
+export const reachedCap = (text: string, cap: number) => Buffer.byteLength(text) >= cap;
+
 // Final review C1: all of /run, not only /run/user (docker.sock, the system bus, varlink sockets).
 const HIDDEN = ["/home", "/tmp", "/var/tmp", "/run"];
 // Final review I3: mounted drives and served data, hidden when the folder exists (tmpfs needs a mount point).

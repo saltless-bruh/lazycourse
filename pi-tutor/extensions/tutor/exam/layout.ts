@@ -1,12 +1,15 @@
 // Exam folders (spec 2026-10-13 §6, M8 D2): each is a small project of its own, so its tests run
 // inside any parent project. The model writes the stub and the tests; the rest is ours.
 import { realpathSync } from "node:fs";
-import { SANDBOX_MISSING, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
+import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
 
 export type RunExec = (command: string, args: string[], options: { cwd: string; timeout: number }) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>;
 /** `version`: a cheap command that fails when the toolchain is not installed (final review I1: pi.exec never rejects). */
 export interface Layout { stub: string; tests: string; extras: [string, string][]; command: [string, string[]]; version: [string, string[]]; broken(out: string): boolean; naming: string }
 export const EXAM_TIMEOUT_MS = 120_000;
+/** Phase 2 final review C1: test output is cut at 1 MiB per stream, enough for long compiler errors. */
+const EXAM_OUT_CAP = 1 << 20;
+export const EXAM_PRINTED_TOO_MUCH = "the example tests printed too much and were stopped (an endless loop printing?)";
 
 /** Lua has no standard test library: a fixed harness around the model's check(...) lines. */
 const LUA_HEAD = `package.path = "./?.lua;" .. package.path
@@ -89,7 +92,7 @@ export async function runExamTests(exec: RunExec, language: string, dir: string,
   // Review Focus #5: mount and chdir the real folder, not a symlink to it.
   let real = dir;
   try { real = realpathSync(dir); } catch { /* a missing folder: bwrap cannot mount it, so the check below reports it */ }
-  const prefix = sb ? sandboxArgv(real, language, toolBinds([l.version[0], l.command[0], "timeout"], sb), sb) : null;
+  const prefix = sb ? sandboxArgv(real, language, toolBinds([l.version[0], l.command[0], "timeout", ...CAP_TOOLS], sb), sb) : null;
   // Plan 2026-10-16 S2: no usable bwrap means no run at all, never a silent run outside the sandbox.
   // Final review M4: the check uses the run's own mounts (overlay included), so a mount it cannot make is caught here.
   if (prefix && (await exec("bwrap", [...prefix, "true"], { cwd: dir, timeout: 10_000 })).code !== 0) {
@@ -104,10 +107,14 @@ export async function runExamTests(exec: RunExec, language: string, dir: string,
     return { code: tool.code, out: missing, killed: false, broken: false, missing };
   }
   const group = (await run("timeout", ["--version"], 10_000)).code === 0;
+  const [c, ...a] = cappedArgv([l.command[0], ...l.command[1]], EXAM_OUT_CAP, EXAM_OUT_CAP);
   const r = group
-    ? await run("timeout", ["-k", "5", String(limitSec), l.command[0], ...l.command[1]], (limitSec + 15) * 1000)
-    : await run(l.command[0], l.command[1], limitSec * 1000);
+    ? await run("timeout", ["-k", "5", String(limitSec), c, ...a], (limitSec + 15) * 1000)
+    : await run(c, a, limitSec * 1000);
   const killed = r.killed || (group && (r.code === 124 || r.code === 137));
   const out = `${r.stdout}\n${r.stderr}`.trim();
+  if (!killed && (reachedCap(r.stdout, EXAM_OUT_CAP) || reachedCap(r.stderr, EXAM_OUT_CAP))) {
+    return { code: r.code || 1, out: `${out}\n${EXAM_PRINTED_TOO_MUCH}`, killed: false, broken: false };
+  }
   return { code: r.code, out, killed, broken: !killed && r.code !== 0 && l.broken(out) };
 }

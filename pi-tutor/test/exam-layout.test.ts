@@ -5,7 +5,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { layout, examFiles, runExamTests, EXAM_TIMEOUT_MS } from "../extensions/tutor/exam/layout.js";
+import { layout, examFiles, runExamTests, EXAM_TIMEOUT_MS, EXAM_PRINTED_TOO_MUCH, type RunExec } from "../extensions/tutor/exam/layout.js";
 import { realExec } from "./fake-pi.js";
 import { SANDBOX_MISSING, type SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 
@@ -59,7 +59,24 @@ function writeAll(dir: string, files: [string, string][]) {
   for (const [rel, text] of files) { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); }
 }
 
+// Final review C1 (phase 2), exam half: pi.exec keeps all output in memory, so a printing loop must be cut before it.
+const FLOOD = "def count_words(text):\n    while True:\n        print('counting', text)\n";
+function counting() {
+  const seen = { max: 0 };
+  const exec: RunExec = async (c, a, o) => { const r = await realExec(c, a, o); seen.max = Math.max(seen.max, r.stdout.length + r.stderr.length); return r; };
+  return { exec, seen };
+}
+
 describe("exam layouts run with the real toolchains (M8 D2, D5)", () => {
+  it.skipIf(!has("python3"))("a solution that prints forever is stopped and says so; Pi never receives the flood (phase 2 final review)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "exam-flood-"));
+    writeAll(dir, examFiles("python", FLOOD, CASES.python.tests));
+    const { exec, seen } = counting();
+    const r = await runExamTests(exec, "python", dir, { limitSec: 20 });
+    expect(r).toMatchObject({ killed: false, broken: false });
+    expect(r.out.endsWith(EXAM_PRINTED_TOO_MUCH)).toBe(true);
+    expect(seen.max).toBeLessThan(3_000_000);
+  }, 60_000);
   for (const [lang, c] of Object.entries(CASES)) {
     it.skipIf(!has(c.tool))(`${lang}: the stub fails cleanly, broken tests are caught, a solution passes`, async () => {
       const lay = layout(lang)!;
@@ -114,6 +131,15 @@ const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "
 const realHost = (): SandboxHost => ({ env: process.env, home: homedir(), cacheDir: mkdtempSync(join(tmpdir(), "sbx-cache-")) });
 
 describe("exam tests inside the sandbox (plan 2026-10-16)", () => {
+  it.skipIf(!bwrapReady || !has("python3"))("a solution that prints forever is stopped inside the sandbox too (phase 2 final review)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbx-flood-"));
+    writeAll(dir, examFiles("python", FLOOD, CASES.python.tests));
+    const { exec, seen } = counting();
+    const r = await runExamTests(exec, "python", dir, { limitSec: 20, sandbox: realHost() });
+    expect(r).toMatchObject({ killed: false, broken: false });
+    expect(r.out.endsWith(EXAM_PRINTED_TOO_MUCH)).toBe(true);
+    expect(seen.max).toBeLessThan(3_000_000);
+  }, 60_000);
   for (const [lang, c] of Object.entries(CASES)) {
     it.skipIf(!bwrapReady || !has(c.tool))(`${lang}: stub fails cleanly and a solution passes inside the sandbox`, async () => {
       const dir = mkdtempSync(join(tmpdir(), `sbx-${lang}-`));
