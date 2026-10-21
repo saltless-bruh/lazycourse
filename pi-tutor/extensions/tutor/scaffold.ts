@@ -3,6 +3,7 @@ import { dirname, extname, join, normalize, isAbsolute } from "node:path";
 import type { Band } from "./policy.js";
 import { LANGS } from "./knowledge/versions.js";
 import type { Suggestion } from "./suggest.js";
+import { luarcJson } from "./luarc.js";
 
 // Scaffold writer (spec §6): one structured call → spec/{design,tasks,requirements}.md, plus local templates.
 export interface ScaffoldSpec { design_md: string; tasks_md: string; requirements_md: string; entry_file: string; run_cmd: string }
@@ -88,7 +89,7 @@ export function readme(s: ScaffoldSpec, m: ScaffoldMeta): string {
   return `---\nrun: ${s.run_cmd}\n${test ? `test: ${test}\n` : ""}language: ${m.language}\n---\n# ${m.title}\n\n${m.summary}\n\n` +
     `## Run\n\n\`${s.run_cmd}\`\n\n## Working with the tutor\n\n` +
     `- Run it with \`:TutorRun\`${test ? ", test it with `:TutorRun test`" : ""}.\n` +
-    `- The plan is in \`spec/\`: start with \`spec/tasks.md\`, tick tasks as you finish them.\n` +
+    `- The plan is in \`spec/\`: start with \`spec/tasks.md\`; when a task works, \`:TutorDone\` runs its checks and ticks it (\`spec/checks.md\` lists them).\n` +
     `- Open the tutor with \`:Tutor\`; ask it anything, it answers with hints, not code.\n` +
     `- Change how much help you get with \`:TutorLevel <0-100>\`.\n`;
 }
@@ -105,7 +106,7 @@ export function agents(m: ScaffoldMeta): string {
  * `existing`: the folder /tutor-start already made (Q23): README.md and AGENTS.md are replaced, everything
  * else the learner has there (learn/) is kept, and a spec or source file already present is never overwritten.
  */
-export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta, opts: { existing?: boolean } = {}): string[] {
+export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta, opts: { existing?: boolean; luaRuntime?: string | null } = {}): string[] {
   if (!opts.existing && !isEmptyOrMissing(dir)) throw new Error(`${dir} is not empty`);
   const replace = new Set(opts.existing ? ["README.md", "AGENTS.md"] : []);
   const entry = normalize(s.entry_file);
@@ -118,12 +119,13 @@ export function writeScaffold(dir: string, s: ScaffoldSpec, meta: ScaffoldMeta, 
     ["spec/tasks.md", s.tasks_md],
     ["spec/requirements.md", s.requirements_md],
     [entry, `${commentPrefix(entry)} Start here: spec/tasks.md, task ${first}. You write the code; the tutor coaches.\n`],
+    ...(meta.language === "lua" && opts.luaRuntime ? [[".luarc.json", luarcJson(opts.luaRuntime)] as [string, string]] : []),
   ];
   const made: string[] = [];
   const madeDirs: string[] = [];
   // Final review C1/I3: into an existing folder, README.md and AGENTS.md are replaced last (a failed write
   // leaves them as they were), and a source file the learner already started is kept.
-  const order = opts.existing ? [...files.filter(([rel]) => !replace.has(rel) && !(rel === entry && existsSync(join(dir, rel)))), ...files.filter(([rel]) => replace.has(rel))] : files;
+  const order = opts.existing ? [...files.filter(([rel]) => !replace.has(rel) && !((rel === entry || rel === ".luarc.json") && existsSync(join(dir, rel)))), ...files.filter(([rel]) => replace.has(rel))] : files;
   try {
     for (const [rel, text] of order) {
       const abs = join(dir, rel);

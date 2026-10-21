@@ -23,7 +23,7 @@ which value was not what they
 expected there?
 ```
 
-At rung 1 ask which line of the trace says what went wrong. At rung 2 name the error type and what it means. At rung 3 point at their frame (`path:line`).
+As a hint, ask which line of the trace says what went wrong. To say why, name the error type and what it means, then point at their frame (`path:line`).
 
 ## Python
 `Traceback (most recent call last)`: the **last line** is the error (`KeyError: 'name'`); the frame just above it is where it happened. Frames from `site-packages` or `/lib/python3` are not theirs.

@@ -30,7 +30,43 @@ export function traceOf(stdout: string, stderr: string): string {
   return `stdout:\n${tail(out, TRACE_LINES / 2, half)}\nstderr:\n${tail(err, TRACE_LINES / 2, half)}`;
 }
 
+/** What a run's attempts are on (spec 2026-10-21 §5): its error line, numbers blurred so a new value is the same spot. */
+export function spotOf(trace: string): string {
+  return spotLine(trace).replace(/-?\d+(?:\.\d+)?/g, "#").slice(0, 120);
+}
+
+/** The error line spotOf keys on, as the run printed it (what a learner-facing fallback quotes). */
+export function spotLine(trace: string): string {
+  // Stack frames name functions, not what went wrong: Lua's "[C]: in function 'error'", Node's "at …", Go's
+  // goroutine dump, Python's "File …" lines.
+  // Lua frames also read "check.lua:6: in local 'check'" or "in global 'require'".
+  const frame = /^(?:at |\[C\]|stack traceback|Traceback \(most recent call last\)|goroutine |File "|# \S|note: run with|\S+:\d+: in |.*\bin (?:function|main chunk|\?)|\/.*:\d+ \+0x)/;
+  const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !frame.test(l));
+  // A message without an error word (Lua's error(msg, 0)) comes first, before its frames.
+  const i = lines.map((l) => /error|exception|panic|assert|failed/i.test(l)).lastIndexOf(true);
+  let line = i >= 0 ? lines[i] : lines[0] ?? "";
+  // Final review I3: a bare exception name (Python's message-less assert) says what failed only with the code line
+  // printed above it; a Rust "panicked at …:" header has its message on the line below.
+  if (i >= 0 && /^\w+:?$/.test(line) && i > 0) line = `${line} at ${lines[i - 1]}`;
+  else if (i >= 0 && /panicked at .*:$/.test(line) && lines[i + 1]) line = `${line} ${lines[i + 1]}`;
+  return line.slice(0, 200);
+}
+
 interface ErrorWatch { line: number; msg: string; since: number; fired: boolean }
+
+/**
+ * Author 2026-10-21: a failed run is a typo run when its own output is a syntax error (Python, Lua, JS/TS,
+ * Go, Rust). Runtime and type errors are not: they are graded tries.
+ */
+const SYNTAX = [
+  /^\s*(SyntaxError|IndentationError|TabError)\b/m,
+  /'[^']*' expected near |unexpected symbol near |unfinished (string|long string|long comment) near /,
+  /\bsyntax error\b/,
+  /^error: (expected|unexpected|mismatched closing delimiter|this file contains an unclosed delimiter)\b/m,
+];
+export function isSyntaxError(trace: string): boolean {
+  return SYNTAX.some((re) => re.test(trace));
+}
 
 export class StuckDetector {
   /** First error per file. Identity is the message; the line may move. */

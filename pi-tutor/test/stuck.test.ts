@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { StuckDetector, traceOf, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
+import { StuckDetector, traceOf, spotOf, spotLine, isSyntaxError, TRACE_LINES, TRACE_CHARS } from "../extensions/tutor/stuck.js";
 import type { TutorPayload } from "../extensions/tutor/nvim.js";
 
 const diag = (path: string, errors: number, msg = "boom", line = 1): TutorPayload =>
@@ -144,5 +144,49 @@ describe("final review I2: test runners print the failure on stdout", () => {
     expect(t).toContain("stderr:\n");
     expect(t).toContain("error: test failed");
     expect(t.length).toBeLessThanOrEqual(TRACE_CHARS + 20);
+  });
+});
+
+describe("attempt spots (spec 2026-10-21 §5)", () => {
+  it("spotOf keys a run by its error line", () => {
+    expect(spotOf('Traceback…\n  File "src/main.py", line 12, in split_amount\nZeroDivisionError: division by zero\n')).toBe("ZeroDivisionError: division by zero");
+    expect(spotOf("AssertionError: expected 16.0, got 144 at line 3")).toBe("AssertionError: expected #, got # at line #");
+    // A wrong value that changes between tries (144, then 144.0, then -2.5) is still the same spot.
+    expect(spotOf("AssertionError: split_amount(48, 3) gave 144.0, expected 16.0")).toBe(spotOf("AssertionError: split_amount(48, 3) gave 144, expected 16.0"));
+    expect(spotOf("AssertionError: gave -2.5")).toBe(spotOf("AssertionError: gave 7"));
+    // Live check 2026-10-21: Lua's error(msg, 0) message has no "error" word, and frames say "in local", "in global".
+    expect(spotOf("lua: split_amount(48, 3) gave 144, expected 16.0\nstack traceback:\n\t[C]: in function 'error'\n\tcheck.lua:6: in local 'check'\n\tcheck.lua:9: in main chunk\n\t[C]: in ?")).toBe("lua: split_amount(#, #) gave #, expected #");
+    expect(spotOf("lua: error loading module 'main' from file 'src/main.lua':\n\tsrc/main.lua:5: ')' expected near 'end'\nstack traceback:\n\t[C]: in ?\n\t[C]: in global 'require'\n\tcheck.lua:2: in main chunk")).toMatch(/^lua: error loading module|'\)' expected/);
+    // Stack frames after the message (Lua, Node, Go) are not the spot.
+    expect(spotOf("lua: check.lua:5: split_amount(48, 3) gave 144, expected 16.0\nstack traceback:\n\t[C]: in function 'error'\n\tcheck.lua:5: in main chunk\n\t[C]: in ?")).toBe("lua: check.lua:#: split_amount(#, #) gave #, expected #");
+    expect(spotOf("TypeError: total is not a function\n    at split (/p/src/main.js:3:10)\n    at Object.<anonymous> (/p/check.js:2:1)")).toBe("TypeError: total is not a function");
+    expect(spotOf("panic: runtime error: integer divide by zero\n\ngoroutine 1 [running]:\nmain.split(...)\n\t/p/main.go:5 +0x1d")).toBe("panic: runtime error: integer divide by zero");
+    expect(spotOf("all good\nbut nothing matched here")).toBe("all good"); // no error word: the first line (Lua prints its message first)
+    expect(spotOf("x".repeat(300) + " error")).toHaveLength(120);
+  });
+  it("final review I3: a bare exception name or a panic header keeps the line that says what failed", () => {
+    const py = (code: string) => `Traceback (most recent call last):\n  File "check.py", line 3, in <module>\n    ${code}\nAssertionError`;
+    expect(spotOf(py("assert split_amount(48, 3) == 16.0"))).not.toBe(spotOf(py("assert tip_rate(True) == 0.2")));
+    const rust = (msg: string) => `thread 'main' panicked at src/main.rs:4:5:\n${msg}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
+    expect(spotOf(rust("attempt to divide by zero"))).not.toBe(spotOf(rust("index out of bounds: the len is 3 but the index is 7")));
+    expect(spotOf("# example.com/bill\n./main.go:5:2: undefined: total")).toBe("./main.go:#:#: undefined: total");
+  });
+  it("spotLine is the same line as spotOf, as printed", () => {
+    expect(spotLine("lua: split_amount(10, 4) gave 2, expected 2.5\nstack traceback:\n\t[C]: in ?")).toBe("lua: split_amount(10, 4) gave 2, expected 2.5");
+  });
+  it("isSyntaxError: syntax errors in the run's own output, never runtime or type errors (author 2026-10-21)", () => {
+    expect(isSyntaxError('  File "src/main.py", line 3\n    def f(\n         ^\nSyntaxError: \'(\' was never closed')).toBe(true);
+    expect(isSyntaxError("IndentationError: expected an indented block after function definition on line 1")).toBe(true);
+    expect(isSyntaxError("TabError: inconsistent use of tabs and spaces in indentation")).toBe(true);
+    expect(isSyntaxError("lua: error loading module 'main' from file 'src/main.lua':\n\tsrc/main.lua:4: ')' expected near 'end'")).toBe(true);
+    expect(isSyntaxError("lua: src/main.lua:2: unexpected symbol near '+'")).toBe(true);
+    expect(isSyntaxError("lua: src/main.lua:2: unfinished string near '\"hi'")).toBe(true);
+    expect(isSyntaxError("SyntaxError: Unexpected token '}'")).toBe(true);
+    expect(isSyntaxError("./main.go:5:2: syntax error: unexpected newline, expected comma or }")).toBe(true);
+    expect(isSyntaxError("error: expected one of `,`, `:`, or `}`, found `{`")).toBe(true);
+    expect(isSyntaxError("error: unexpected closing delimiter: `}`")).toBe(true);
+    expect(isSyntaxError("error: mismatched closing delimiter: `)`")).toBe(true);
+    for (const t of ["NameError: name 'totl' is not defined", "TypeError: total is not a function", "lua: src/main.lua:4: attempt to call a nil value (global 'splt')", "error[E0308]: mismatched types", "split_amount(48, 3) gave 144, expected 16.0", "ValueError: could not convert string to float: 'abc'"])
+      expect(isSyntaxError(t), t).toBe(false);
   });
 });

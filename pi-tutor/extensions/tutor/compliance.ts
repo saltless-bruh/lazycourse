@@ -1,7 +1,8 @@
 import { stripIntake } from "./onboard.js";
 import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
-import { RUNG_NAMES } from "./ladder.js";
+import type { TurnStep } from "./ladder.js";
+import { turnInstruction, TURN_LIMITS } from "./turns.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -55,15 +56,14 @@ const INTERNALS = /(INDEX\.md|SKILL\.md|\.devdocs\.json|tutor-judgment|step_done
  */
 const QUOTES = new Set(["markdown", "md"]);
 
-function codeAllowed(o: { band: Band; rung: number | null; noCode: boolean }, lines: number): boolean {
+function codeAllowed(o: { band: Band; step: TurnStep | null; noCode: boolean }, lines: number): boolean {
   if (o.noCode) return false;
-  const rung = o.rung ?? 1;
-  if (rung >= 4) return true;
+  if (o.step === "fix") return true;
   return o.band === "beginner" && lines <= 3;
 }
 
 /** `cols`: the learner's real diagram width (diagramCols); prompts still ask for 40, the check allows what fits. */
-export function checkReply(text: string, o: { band: Band; rung: number | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
+export function checkReply(text: string, o: { band: Band; step: TurnStep | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
   const issues = new Set<Issue>();
   if (!o.judged) issues.add("missing-judgment");
   for (const m of text.matchAll(FENCES)) {
@@ -87,12 +87,16 @@ export function checkReply(text: string, o: { band: Band; rung: number | null; j
   return [...issues];
 }
 
-const FIX: Record<Issue, (cols: number) => string> = {
+const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "missing-judgment": () => "it did not end with the fenced tutor-judgment block (plain text, not a tool call)",
   "code-above-rung": () => "it showed code the current rung does not allow; point and explain instead",
   "wide-diagram": (cols) => `a diagram line was wider than the learner's pane (${cols} characters); stack it vertically`,
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
   "no-summary": () => "a long reply had no **In short** line",
+  "own-code": () => "it showed the learner's own code (their names) before this turn allows the fix; teach on an unrelated example or point at the place",
+  "too-long": () => "it was longer than this turn allows",
+  "no-question": () => "this turn must ask a question, and it asked none",
+  "machinery": () => "it talked about the tutor's machinery or about \"the learner\"; talk to them directly about the code",
 };
 
 // Rewrites for the machinery checkReply calls "internals" (golden leaks 2026-10-13: "At rung 1, I'll
@@ -123,6 +127,8 @@ function scrubLine(line: string): string {
     .replace(/,\s*rung \d(?=\))/gi, "")
     .replace(/\(rung \d,\s*/gi, "(")
     .replace(RUNG_LEAD, (_m, lead: string, next: string) => lead + next.toUpperCase())
+    // Spike run 2 (2026-10-21): "at hint rung 3/5 (pointer)" lost only "rung 3" and became "this stage/5 (pointer)".
+    .replace(/\b(at|on) (?:hint )?rung \d(?:\/\d)?(?: \([\w-]+\))?/gi, (_m, p: string) => `${p} this stage`)
     .replace(/\b(at|on) rung \d\b(?![-\d])/gi, (_m, p: string) => `${p} this stage`);
   return l === line ? line : l.replace(/(\S) {2,}(?=\S)/g, "$1 ");
 }
@@ -154,21 +160,125 @@ export function scrubInternals(raw: string): string {
 
 /**
  * Last line of every turn's hidden context. Golden round 1 (nemotron): 3 of 5 replies dropped the
- * judgment block that the system prompt asks for; round 2: a rung 2 reply stated the fix in words.
+ * judgment block that the system prompt asks for; round 2: a hint-level reply stated the fix in words.
  * A reminder next to the learner's message is read last.
  */
-export function replyReminder(rung: number | null, recipe = false): string {
+export function replyReminder(step: TurnStep | null, recipe = false): string {
   const hold = recipe
     ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
-    : rung !== null && rung < 5 ? ` At rung ${rung} (${RUNG_NAMES[rung - 1]}): do not state the fix, in code or in words.` : "";
-  return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}`;
+    : step !== null && step !== "fix" ? " Do not state the fix, in code or in words." : "";
+  const turn = step !== null ? ` This turn: ${turnInstruction(step)}` : "";
+  // Final review I5: a hint or a question is a few plain sentences; the five parts would fail its length check.
+  const shape = step === "hint" || step === "ask"
+    ? "Reply in plain sentences, no bold parts,"
+    : "Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters,";
+  return `[tutor-reply] ${shape} and end with the \`\`\`tutor-judgment block.${hold}${turn}`;
 }
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
-export function formatCheck(issues: Issue[], cols = DIAGRAM_COLS): string {
+export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS): string {
   // Live check: worded as "your last reply", the model blamed the learner's diagram for its own.
   return [
     "[tutor-check] Your own previous reply (the tutor's, not the learner's) broke these rules. Follow them in this reply, and do not mention this note to the learner:",
     ...issues.map((i) => `- ${FIX[i](cols)}`),
   ].join("\n");
+}
+
+// ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
+
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery";
+
+/** Parameter-ish names every example uses; never the learner's own. */
+const COMMON = new Set(["self", "this", "cls", "args", "kwargs", "main"]);
+const SIGNATURE = /([A-Za-z_][\w.:]*)\s*\(([^)]*)\)/g;
+const DEFINITION = /\b(?:def|function|fn|func)\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w.:]*)\s*\(([^)]*)\)/g;
+
+function addSignature(out: Set<string>, name: string, params: string) {
+  const add = (n: string) => { if (n.length >= 3 && !COMMON.has(n)) out.add(n); };
+  add(name.split(/[.:]/).pop() ?? name);
+  for (const p of params.split(",")) {
+    // `total: f64`, `height=2`, `*args`, `mut x`, Go's `a, b int` (the name comes first in each part).
+    const m = p.replace(/^\s*(?:mut\s+|&|\*+)*/, "").match(/^\s*([A-Za-z_]\w*)/);
+    if (m) add(m[1]);
+  }
+}
+
+/** The learner's own names: task signatures in spec/tasks.md backticks and the definitions in their sources. */
+export function ownNames(i: { tasksMd: string | null; sources: string[] }): Set<string> {
+  const out = new Set<string>();
+  for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) for (const m of span[1].matchAll(SIGNATURE)) addSignature(out, m[1], m[2]);
+  // Final review I6: from their files only function names; every parameter (`value`, `items`) flagged examples.
+  for (const src of i.sources) for (const m of src.matchAll(DEFINITION)) addSignature(out, m[1], "");
+  return out;
+}
+
+const DIAGRAM_ONLY = /^[\s^|│┃─━┌┐└┘├┤┬┴┼▶◀►◄→←↑↓<>v+*#=~.:'"-]*$/;
+const TOKENS = /[A-Za-z_]\w*|\d+(?:\.\d+)?|[^\sA-Za-z_\d]/g;
+
+/** Code that uses one of the learner's names beyond naming it (`split_amount` or `split_amount()` alone is a pointer). */
+function usesOwnName(code: string, names: Set<string>): boolean {
+  const tokens = code.match(TOKENS) ?? [];
+  if (!tokens.some((t) => names.has(t))) return false;
+  const rest = tokens.filter((t) => !names.has(t) && t !== "(" && t !== ")");
+  return rest.length > 0 || tokens.filter((t) => names.has(t)).length > 1;
+}
+
+/** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
+ *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[] }): TurnIssue[] {
+  const limits = TURN_LIMITS[o.step];
+  const issues = new Set<TurnIssue>();
+  // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
+  const text = hideJudgment(raw);
+  const quoted = new Set(o.sourceLines.map((l) => l.trim()).filter(Boolean));
+  // Spec 2026-10-21 §7: a line of the hidden reference solution (8+ characters) is the answer, named or not.
+  const answer = new Set((o.referenceLines ?? []).map((l) => l.trim()).filter((l) => l.length >= 8));
+  const leaks = (line: string) => {
+    // Final review I6: a quote may carry the editor's line number ("  3| …"); a caret line is an annotation.
+    const t = line.replace(/^\s*\d+\s*[|:]\s?/, "").trim();
+    return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && !/^\^/.test(t) && (usesOwnName(t, o.names) || answer.has(t));
+  };
+  let quotedProse = "";
+  for (const m of text.matchAll(FENCES)) {
+    const tag = m[2].trim().toLowerCase();
+    if (tag === "tutor-judgment") continue;
+    // Final review I1: a ```markdown fence is checked too (style.md asks for quotes in one); its text also counts as prose.
+    if (QUOTES.has(tag)) quotedProse += `\n${m[3]}`;
+    if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
+  }
+  const prose = text.replace(FENCES, "") + quotedProse;
+  // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
+  const seen = [...quoted];
+  const spanLeaks = (span: string) => leaks(span) && !seen.some((l) => l.includes(span.trim()));
+  if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
+  const plain = prose.replace(/`[^`\n]*`/g, "x");
+  const sentences = plain.split(/[.!?]+(?=\s|$)/).filter((x) => /\w/.test(x)).length;
+  if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");
+  if (limits.question && !plain.includes("?")) issues.add("no-question");
+  if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
+  return [...issues];
+}
+
+/** C: a weak model's planning before the reply's first heading is folded away; a reply with no heading stays. */
+export function foldPreamble(text: string): string {
+  const m = /^\*\*[^*\n]+\*\*\s*:/m.exec(text);
+  if (!m || m.index === 0) return text;
+  const before = text.slice(0, m.index);
+  return /`{3}|~{3}/.test(before) ? text : text.slice(m.index);
+}
+
+/** D: the judgment block is for the extension only; the screen never shows it (the stored reply keeps it).
+ *  Final review C1: only a fence whose OWN body holds "judgment" goes; a diagram fence before it stays. */
+export function hideJudgment(md: string): string {
+  let out = "", last = 0;
+  for (const m of md.matchAll(FENCES)) {
+    const tag = m[2].trim().toLowerCase();
+    if (tag === "tutor-judgment" || ((tag === "" || tag === "json") && m[3].includes('"judgment"'))) {
+      out += md.slice(last, m.index);
+      last = m.index + m[0].length;
+    }
+  }
+  out += md.slice(last);
+  out = out.replace(/\{[^{}]*"judgment"[^{}]*\}\s*$/, "");
+  return out === md ? md : out.trimEnd();
 }

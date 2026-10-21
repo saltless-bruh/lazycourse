@@ -8,7 +8,9 @@ export interface TutorState {
   lesson?: string;
   /** Active role when it is not the default coding tutor (spec 2026-10-13 §3). */
   role?: string;
-  language?: string; level?: number; rung?: number; task?: string;
+  language?: string; level?: number; task?: string;
+  /** Failed graded tries on the current spot (spec 2026-10-21 §5); shown only when > 0. */
+  attempt?: number;
   state: string; connected: boolean;
   /** Was linked to Neovim and the link ended (the editor exited). */
   lost?: boolean;
@@ -35,11 +37,12 @@ export function renderWidget(s: TutorState): string[] {
   const parts: string[] = [];
   if (s.exam) parts.push(s.exam);
   if (s.lesson) parts.push(s.lesson);
+  // The try count leads what is left: a long lesson label clipped it in the phase 2 live check.
+  if (s.attempt) parts.push(`try ${s.attempt}`);
+  if (s.task) parts.push(s.task);
   if (s.role) parts.push(s.role);
   if (s.language) parts.push(s.language);
   if (s.level !== undefined) parts.push(`lvl ${s.level}`);
-  if (s.rung !== undefined) parts.push(`rung ${s.rung}`);
-  if (s.task) parts.push(s.task);
   const line1 = parts.length ? `tutor  ${parts.join(" · ")}` : "tutor";
   // Off Neovim the state and judgment still show; the prefix says why (M1b #2, M2 #10, M3 #23).
   // The state is clipped to the room the prefix and the judgment leave, so "· judged X" always shows (M6c I2).

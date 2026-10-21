@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols } from "../extensions/tutor/compliance.js";
+import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
+import type { TurnStep } from "../extensions/tutor/ladder.js";
+import { turnInstruction } from "../extensions/tutor/turns.js";
 
 const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ judgment, concept_tags: ["t"], task_done_ids: [], episode_closed: false, step_done });
 const fence = (tag: string, lines: string[]) => "```" + tag + "\n" + lines.join("\n") + "\n```";
 const JUDGED = "\n" + fence("tutor-judgment", ['{"judgment":"none"}']); // a fence opens on its own line
-const ok = { band: "intermediate" as const, rung: 2, judged: true, noCode: false };
+const ok = { band: "intermediate" as const, step: "why" as TurnStep | null, judged: true, noCode: false };
 
 describe("hasReasoning", () => {
   it("a bare question or a [tutor] nudge is not reasoning", () => {
@@ -41,17 +43,17 @@ describe("checkReply", () => {
   it("flags a diagram line wider than 40 columns, not a wide code line", () => {
     expect(checkReply(fence("", ["a".repeat(DIAGRAM_COLS + 1)]) + JUDGED, ok)).toContain("wide-diagram");
     expect(checkReply(fence("text", ["┌" + "─".repeat(DIAGRAM_COLS - 2) + "┐"]) + JUDGED, ok)).not.toContain("wide-diagram");
-    expect(checkReply(fence("python", ["x = " + "1".repeat(50)]) + JUDGED, { ...ok, rung: 5 })).not.toContain("wide-diagram");
+    expect(checkReply(fence("python", ["x = " + "1".repeat(50)]) + JUDGED, { ...ok, step: "fix" })).not.toContain("wide-diagram");
   });
-  it("code above the rung: none for pro or architect, ≤3 lines for a beginner below rung 4, any at 4-5", () => {
+  it("code before the fix step: none for pro or architect, ≤3 lines for a beginner, any at the fix", () => {
     const code3 = fence("python", ["a = 1", "b = 2", "c = 3"]) + JUDGED;
     const code4 = fence("python", ["a = 1", "b = 2", "c = 3", "d = 4"]) + JUDGED;
-    expect(checkReply(code3, { ...ok, band: "beginner", rung: 3 })).not.toContain("code-above-rung");
-    expect(checkReply(code4, { ...ok, band: "beginner", rung: 3 })).toContain("code-above-rung");
-    expect(checkReply(code3, { ...ok, rung: 3 })).toContain("code-above-rung");
-    expect(checkReply(code4, { ...ok, rung: 4 })).not.toContain("code-above-rung");
-    expect(checkReply(code3, { ...ok, band: "pro", rung: 4, noCode: true })).toContain("code-above-rung");
-    expect(checkReply(code3, { ...ok, rung: null, noCode: true })).toContain("code-above-rung");
+    expect(checkReply(code3, { ...ok, band: "beginner", step: "why" })).not.toContain("code-above-rung");
+    expect(checkReply(code4, { ...ok, band: "beginner", step: "why" })).toContain("code-above-rung");
+    expect(checkReply(code3, { ...ok, step: "why" })).toContain("code-above-rung");
+    expect(checkReply(code4, { ...ok, step: "fix" })).not.toContain("code-above-rung");
+    expect(checkReply(code3, { ...ok, band: "pro", step: "fix", noCode: true })).toContain("code-above-rung");
+    expect(checkReply(code3, { ...ok, step: null, noCode: true })).toContain("code-above-rung");
   });
   it("flags internals in prose (live: 'line 4597 in INDEX.md')", () => {
     expect(checkReply("See line 4597 in INDEX.md.\n" + JUDGED, ok)).toContain("internals");
@@ -68,7 +70,7 @@ describe("checkReply", () => {
 describe("checkReply after golden round 1 (nemotron, 2026-10-13)", () => {
   it("a markdown fence is a quote of a file, neither a diagram nor code", () => {
     const quote = fence("markdown", ["- [ ] P1.T1 Parse the command line into a Command"]) + JUDGED;
-    expect(checkReply(quote, { ...ok, rung: 2 })).toEqual([]);
+    expect(checkReply(quote, { ...ok, step: "why" })).toEqual([]);
     expect(checkReply(fence("md", ["x".repeat(60)]) + JUDGED, { ...ok, noCode: true })).toEqual([]);
   });
   it("step_done and the [workflow] / [tutor-check] lines are internals", () => {
@@ -213,10 +215,14 @@ describe("replyReminder", () => {
     expect(r).toContain("In short");
     expect(r).toContain("tutor-judgment");
   });
-  it("below rung 5 it names the rung and forbids stating the fix (golden round 2: fix leaked in words at rung 2)", () => {
-    expect(replyReminder(2)).toMatch(/rung 2 \(concept\): do not state the fix/);
-    expect(replyReminder(5)).not.toMatch(/do not state the fix/);
-    expect(replyReminder(null)).not.toMatch(/rung/);
+  it("before the fix step it forbids stating the fix (golden round 2: the fix leaked in words); never says rung", () => {
+    expect(replyReminder("why")).toMatch(/do not state the fix/i);
+    expect(replyReminder("fix")).not.toMatch(/do not state the fix/i);
+    for (const s of [null, "hint", "fix"] as const) expect(replyReminder(s)).not.toMatch(/rung/);
+  });
+  it("ends with this turn's instruction when there is a step (spec 2026-10-21 §6)", () => {
+    expect(replyReminder("why").endsWith(`This turn: ${turnInstruction("why")}`)).toBe(true);
+    expect(replyReminder(null)).not.toContain("This turn:");
   });
 });
 
@@ -231,24 +237,24 @@ describe("final review fixes", () => {
   });
   it("I3: a reply wrapped in a markdown fence is still checked, including code nested inside it", () => {
     const wrapped = ["```markdown", "**What's happening**: see INDEX.md", "```python", "a = 1", "```", "**In short**: x", "```", JUDGED].join("\n");
-    const issues = checkReply(wrapped, { ...ok, rung: 2 });
+    const issues = checkReply(wrapped, { ...ok, step: "why" });
     expect(issues).toContain("internals");
     expect(issues).toContain("code-above-rung");
     expect(checkReply(fence("markdown", ["- [ ] P1.T1 Parse the command line into a Command"]) + JUDGED, ok)).toEqual([]);
   });
   it("I3: an unclosed fence runs to the end of the reply", () => {
-    expect(checkReply("**In short**: x\n```python\na = 1\nb = 2", { ...ok, rung: 2 })).toContain("code-above-rung");
+    expect(checkReply("**In short**: x\n```python\na = 1\nb = 2", { ...ok, step: "why" })).toContain("code-above-rung");
   });
-  it("I2: the reminder keeps the hold during a workflow even at rung 5", () => {
-    expect(replyReminder(5, true)).toMatch(/do not state the fix/);
-    expect(replyReminder(5, false)).not.toMatch(/do not state the fix/);
+  it("I2: the reminder keeps the hold during a workflow even at the fix step", () => {
+    expect(replyReminder("fix", true)).toMatch(/do not state the fix/);
+    expect(replyReminder("fix", false)).not.toMatch(/do not state the fix/i);
   });
 });
 
 describe("M6a minors: fence forms", () => {
   it("an indented fence inside a list item and a ~~~ fence are checked", () => {
     const listed = ["1. Try this:", "   ```python", "   a = 1", "   ```", JUDGED].join("\n");
-    expect(checkReply(listed, { ...ok, rung: 2 })).toContain("code-above-rung");
+    expect(checkReply(listed, { ...ok, step: "why" })).toContain("code-above-rung");
     expect(checkReply(["~~~", "x".repeat(DIAGRAM_COLS + 1), "~~~", JUDGED].join("\n"), ok)).toContain("wide-diagram");
   });
 });
@@ -256,5 +262,117 @@ describe("M6a minors: fence forms", () => {
 describe("M6c: closing fence length (M6b #61)", () => {
   it("a longer closing fence closes the block", () => {
     expect(checkReply(["```", "a", "`````", "See INDEX.md.", JUDGED].join("\n"), ok)).toEqual(["internals"]); // prose after the fence is still checked
+  });
+});
+
+// Spec 2026-10-21 §6, §10: code checks a reply against this turn (strings from the 2026-10-20/21 spike).
+const names = ownNames({ tasksMd: "- [ ] P2.T2 add `split_amount(total, people)` = total / people", sources: ["def tip_rate(generous):\n    return 0.1\n"] });
+describe("ownNames", () => {
+  it("task signatures with their parameters, and the learner's function names (final review I6: not every parameter)", () => {
+    expect([...names].sort()).toEqual(["people", "split_amount", "tip_rate", "total"]);
+  });
+  it("reads function names in other languages, and leaves out main, short names and self", () => {
+    const n = ownNames({ tasksMd: null, sources: ["fn split(total: f64, people: u32) -> f64 {}", "func (r Bill) Share(amount float64) float64 {}", "function M.ask_number(read) end", "def area(self, w, height=2): pass", "def main(value, items): pass"] });
+    expect([...n].sort()).toEqual(["Share", "area", "ask_number", "split"]);
+  });
+});
+describe("checkTurn (spec 2026-10-21 §6)", () => {
+  const src = ["def split_amount(total, people):", "    return total * people"];
+  it("nemotron attempt 1, run 1: the fix in the summary is own code", () => {
+    expect(checkTurn("Look at the operator.\n\n**In short**: Change `*` to `/` in `return total / people`.", { step: "hint", names, sourceLines: src })).toContain("own-code");
+  });
+  it("Review Focus #1: quoting the learner's own current line with a marker is allowed", () => {
+    const glm = "Look at the operator in this slot:\n\n```\nreturn total * people\n             ^\n```\nWhich one did you type?";
+    expect(checkTurn(glm, { step: "hint", names, sourceLines: src })).not.toContain("own-code");
+  });
+  it("quoting what the learner already saw passes: part of their line, or the run's own error text (live audit 2026-10-21)", () => {
+    const seen = [...src, "lua: split_amount(48, 3) gave 144.0, expected 16.0"];
+    expect(checkTurn("The function `split_amount(48, 3)` gives 144.0, not 16.0.", { step: "why", names, sourceLines: seen })).not.toContain("own-code");
+    expect(checkTurn("Your `total * people` grows the bill.", { step: "why", names, sourceLines: seen })).not.toContain("own-code");
+    expect(checkTurn("It should be `total / people`.", { step: "why", names, sourceLines: seen })).toContain("own-code");
+  });
+  it("an unrelated example passes; naming a function alone passes", () => {
+    expect(checkTurn("Try it on `12 / 4`, then look at `split_amount`.", { step: "hint", names, sourceLines: src })).toEqual([]);
+  });
+  it("a fenced block with the learner's names is own code", () => {
+    expect(checkTurn("Like this:\n```python\ndef split_amount(total, people):\n    return total / people\n```", { step: "why", names, sourceLines: src })).toContain("own-code");
+  });
+  it("hint: too long; ask: needs a question", () => {
+    expect(checkTurn("One. Two. Three.", { step: "hint", names, sourceLines: src })).toContain("too-long");
+    expect(checkTurn("Tell me your thinking.", { step: "ask", names, sourceLines: src })).toContain("no-question");
+  });
+  it("the fix step may show their line", () => {
+    expect(checkTurn("```python\nreturn total / people\n```\nOne slash keeps the decimals.", { step: "fix", names, sourceLines: src })).toEqual([]);
+  });
+  it("machinery: third person, attempt notes, the half-scrubbed rung", () => {
+    expect(checkTurn("The learner asks how to divide.", { step: "why", names, sourceLines: src })).toContain("machinery");
+    expect(checkTurn("You're at this stage/5 (pointer).", { step: "why", names, sourceLines: src })).toContain("machinery");
+    expect(checkTurn("[attempt 2] says so.", { step: "why", names, sourceLines: src })).toContain("machinery");
+  });
+});
+describe("foldPreamble (C)", () => {
+  it("planning before the first heading goes; a reply without headings stays", () => {
+    expect(foldPreamble("The user wants a lesson. We need to ask.\n\n**What's happening**: x")).toBe("**What's happening**: x");
+    expect(foldPreamble("What were you thinking?")).toBe("What were you thinking?");
+    expect(foldPreamble("```python\nx = 1\n```\n**Why**: y")).toBe("```python\nx = 1\n```\n**Why**: y");
+  });
+});
+describe("scrubInternals rung forms (spike run 2)", () => {
+  it("'hint rung 3/5 (pointer)' is reworded whole", () => {
+    expect(scrubInternals("You're at hint rung 3/5 (pointer) of the Map step.")).toBe("You're at this stage of the Map step.");
+  });
+});
+
+describe("hideJudgment (final review C1: a diagram fence before the judgment must survive)", () => {
+  it("removes only the judgment block, never a diagram or the parts after it", () => {
+    const reply = "**What's happening**:\n```\nbill\n  |\n  v\nshare\n```\n**Why**: dividing.\n**In short**: divide.\n```tutor-judgment\n{\"judgment\":\"none\"}\n```";
+    const shown = hideJudgment(reply);
+    expect(shown).toContain("share");
+    expect(shown).toContain("**Why**: dividing.");
+    expect(shown).toContain("**In short**: divide.");
+    expect(shown).not.toMatch(/tutor-judgment|"judgment"/);
+  });
+  it("also hides a json fence or a bare trailing object that carries the judgment", () => {
+    expect(hideJudgment("Hi.\n```json\n{\"judgment\":\"none\"}\n```")).toBe("Hi.");
+    expect(hideJudgment("Hi.\n{\"judgment\":\"none\",\"step_done\":false}")).toBe("Hi.");
+  });
+});
+
+describe("checkTurn after the final review (I1, I6, I7)", () => {
+  const src = ["local M = {}", "function M.split_amount(total, people)", "  local share = total * people", "  return share", "end"];
+  it("I1: a ```markdown fence is checked like any other; an exact quote in it still passes", () => {
+    expect(checkTurn("Try this:\n```markdown\nlocal share = total / people\n```", { step: "hint", names, sourceLines: src })).toContain("own-code");
+    expect(checkTurn("Your line:\n```markdown\nlocal share = total * people\n```", { step: "hint", names, sourceLines: src })).not.toContain("own-code");
+  });
+  it("I6: a line-numbered quote and a labelled caret are quotes; an example with a common name is not own code", () => {
+    expect(checkTurn("```\n   3|   local share = total * people\n      ^ total times people\n```\nWhich one?", { step: "hint", names, sourceLines: src })).not.toContain("own-code");
+    const n = ownNames({ tasksMd: null, sources: ["def main(value, items):\n    return value\n"] });
+    expect(checkTurn("```python\nfor value in [1, 2, 3]:\n    print(value)\n```", { step: "teach", names: n, sourceLines: [] })).not.toContain("own-code");
+  });
+  it("I7: a bare JSON judgment after a clean hint is not machinery", () => {
+    expect(checkTurn('Look at line 3.\n{"judgment":"none","concept_tags":[],"step_done":false}', { step: "hint", names, sourceLines: src })).toEqual([]);
+  });
+});
+
+describe("final review I5: the prompt never asks for what the check rejects", () => {
+  it("hint and ask turns are plain sentences, not the five bold parts", () => {
+    for (const s of ["hint", "ask"] as const) {
+      expect(replyReminder(s)).not.toMatch(/Use the bold parts/);
+      expect(replyReminder(s)).toMatch(/plain sentences/);
+    }
+    expect(replyReminder("teach")).toMatch(/Use the bold parts/);
+  });
+});
+
+describe("checkTurn and the hidden reference (spec 2026-10-21 §6, §7)", () => {
+  const reference = ["def split_amount(total, people):", "    return total / people"];
+  it("a line of the reference before the fix step is own code, even with no task names known", () => {
+    expect(checkTurn("Try this: `return total / people`.", { step: "hint", names: new Set(), sourceLines: [], referenceLines: reference })).toContain("own-code");
+    expect(checkTurn("Look:\n```python\n    return total / people\n```\nWhat changes?", { step: "ask", names: new Set(), sourceLines: [], referenceLines: reference })).toContain("own-code");
+  });
+  it("not when the learner already has that line, when it is short, or at the fix step", () => {
+    expect(checkTurn("Your `return total / people` is right.", { step: "hint", names: new Set(), sourceLines: ["    return total / people"], referenceLines: reference })).not.toContain("own-code");
+    expect(checkTurn("Use `x`.", { step: "hint", names: new Set(), sourceLines: [], referenceLines: ["x"] })).not.toContain("own-code");
+    expect(checkTurn("Change it to `return total / people`.", { step: "fix", names: new Set(), sourceLines: [], referenceLines: reference })).not.toContain("own-code");
   });
 });

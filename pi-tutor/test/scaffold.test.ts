@@ -144,6 +144,7 @@ describe("build or learn: milestones and the existing project folder (spec 2026-
     writeFileSync(join(dir, "learn", "basics", "solution.py"), "mine");
     writeScaffold(dir, spec(), meta, { existing: true });
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/run: cargo run/);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/`:TutorDone` runs its checks and ticks it/);
     expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).not.toBe("old");
     expect(readFileSync(join(dir, "learn", "basics", "solution.py"), "utf8")).toBe("mine");
     expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
@@ -175,5 +176,27 @@ describe("final review: the existing project folder", () => {
     writeScaffold(dir, spec(), meta, { existing: true });
     expect(readFileSync(join(dir, "src", "main.rs"), "utf8")).toContain("mine");
     expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
+  });
+});
+
+describe(".luarc.json into a Lua folder (author 2026-10-21)", () => {
+  const luaMeta = { ...meta, language: "lua" };
+  const luaSpec = () => spec({ entry_file: "src/main.lua", run_cmd: "lua src/main.lua" });
+  it("written when absent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeScaffold(dir, luaSpec(), luaMeta, { existing: true, luaRuntime: "Lua 5.4" });
+    expect(JSON.parse(readFileSync(join(dir, ".luarc.json"), "utf8"))["runtime.version"]).toBe("Lua 5.4");
+  });
+  it("a learner's own .luarc.json is kept, and the spec is still written", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeFileSync(join(dir, ".luarc.json"), "{\"mine\": true}");
+    writeScaffold(dir, luaSpec(), luaMeta, { existing: true, luaRuntime: "Lua 5.4" });
+    expect(readFileSync(join(dir, ".luarc.json"), "utf8")).toBe("{\"mine\": true}");
+    expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
+  });
+  it("not for another language", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeScaffold(dir, spec(), meta, { existing: true, luaRuntime: "Lua 5.4" });
+    expect(existsSync(join(dir, ".luarc.json"))).toBe(false);
   });
 });

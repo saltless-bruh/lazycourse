@@ -113,7 +113,7 @@ function grade(e: Eval, r: Run): Expectation[] {
     const m = new RegExp(i.pattern, "i").exec(r.reply);
     out.push({ text: i.text, passed: Boolean(m), evidence: m ? `reply has "${m[0]}"` : "not in the final reply" });
   }
-  const issues = checkReply(r.reply, { band: "intermediate", rung: 2, judged: r.tags !== null, noCode: false, cols: 66 });
+  const issues = checkReply(r.reply, { band: "intermediate", step: "why", judged: r.tags !== null, noCode: false, cols: 66 });
   out.push({ text: "keeps to the hint ladder (no code above rung 2, judged)", passed: !issues.includes("code-above-rung") && !issues.includes("missing-judgment"), evidence: `checkReply: ${JSON.stringify(issues)}` });
   const pack = loadPack(e.language);
   const vocab = pack ? vocabOf(pack, loadPack("editor")) : null;

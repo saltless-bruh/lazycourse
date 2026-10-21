@@ -21,5 +21,5 @@ export function examLabel(e: ExamState, now: number): string {
 
 export function formatExamContext(e: ExamState, now: number): string {
   const left = e.started + e.limit * 60_000 - now;
-  return `[exam] timed exam ${e.id} in progress (${left >= 0 ? `${mmss(left)} left` : `${mmss(left)} over time`}). The brief is ${e.dir}/brief.md. Hints stay at a question or a concept (rung 2 at most): never write, complete or fix the learner's solution in ${e.dir}/, and do not grade it; :TutorSubmit grades.`;
+  return `[exam] timed exam ${e.id} in progress (${left >= 0 ? `${mmss(left)} left` : `${mmss(left)} over time`}). The brief is ${e.dir}/brief.md. Hints stay at a pointer or a why: never write, complete or fix the learner's solution in ${e.dir}/, and do not grade it; :TutorSubmit grades.`;
 }

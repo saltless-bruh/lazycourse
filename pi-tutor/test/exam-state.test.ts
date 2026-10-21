@@ -14,6 +14,7 @@ describe("exam state", () => {
     expect(c).toMatch(/^\[exam\] timed exam 01-word-frequency in progress \(19:00 left\)/);
     expect(c).toContain("exam/01-word-frequency/brief.md");
     expect(c).toMatch(/never write, complete or fix the learner's solution/);
+    expect(c).not.toMatch(/rung/);
   });
   it("restores the last open exam from the branch; submitted or abandoned ones stay closed (Review Focus #3)", () => {
     const entry = (data: object) => ({ type: "custom", customType: "tutor_exam", data });

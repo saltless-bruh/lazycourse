@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bandFor, startRung, thresholds, DEFAULT_LEVEL } from "../extensions/tutor/policy.js";
+import { bandFor, thresholds, DEFAULT_LEVEL } from "../extensions/tutor/policy.js";
 
 describe("bandFor", () => {
   it("splits 0-33 / 34-66 / 67-100", () => {
@@ -19,13 +19,6 @@ describe("bandFor", () => {
   });
 });
 
-describe("startRung", () => {
-  it("is 3 / 2 / 1 by band", () => {
-    expect(startRung("beginner")).toBe(3);
-    expect(startRung("intermediate")).toBe(2);
-    expect(startRung("pro")).toBe(1);
-  });
-});
 
 describe("thresholds", () => {
   const MIN = 60_000;

@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { writeFileSync, mkdtempSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
-import { boot, episodes, turn, judged, assistant, REASONED } from "./fake-pi.js";
+import { boot, episodes, turn, judged, assistant, realExec, REASONED } from "./fake-pi.js";
+import { spawnSync } from "node:child_process";
 import { NvimLink, type NvimLinkOptions } from "../extensions/tutor/nvim.js";
 
 let h: Headless | undefined;
@@ -152,49 +153,147 @@ describe("profile language in a scaffolded project (M4 final review I3)", () => 
 const runPayload = (code: number, stderr = "") =>
   nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["python3", "a.py"], code, stdout: "", stderr }]);
 
-describe("task ticking (M8 D6)", () => {
+describe("ticking (spec 2026-10-21 §7: evidence, never the model)", () => {
   const tasks = () => readFileSync(join(h!.root, "spec", "tasks.md"), "utf8");
   const done = (ids: string[]) => assistant("nice\n```tutor-judgment\n" + JSON.stringify({ judgment: "correct", task_done_ids: ids }) + "\n```");
-  it("a done task is ticked by the next passing run, not before", async () => {
+  it("neither the model's task_done_ids nor a passing run ticks a task", async () => {
     const b = await linked();
     mkdirSync(join(h!.root, "spec"));
     writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 parse\n- [ ] P1.T2 print\n");
     await turn(b.events, b.ctx, REASONED, done(["P1.T1"]));
-    expect(tasks()).toContain("- [ ] P1.T1");
-    expect(b.notes.at(-1)).toMatch(/P1\.T1 .*ticked when :TutorRun passes/);
-    await runPayload(1);
+    await runPayload(0);
     await new Promise((r) => setTimeout(r, 300));
-    expect(tasks()).toContain("- [ ] P1.T1");
-    await runPayload(0);
-    await until(() => tasks().includes("- [x] P1.T1"));
-    expect(tasks()).toContain("- [ ] P1.T2");
-    expect(b.entries.filter((e) => e.type === "tutor_tick").map((e) => e.data)).toEqual([{ ids: ["P1.T1"] }]);
-  }, 20000);
-  it("waits while spec/tasks.md has unsaved edits in Neovim (Review Focus #5)", async () => {
-    const b = await linked();
-    mkdirSync(join(h!.root, "spec"));
-    writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 parse\n");
-    await nvim!.command(`edit ${join(h!.root, "spec", "tasks.md")}`);
-    await nvim!.command("normal! Ox");
-    await turn(b.events, b.ctx, REASONED, done(["P1.T1"]));
-    await runPayload(0);
-    await until(() => /unsaved/.test(b.notes.at(-1) ?? ""));
-    expect(tasks()).toBe("- [ ] P1.T1 parse\n");
+    expect(tasks()).toBe("- [ ] P1.T1 parse\n- [ ] P1.T2 print\n");
+    expect(b.entries.filter((e) => e.type === "tutor_tick")).toEqual([]);
   }, 20000);
 });
 
+/** A python project with a trusted check on P2.T2, a real sandbox and real commands (spec 2026-10-21 §7). */
+const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync("python3", ["--version"]).status === 0;
+async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }]) {
+  const { Profile } = await import("../extensions/tutor/profile.js");
+  const { realpathSync } = await import("node:fs");
+  h = await startHeadlessNvim();
+  const root = realpathSync(h.root);
+  mkdirSync(join(root, "src")); mkdirSync(join(root, "spec"));
+  writeFileSync(join(root, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Split\n");
+  writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 split the bill\n  - [ ] P2.T2.S1 divide\n- [ ] P2.T3 print\n");
+  writeFileSync(join(root, "src", "main.py"), code);
+  const file = join(mkdtempSync(join(tmpdir(), "done-prof-")), "p.sqlite");
+  const seed = Profile.open(file);
+  seed.saveLanguage("python", 10, {}, 1);
+  seed.addProject("python", root, "Split", 1);
+  seed.setSetting(`checks:${root}`, JSON.stringify({ milestones: { 1: { ran: true, reference: "def split_amount(t, p):\n    return t / p\n",
+    checks } } }));
+  seed.close();
+  const saved = process.env.PI_TUTOR_PROFILE;
+  process.env.PI_TUTOR_PROFILE = file;
+  const b = await boot({ nvim: h.socket, cwd: root });
+  (b.pi as { exec: unknown }).exec = realExec;
+  shutdown = async () => { await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx); if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; };
+  const { attach } = await import("neovim");
+  nvim = attach({ socket: h.socket });
+  return { b, root };
+}
+
+describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
+  it("a failing trusted check is a graded try on the check's spot; unchanged code is not; the fix ticks the task and its subtasks", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total * people\n");
+    const tasks = () => readFileSync(join(root, "spec", "tasks.md"), "utf8");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(tasks()).toContain("- [ ] P2.T2");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "check:P2.T2:split_amount(48, 3)" });
+    expect(b.sent.at(-1)?.text).toMatch(/run failed \(check P2\.T2\): split_amount\(48, 3\) gave 144, expected 16\.0/);
+    await b.commands["tutor-done"].handler("", b.ctx); // the first open task; nothing changed
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1 });
+    writeFileSync(join(root, "src", "main.py"), "def split_amount(total, people):\n    return total / people\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(tasks()).toBe("- [x] P2.T2 split the bill\n  - [x] P2.T2.S1 divide\n- [ ] P2.T3 print\n");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ closeReason: "run_passed" });
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done)");
+  }, 30000);
+  it("a syntax error in the file is a typo, not a try", async () => {
+    const { b } = await doneProject("def split_amount(total, people)\n    return total / people\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries)).toEqual([]);
+    expect(b.notes.at(-1)).toMatch(/syntax error/);
+  }, 30000);
+  it("anyway ticks a failing task, labelled as ticked by you", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total * people\n");
+    await b.commands["tutor-done"].handler("P2.T2 anyway", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(ticked by you\)/);
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done, ticked by you)");
+  }, 30000);
+  it("anyway after a failed try closes the check episode as given up, not solved (final review I2)", async () => {
+    const { b } = await doneProject("def split_amount(total, people):\n    return total * people\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1 });
+    await b.commands["tutor-done"].handler("P2.T2 anyway", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ closeReason: "superseded" });
+  }, 30000);
+  it("a subtask's checks run when its task is done (final review I3)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total * people\n",
+      [{ task: "P2.T2.S1", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [ ] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 not yet: split_amount\(48, 3\) gave 144/);
+  }, 30000);
+  it("a tick where no trusted check passed is labelled self-checked, not done by checks (final review I5)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
+      [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "unverified" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(self-checked: /);
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done, self-checked)");
+  }, 30000);
+  it("spec/checks.md is written only inside the project (final review I6)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    const outside = join(mkdtempSync(join(tmpdir(), "outside-")), "victim.txt");
+    writeFileSync(outside, "keep me\n");
+    symlinkSync(outside, join(root, "spec", "checks.md"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(readFileSync(outside, "utf8")).toBe("keep me\n");
+  }, 30000);
+  it("unsaved edits made to spec/tasks.md while the checks run are not overwritten by the tick (pane check #1)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    const path = join(root, "spec", "tasks.md");
+    let edited = false;
+    (b.pi as { exec: unknown }).exec = async (c: string, a: string[], o: { cwd: string; timeout: number }) => {
+      if (!edited) { edited = true; await nvim!.command(`edit ${path}`); await nvim!.command("normal! Gonote to self"); }
+      return realExec(c, a, o);
+    };
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(path, "utf8")).toContain("- [ ] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/unsaved edits/);
+    expect(await nvim!.call("getline", ["$"])).toBe("note to self");
+  }, 30000);
+  it("waits while spec/tasks.md has unsaved edits in Neovim, and runs nothing", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    await nvim!.command(`edit ${join(root, "spec", "tasks.md")}`);
+    await nvim!.command("normal! Ox");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/unsaved/);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [ ] P2.T2");
+  }, 30000);
+});
+
 describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
-  it("a failing run takes over an open error episode and nudges inside the gap", async () => {
+  it("a run whose own output is a syntax error is a typo run: no attempt, no nudge, even with no editor mark (author 2026-10-21)", async () => {
+    const b = await linked();
+    await runPayload(1, '  File "a.py", line 1\n    x = (\n        ^\nSyntaxError: \'(\' was never closed');
+    await until(() => /syntax error/.test(b.widgets["tutor"]?.[1] ?? ""));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(b.sent).toEqual([]);
+    expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
+  }, 20000);
+  it("an error marked in the editor no longer makes a runtime error a typo run (author 2026-10-21)", async () => {
     const b = await linked();
     await setError("boom");
-    await until(() => b.sent.length === 1); // the error episode's nudge starts the 2-minute gap
-    await runPayload(1, "Traceback (most recent call last):\n  File \"a.py\", line 1\nKeyError: 'x'");
-    await until(() => b.sent.length === 2);
-    expect(b.sent[1].text).toBe("[tutor] stuck signal: run failed (exit 1): python3 a.py");
-    const eps = episodes(b.entries);
-    expect(eps.at(-1)).toMatchObject({ trigger: { kind: "run", code: 1, trace: expect.stringContaining("KeyError: 'x'") } });
-    expect(eps.find((e) => (e.trigger as { kind: string }).kind === "error" && e.closeReason === "superseded")).toBeTruthy();
-    expect(b.widgets["tutor"]?.[1]).toBe("stuck: run failed (exit 1): python3 a.py");
+    await until(() => b.sent.length === 1); // the error episode's own nudge
+    await runPayload(1, "NameError: name 'totl' is not defined");
+    await until(() => (episodes(b.entries).at(-1) as { attempts?: number; trigger: { kind: string } }).trigger.kind === "run");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "NameError: name 'totl' is not defined" });
   }, 20000);
 
   it("a passing run closes the run episode; an editor error does not replace it", async () => {
@@ -220,19 +319,62 @@ describe("architect role and stuck signals (M6a minor)", () => {
   }, 20000);
 });
 
-describe("final review I1: a failing re-run keeps the hint level", () => {
-  it("a second failing run refreshes the run episode's trace in place and keeps its rung, turns and tags", async () => {
+describe("attempts from runs (spec 2026-10-21 §5)", () => {
+  const attempts = (b: { entries: { type: string; data: unknown }[] }) => (episodes(b.entries).at(-1) as { attempts?: number } | undefined)?.attempts;
+  const edit = (text: string) => writeFileSync(join(h!.root, "a.py"), text);
+  it("failed runs on one spot climb; an unchanged rerun and a typo run do not", async () => {
+    const b = await linked();
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => attempts(b) === 1 && b.sent.length === 1);
+    edit("x = 1\n");
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => attempts(b) === 2 && b.sent.length === 2);
+    await runPayload(1, "ZeroDivisionError: division by zero"); // nothing changed
+    await new Promise((r) => setTimeout(r, 300));
+    expect(attempts(b)).toBe(2);
+    expect(b.sent).toHaveLength(2);
+    edit("x = (\n");
+    const runs = b.entries.filter((e) => e.type === "tutor_signal").length;
+    await runPayload(1, "SyntaxError: invalid syntax");
+    await until(() => b.entries.filter((e) => e.type === "tutor_signal").length > runs);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(attempts(b)).toBe(2); // a typo run: the run's own output is a syntax error
+    expect(b.sent).toHaveLength(2);
+  }, 30000);
+  it("a run that fails on a new spot starts over on a new episode", async () => {
     const b = await linked();
     await runPayload(1, "KeyError: 'x'");
-    await until(() => b.sent.length === 1);
-    await turn(b.events, b.ctx, REASONED, judged("correct")); // beginner start rung 3 → 4
-    const before = episodes(b.entries).at(-1)!;
-    expect(before).toMatchObject({ rung: 4, turns: 1 });
-    await runPayload(1, "KeyError: 'y'");
-    await until(() => b.sent.length === 2); // still nudged
-    const after = episodes(b.entries).at(-1)!;
-    expect(after).toMatchObject({ id: before.id, rung: 4, turns: 1, trigger: { kind: "run", trace: "KeyError: 'y'" } });
-    expect(episodes(b.entries).some((e) => e.closeReason === "superseded")).toBe(false);
+    await until(() => attempts(b) === 1);
+    const first = episodes(b.entries).at(-1)!;
+    edit("x = 2\n");
+    await runPayload(1, "TypeError: unsupported operand");
+    await until(() => episodes(b.entries).some((e) => e.id === first.id && e.closeReason === "superseded"));
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "TypeError: unsupported operand", trigger: { kind: "run" } });
+  }, 20000);
+  it("coming back to a spot after a different error resumes its count (live check 2026-10-21)", async () => {
+    const b = await linked();
+    await runPayload(1, "split_amount(48, 3) gave 144, expected 16.0");
+    await until(() => attempts(b) === 1);
+    edit("x = 4\n");
+    await runPayload(1, "split_amount(48, 3) gave 144.0, expected 16.0");
+    await until(() => attempts(b) === 2);
+    edit("x = (\n");
+    await runPayload(1, "lua: src/main.lua:4: attempt to call a nil value (global 'splt')");
+    await until(() => (episodes(b.entries).at(-1) as { spot?: string }).spot?.includes("nil value") === true);
+    expect(attempts(b)).toBe(1);
+    edit("x = 5\n");
+    await runPayload(1, "split_amount(10, 4) gave 2, expected 2.5");
+    await until(() => (episodes(b.entries).at(-1) as { spot?: string }).spot?.includes("gave") === true);
+    expect(attempts(b)).toBe(3);
+  }, 20000);
+  it("a chat message never counts as an attempt, even after the code changed (only graded tries count)", async () => {
+    const b = await linked();
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => attempts(b) === 1);
+    edit("x = 3\n");
+    const t = await turn(b.events, b.ctx, "I changed it and it is still wrong", judged("wrong"));
+    expect(attempts(b)).toBe(1);
+    expect(t.message?.content).toContain("this turn: One small hint");
   }, 20000);
 });
 
@@ -283,7 +425,7 @@ describe("M6c: episodes against a real Neovim", () => {
     await setError("boom"); // replaces it mid-reply
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, attempts: 0, turns: 0 });
   }, 20000);
   it("a run that started without an episode does not judge one opened mid-reply (M6c M6)", async () => {
     const b = await linked(); // beginner: error threshold 0
@@ -293,7 +435,7 @@ describe("M6c: episodes against a real Neovim", () => {
     await setError("boom"); // an editor episode opens mid-reply
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("wrong") }, b.ctx);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, rung: 3, turns: 0 });
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, attempts: 0, turns: 0 });
   }, 20000);
   it("display-only filetypes are not languages for /tutor-docs and memory (M5 #38, M6b #57)", async () => {
     const b = await linked();

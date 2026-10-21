@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
+import { HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
 import { PY_EXAM } from "./exam-fixtures.js";
@@ -31,12 +32,12 @@ describe("extension wiring", () => {
     expect(statuses["tutor"]).toBe("tutor lvl 50 · intermediate");
   });
 
-  it("/tutor-level validates, persists a tutor_level entry, and sets the start rung", async () => {
+  it("/tutor-level validates and persists a tutor_level entry", async () => {
     const { commands, ctx, widgets, notes, entries } = await boot();
     await commands["tutor-level"].handler("abc", ctx);
     expect(notes.at(-1)).toMatch(/0-100/);
     await commands["tutor-level"].handler("20", ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 20 · rung 3");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 20");
     expect(entries).toContainEqual({ type: "tutor_level", data: { level: 20 } });
   });
 
@@ -46,7 +47,7 @@ describe("extension wiring", () => {
       { type: "custom", customType: "tutor_signal", data: {} },
       { type: "custom", customType: "tutor_level", data: { level: 80 } },
     ] });
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 80 · rung 1");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 80");
   });
 
   it("before_agent_start sets the band section; detached turns carry the episode but no editor snapshot", async () => {
@@ -58,7 +59,7 @@ describe("extension wiring", () => {
     expect(opts.sections["tutor"]).toContain("```tutor-judgment");
     expect(r1.message.customType).toBe("tutor_editor");
     expect(r1.message.display).toBe(false);
-    expect(r1.message.content).toMatch(/^\[episode\] stuck on: learner question\nhint rung 2\/5/);
+    expect(r1.message.content).toMatch(/^\[episode\] stuck on: learner question\nfailed attempts on this spot: 0/);
     expect(r1.message.content).not.toContain("[editor]");
     await commands["tutor-level"].handler("5", ctx);
     await events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "hi", systemPromptOptions: opts }, ctx);
@@ -117,20 +118,19 @@ describe("M2 review fixes", () => {
 describe("M3 episodes, ladder and guard", () => {
   const bas = (prompt: string) => ({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: { sections: {} } });
 
-  it("a chat message opens an episode; correct advances, wrong holds, episode_closed closes", async () => {
+  it("a chat message opens an episode; judgments never move help (spec 2026-10-21 §5); episode_closed closes", async () => {
     const { events, ctx, entries, widgets } = await boot();
     await events["before_agent_start"](bas(REASONED), ctx);
-    expect(episodes(entries).at(-1)).toMatchObject({ trigger: { kind: "chat" }, rung: 2, turns: 0 });
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2"); // line 2 says "detached" in these boots
+    expect(episodes(entries).at(-1)).toMatchObject({ trigger: { kind: "chat" }, attempts: 0, turns: 0 });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50"); // line 2 says "detached" in these boots
     await events["turn_end"]({ type: "turn_end", message: judged("correct") }, ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
     await events["before_agent_start"](bas(REASONED), ctx);
     await events["turn_end"]({ type: "turn_end", message: judged("wrong") }, ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 3");
     await events["before_agent_start"](bas(REASONED), ctx);
     await events["turn_end"]({ type: "turn_end", message: judged("correct", true) }, ctx);
-    expect(episodes(entries).at(-1)).toMatchObject({ rung: 4, turns: 3, closeReason: "judged" });
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+    expect(episodes(entries).at(-1)).toMatchObject({ attempts: 0, turns: 3, closeReason: "judged" });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
   });
 
   it("[tutor] nudges never open a chat episode, and a second chat message joins the open one", async () => {
@@ -142,7 +142,7 @@ describe("M3 episodes, ladder and guard", () => {
     expect(episodes(entries)).toHaveLength(1);
   });
 
-  it("aborted, errored and truncated replies leave the rung and the widget alone", async () => {
+  it("aborted, errored and truncated replies leave the episode and the widget alone", async () => {
     const { events, ctx, entries, widgets } = await boot();
     await events["before_agent_start"](bas("q"), ctx);
     const n = entries.length;
@@ -150,25 +150,26 @@ describe("M3 episodes, ladder and guard", () => {
       await events["turn_end"]({ type: "turn_end", message: judged("correct", true, stop) }, ctx);
     }
     expect(entries.length).toBe(n);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
   });
 
-  it("restores an open episode on resume and ignores a closed one", async () => {
-    const ep = { id: "ep-1", trigger: { kind: "chat" }, band: "intermediate", rung: 4, opened: 1, turns: 3, concept_tags: [] };
+  it("restores an open episode on resume and ignores a closed one; one saved with a rung loads at 0 tries", async () => {
+    const ep = { id: "ep-1", trigger: { kind: "chat" }, band: "intermediate", attempts: 2, opened: 1, turns: 3, concept_tags: [] };
     const entry = (data: unknown) => ({ type: "custom", customType: "tutor_episode", data });
     const open = await boot({ branch: [entry(ep)] });
-    expect(open.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 4");
+    expect(open.widgets["tutor"]?.[0]).toBe("tutor  try 2 · lvl 50");
+    const old = await boot({ branch: [entry({ id: "ep-0", trigger: { kind: "chat" }, band: "intermediate", rung: 4, opened: 1, turns: 3, concept_tags: [] })] });
+    expect(old.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
     const closed = await boot({ branch: [entry(ep), entry({ ...ep, closed: 5, closeReason: "judged" })] });
-    expect(closed.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+    expect(closed.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
   });
 
-  it("/tutor-level into pro re-caps an open episode's rung and persists it", async () => {
+  it("/tutor-level into pro moves an open episode's band and persists it", async () => {
     const { events, commands, ctx, entries, widgets } = await boot();
     for (let i = 0; i < 3; i++) await turn(events, ctx, REASONED, judged("correct"));
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 5");
     await commands["tutor-level"].handler("90", ctx);
-    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 90 · rung 4");
-    expect(episodes(entries).at(-1)).toMatchObject({ band: "pro", rung: 4 });
+    expect(widgets["tutor"]?.[0]).toBe("tutor  lvl 90");
+    expect(episodes(entries).at(-1)).toMatchObject({ band: "pro", attempts: 0 });
   });
 
   it("tool_call blocks bash and paths outside ctx.cwd, allows reads inside", async () => {
@@ -208,14 +209,15 @@ describe("M4 profile and /tutor-start", () => {
     process.env.PI_TUTOR_PROFILE = file;
     try {
       const b = await boot({ cwd: dir });
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20");
       await turn(b.events, b.ctx, REASONED, assistant('ok\n```tutor-judgment\n{"judgment":"correct","concept_tags":["traits"],"episode_closed":true}\n```'));
       await b.commands["tutor-level"].handler("70", b.ctx);
       await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
       const check = Profile.open(file);
       expect(check.language("rust")?.level).toBe(70);
-      expect(check.episodes("rust")).toEqual([expect.objectContaining({ project: dir, concept_tags: ["traits"], turns: 1, rungs_used: 2 })]);
-      expect(check.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: expect.closeTo(2 / 3), episodes: 1 }]);
+      // spec 2026-10-21 §11a: no failed attempt → rungs_used (attempts + 1) is 1 and the ease sample is 1
+      expect(check.episodes("rust")).toEqual([expect.objectContaining({ project: dir, concept_tags: ["traits"], turns: 1, rungs_used: 1 })]);
+      expect(check.concepts("rust")).toEqual([{ language: "rust", tag: "traits", ease: 1, episodes: 1 }]);
       check.close();
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
@@ -234,7 +236,7 @@ describe("M4 profile and /tutor-start", () => {
     try {
       const b = await boot();
       expect(b.notes.some((n) => /newer/.test(n))).toBe(true);
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · rung 2");
+      expect(b.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
       await b.commands["tutor-start"].handler("python", b.ctx);
       expect(b.notes.at(-1)).toMatch(/profile/i);
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
@@ -284,7 +286,7 @@ describe("M5 skill reads", () => {
 });
 
 describe("M5 /tutor-learn", () => {
-  const closedEp = { id: "ep-1", trigger: { kind: "error", path: "/p/main.rs", line: 4, msg: "borrow of moved value" }, band: "beginner", rung: 4, opened: 1, turns: 2, concept_tags: ["ownership"], closed: 5, closeReason: "judged" };
+  const closedEp = { id: "ep-1", trigger: { kind: "error", path: "/p/main.rs", line: 4, msg: "borrow of moved value" }, band: "beginner", attempts: 3, opened: 1, turns: 2, concept_tags: ["ownership"], closed: 5, closeReason: "judged" };
   const branch = [
     { type: "custom", customType: "tutor_episode", data: closedEp },
     { type: "message", message: { role: "user", content: "why is s moved?" } },
@@ -332,8 +334,8 @@ describe("M5 /tutor-learn", () => {
   });
 });
 
-describe("M5 ease start rung", () => {
-  it("a first judgment on concepts with ease ≥ 0.7 starts the episode one rung lower", async () => {
+describe("M5 ease: well-known concepts get help one attempt later (spec 2026-10-21 §11a)", () => {
+  it("a first judgment on concepts with ease ≥ 0.7 sets the episode's delay", async () => {
     const { mkdtempSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
@@ -350,9 +352,9 @@ describe("M5 ease start rung", () => {
     try {
       const b = await boot({ cwd: dir });
       await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "q", systemPromptOptions: { sections: {} } }, b.ctx);
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 3");
+      expect(episodes(b.entries).at(-1)?.delay).toBeUndefined();
       await b.events["turn_end"]({ type: "turn_end", message: assistant('hm\n```tutor-judgment\n{"judgment":"wrong","concept_tags":["traits"]}\n```') }, b.ctx);
-      expect(b.widgets["tutor"]?.[0]).toBe("tutor  rust · lvl 20 · rung 2");
+      expect(episodes(b.entries).at(-1)).toMatchObject({ delay: 1, attempts: 0 });
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
 });
@@ -438,15 +440,26 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
     expect(b.notes.some((n) => /go docs fetch failed/.test(n))).toBe(true);
     expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
   });
+
+  it("a Lua project gets a .luarc.json naming the installed Lua (author 2026-10-21)", async () => {
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "pitutor-luarc-"));
+    const b = await boot({ cwd: root });
+    b.execOut["lua"] = { stdout: "Lua 5.5.1  Copyright (C) 1994-2025 Lua.org, PUC-Rio\n", stderr: "", code: 0 };
+    await toProject(b, "lua", join(root, "p1"));
+    expect(JSON.parse(readFileSync(join(root, "p1", ".luarc.json"), "utf8"))["runtime.version"]).toBe("Lua 5.5");
+  });
 });
 
 describe("one judgment per run", () => {
-  it("a tool-call judgment followed by a fenced one moves the rung once", async () => {
+  it("a tool-call judgment followed by a fenced one is applied once", async () => {
     const b = await boot();
     const call = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "1", name: "tutor-judgment", arguments: { judgment: "correct", concept_tags: ["loops"] } }] };
     await turn(b.events, b.ctx, REASONED, call, judged("correct"));
     const eps = episodes(b.entries);
-    expect(eps.at(-1)?.rung).toBe(3); // intermediate starts at 2; one step
+    expect(eps.at(-1)?.turns).toBe(1);
     expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(1);
   });
   it("a turn_end without a before_agent_start still applies (Pi always sends one; defensive)", async () => {
@@ -457,10 +470,10 @@ describe("one judgment per run", () => {
 });
 
 describe("compliance in the turn loop", () => {
-  it("a correct judgment on a bare question does not advance the rung", async () => {
+  it("a correct judgment on a bare question is read as none and moves nothing", async () => {
     const b = await boot();
     await turn(b.events, b.ctx, "what does KeyError mean?", judged("correct"));
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(episodes(b.entries).at(-1)?.attempts).toBe(0);
     expect(b.entries.filter((e) => e.type === "tutor_judgment").at(-1)?.data).toMatchObject({ judgment: "none" });
   });
   it("records rule breaks and quotes them to the model on the next turn", async () => {
@@ -539,7 +552,7 @@ describe("roles in the turn loop", () => {
   });
   it("architect turns leave the episode alone and never open one", async () => {
     const b = await boot();
-    await turn(b.events, b.ctx, REASONED, judged("none")); // opens a chat episode at rung 2
+    await turn(b.events, b.ctx, REASONED, judged("none")); // opens a chat episode
     const before = episodes(b.entries).length;
     await b.commands["tutor-architect"].handler("", b.ctx);
     const opts = await turn(b.events, b.ctx, REASONED, judged("correct", true));
@@ -631,7 +644,7 @@ describe("per-turn reply reminder (golden round 1: 3 of 5 replies dropped the ju
     await b.commands["tutor-architect"].handler("off", b.ctx);
     const tutor = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(tutor.message?.content.startsWith("[episode]")).toBe(true);
-    expect(tutor.message?.content.endsWith(replyReminder(2))).toBe(true);
+    expect(tutor.message?.content.endsWith(replyReminder("teach"))).toBe(true);
   });
 });
 
@@ -683,13 +696,13 @@ describe("final review fixes (workflow)", () => {
     return dir;
   };
   const stepDone = (judgment: string) => assistant('ok\n```tutor-judgment\n{"judgment":"' + judgment + '","step_done":true}\n```');
-  it("I2: correct step answers move the recipe on but leave the hint rung frozen", async () => {
+  it("I2: correct step answers move the recipe on and never move help (only graded tries do)", async () => {
     const b = await boot({ cwd: project() });
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
     for (let i = 0; i < 3; i++) await turn(b.events, b.ctx, REASONED, stepDone("correct"));
     expect(b.widgets["tutor"]?.[0]).toContain("plan 4/6");
-    expect(b.widgets["tutor"]?.[0]).toContain("rung 2");
-    expect(episodes(b.entries).at(-1)).toMatchObject({ rung: 2 });
+    expect(b.widgets["tutor"]?.[0]).not.toContain("try");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 0 });
   });
   it("I4: /tutor-plan off ends the recipe; the context and widget label go away and stay away on resume", async () => {
     const b = await boot({ cwd: project() });
@@ -744,7 +757,7 @@ describe("tutor memory in the extension (spec 2026-10-13 §7.1)", () => {
 });
 
 describe("/tutor-feedback in the extension", () => {
-  it("logs to the profile in a project, adjusts the open episode's rung, and notes the style next turn", async () => {
+  it("logs to the profile in a project, slows help for too-much-help, and notes the style next turn", async () => {
     const dir = mkd(pjoin(tmp(), "pitutor-fb-"));
     const file = pjoin(dir, "profile.sqlite");
     const { Profile } = await import("../extensions/tutor/profile.js");
@@ -752,15 +765,16 @@ describe("/tutor-feedback in the extension", () => {
     const saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = file;
     try {
       const b = await boot({ cwd: dir });
-      await turn(b.events, b.ctx, REASONED, judged("correct")); // chat episode, rung 2 → 3
+      await turn(b.events, b.ctx, REASONED, judged("correct")); // chat episode
       await b.commands["tutor-feedback"].handler("too-much-help", b.ctx);
-      expect(episodes(b.entries).at(-1)).toMatchObject({ rung: 2 });
+      expect(episodes(b.entries).at(-1)).toMatchObject({ delay: 1, attempts: 0 });
       await b.commands["tutor-feedback"].handler("too-long", b.ctx);
       const next = await turn(b.events, b.ctx, "hi", judged("none"));
       expect(next.message?.content).toMatch(/\[tutor-feedback\][\s\S]*too long/);
       await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
       const check = Profile.open(file);
-      expect(check.feedback("python").map((f) => [f.kind, f.rung])).toEqual([["too-much-help", 3], ["too-long", 2]]);
+      // the profile's rung column holds the attempt count now (spec 2026-10-21 §11a)
+      expect(check.feedback("python").map((f) => [f.kind, f.rung])).toEqual([["too-much-help", 0], ["too-long", 0]]);
       check.close();
       const again = await boot({ cwd: dir }); // a new session in the same project keeps the note
       const t = await turn(again.events, again.ctx, "hi", judged("none"));
@@ -773,7 +787,7 @@ describe("/tutor-feedback in the extension", () => {
       if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved;
     }
   });
-  it("/tutor-feedback edge cases: bad kind warns; no episode or architect role logs without a rung change", async () => {
+  it("/tutor-feedback edge cases: bad kind warns; no episode or architect role logs without changing help", async () => {
     const b = await boot();
     await b.commands["tutor-feedback"].handler("meh", b.ctx);
     expect(b.notes.at(-1)).toMatch(/usage: \/tutor-feedback too-long\|too-vague\|too-much-help\|good/);
@@ -997,8 +1011,8 @@ describe("concept tags use the pack vocabulary (spec §5.4, gap #5)", () => {
     p.close();
     const b = await boot({ cwd });
     await turn(b.events, b.ctx, REASONED, assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "none", concept_tags: ["dicts"] }) + "\n```"));
-    const ep = b.entries.filter((e) => e.type === "tutor_episode").at(-1)?.data as { rung: number };
-    expect(ep.rung).toBe(1); // intermediate (level 50) starts at rung 2; ease 1.0 on dicts eases it by one
+    const ep = b.entries.filter((e) => e.type === "tutor_episode").at(-1)?.data as { delay?: number };
+    expect(ep.delay).toBe(1); // ease 1.0 saved under "keyerror" counts for dicts: help comes one attempt later
   });
   it("tags follow the language the question was asked in, even if the session moved mid-reply (M7 minor)", async () => {
     const b = await boot({ cwd: await projectDir("python") });
@@ -1044,14 +1058,14 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     expect(b.notes.at(-1)).toMatch(/exam 01-x is running/);
   });
   const running = (over: object = {}) => [{ type: "custom", customType: "tutor_exam", data: { id: "01-word-frequency", dir: "exam/01-word-frequency", language: "python", topic: null, size: "small", started: Date.now(), limit: 20, concepts: ["dicts"], ...over } }];
-  it("during an exam, hints are capped at rung 2 and every turn carries the [exam] line", async () => {
+  it("during an exam, every turn carries the [exam] line and holds back the fix; judgments never move help", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running() });
-    await b.commands["tutor-level"].handler("10", b.ctx); // beginner: would start at rung 3
+    await b.commands["tutor-level"].handler("10", b.ctx);
     const t = await turn(b.events, b.ctx, "how do I start?", judged("none"));
     expect(t.message?.content).toMatch(/\[exam\] timed exam 01-word-frequency/);
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(t.message?.content).toMatch(/do not state the fix/i);
     await turn(b.events, b.ctx, REASONED, judged("correct"));
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(episodes(b.entries).at(-1)?.attempts).toBe(0);
   });
   it("a resumed exam keeps its real start: one that began an hour ago is late (Review Focus #3)", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running({ started: Date.now() - 3_600_000 }) });
@@ -1180,12 +1194,12 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     await b.events["session_start"]({ type: "session_start", reason: "resume" }, old.ctx);
     expect(old.widgets["tutor"]?.[0]).not.toMatch(/exam/);
   }, 30_000);
-  it("/tutor-feedback too-vague cannot lift hints above the exam cap (final review I4)", async () => {
+  it("/tutor-feedback too-vague never lifts help (final review I4; spec 2026-10-21: only graded tries do)", async () => {
     const b = await boot({ cwd: await projectDir("python"), branch: running() });
     await turn(b.events, b.ctx, "how do I start?", judged("none"));
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    const before = episodes(b.entries).at(-1);
     await b.commands["tutor-feedback"].handler("too-vague", b.ctx);
-    expect(episodes(b.entries).at(-1)?.rung).toBe(2);
+    expect(episodes(b.entries).at(-1)).toEqual(before);
   });
   it("a second /tutor-submit while one runs is refused; the exam is recorded once (final review M1, re-graded)", async () => {
     const cwd = await projectDir("python");
@@ -1530,6 +1544,78 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(await setting(`lesson:${dir}`)).toBeNull();
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
+  describe("checks job (spec 2026-10-21 §7)", () => {
+    const CHECKS = 'check P1.T1: tip(40) == 8.0\nrun P1.T2: stdin "40\\n" -> stdout contains "8.00"';
+    const REF = "```python\ndef tip(x):\n    return x * 0.2\n```";
+    const files = (d: string): string[] => {
+      const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+      return readdirSync(d).flatMap((n) => { const f = pjoin(d, n); return statSync(f).isDirectory() ? files(f) : [f]; });
+    };
+    it("build now: milestone 1's checks follow the plan, live in the profile, show in spec/checks.md; the reference never enters the project", async () => {
+      const b = await boot({ cwd: dir });
+      b.replies.push(SPEC([]), CHECKS, REF);
+      await exchange(b, note({ path: "build" }));
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      const state = await setting(`checks:${dir}`);
+      expect(state.milestones["1"].checks.map((c: { task: string; status: string }) => [c.task, c.status])).toEqual([["P1.T1", "unverified"], ["P1.T2", "unverified"]]);
+      expect(state.milestones["1"].reference).toContain("return x * 0.2");
+      const md = readFileSync(pjoin(dir, "spec", "checks.md"), "utf8");
+      expect(md).toContain("- tip(40) == 8.0 (unverified)");
+      expect(md).toMatch(/could not be tried/);
+      for (const f of files(dir)) expect(readFileSync(f, "utf8"), f).not.toContain("x * 0.2");
+      expect(b.notes.some((n) => /checks for milestone 1: spec\/checks\.md/.test(n))).toBe(true);
+    });
+    it("learn first: no checks until the round reaches its milestone", async () => {
+      const b = await boot({ cwd: dir });
+      b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
+      await exchange(b, note({ path: "learn" }));
+      await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+      await new Promise((r) => setTimeout(r, 100));
+      expect(await setting(`checks:${dir}`)).toBeNull();
+      b.replies.push(CHECKS.split("\n")[0], REF);
+      for (let i = 0; i < 3; i++) await b.commands["tutor-lesson"].handler("skip", b.ctx);
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
+    });
+    it("/tutor-done with no sandbox ticks as self-checked; a task with no checks too; a deleted spec/checks.md is rewritten (Review Focus #4)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file);
+      p.setSetting("onboarding", "");
+      p.setSetting(`checks:${dir}`, JSON.stringify({ milestones: { 1: { ran: false, reference: "", checks: [{ task: "P1.T1", kind: "value", expr: "tip(40)", expected: "8.0", milestone: 1, status: "unverified" }] } } }));
+      p.close();
+      const b = await boot({ cwd: dir });
+      await b.commands["tutor-done"].handler("P1.T1", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/ticked P1\.T1 \(self-checked: .*bubblewrap/);
+      const { rmSync } = await import("node:fs");
+      rmSync(pjoin(dir, "spec", "checks.md"));
+      await b.commands["tutor-done"].handler("", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/ticked P1\.T2 \(self-checked: it has no checks\)/);
+      expect(readFileSync(pjoin(dir, "spec", "tasks.md"), "utf8")).toBe("- [x] P1.T1 tip\n- [x] P1.T2 print\n");
+      expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("## P1.T1 (done, self-checked)");
+      expect(b.entries.filter((e) => e.type === "tutor_tick").map((e) => e.data)).toEqual([{ ids: ["P1.T1"], how: "self" }, { ids: ["P1.T2"], how: "self" }]);
+      await b.commands["tutor-done"].handler("", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/every task in spec\/tasks\.md is ticked/);
+    });
+    it("an older project with a plan and no checks gets them at session start", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [x] P1.T2 print\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const f = fakePi();
+      extension(f.pi as never);
+      const c = fakeCtx([], dir);
+      c.replies.push(CHECKS, REF);
+      const saved = process.env.NVIM; delete process.env.NVIM;
+      await f.events["session_start"]({ type: "session_start", reason: "startup" }, c.ctx);
+      if (saved) process.env.NVIM = saved;
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("## P1.T2 (done)");
+    });
+  });
   it("no answer in the note: the code asks with a dialog", async () => {
     const b = await boot({ cwd: dir });
     b.replies.push(SPEC([]));
@@ -1634,6 +1720,23 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     await exchange(b, note({ path: "build" }));
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
+  it("a checks job still running at /new or /reload stays silent afterwards (pane check #2)", async () => {
+    const b = await boot({ cwd: dir });
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { systemPrompt: string }) => {
+      if (c.systemPrompt.startsWith("You write the specification")) return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] };
+      await held;
+      throw new Error("This extension ctx is stale after session replacement or reload.");
+    };
+    await exchange(b, note({ path: "build" }));
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+    await new Promise((r) => setTimeout(r, 50));
+    await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    release();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(b.notes.filter((n) => /checks could not be written/.test(n))).toEqual([]);
+  });
   async function failingPlan(errorMessage: string) {
     const { PROVIDER_RETRY } = await import("../extensions/tutor/progress.js");
     const base = PROVIDER_RETRY.baseDelayMs;
@@ -1641,9 +1744,13 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     try {
       const b = await boot({ cwd: dir });
       let calls = 0;
-      (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => (++calls === 1
-        ? { role: "assistant", stopReason: "error", errorMessage, content: [] }
-        : { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] });
+      // Only the plan job's calls: once the plan is written, the checks job asks the model too.
+      (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { systemPrompt: string }) => {
+        if (!c.systemPrompt.startsWith("You write the specification")) return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "" }] };
+        return ++calls === 1
+          ? { role: "assistant", stopReason: "error", errorMessage, content: [] }
+          : { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] };
+      };
       await exchange(b, note({ path: "build" }));
       await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")) || b.notes.some((n) => /could not be written/.test(n)));
       return { calls, written: existsSync(pjoin(dir, "spec", "tasks.md")) };
@@ -1664,5 +1771,156 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(b.widgets["tutor"]?.[0]).toMatch(/build: milestone 1/);
     await b.commands["tutor-lesson"].handler("next", b.ctx);
     expect((await setting(`lesson:${dir}`))).toMatchObject({ round: 1, concept: "numbers", building: false });
+  });
+});
+
+describe("/tutor-fix (spec 2026-10-21 §5: at pro the fix comes only when asked)", () => {
+  const ep = (band: string) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "chat" }, band, attempts: 4, opened: 1, turns: 0, concept_tags: [] } });
+  it("pro: marks the open episode, so the next turn is the fix", async () => {
+    const b = await boot({ branch: [ep("pro")] });
+    await b.commands["tutor-level"].handler("90", b.ctx);
+    await b.commands["tutor-fix"].handler("", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ fixAsked: true });
+    const t = await turn(b.events, b.ctx, "go on", judged("none"));
+    expect(t.message?.content).toContain("this turn: Give the fix for only the stuck part");
+  });
+  it("other levels and no episode: a note, nothing changes", async () => {
+    const b = await boot({ branch: [ep("beginner")] });
+    await b.commands["tutor-level"].handler("10", b.ctx);
+    const before = episodes(b.entries).length;
+    await b.commands["tutor-fix"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toBe("the fix comes after a few tries on the same spot");
+    expect(episodes(b.entries).length).toBe(before);
+    const none = await boot();
+    await none.commands["tutor-fix"].handler("", none.ctx);
+    expect(none.notes.at(-1)).toMatch(/nothing to fix/);
+  });
+});
+
+describe("held replies (spec 2026-10-21 §6)", () => {
+  const project = () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-held-"));
+    mkdir(pjoin(dir, "src")); mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "src", "main.py"), "def split_amount(total, people):\n    return total * people\n");
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P2.T2 add `split_amount(total, people)` = total / people\n");
+    return dir;
+  };
+  const ep = (attempts: number) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "run", cmd: ["python3", "src/main.py"], code: 1, trace: "ZeroDivisionError: x" }, band: "beginner", attempts, spot: "ZeroDivisionError: x", opened: 1, turns: 0, concept_tags: [] } });
+  const reply = (text: string) => assistant(`${text}\n\`\`\`tutor-judgment\n{"judgment":"wrong"}\n\`\`\``);
+  const textOf = (m: unknown) => ((m as { content: { type: string; text?: string }[] }).content.find((c) => c.type === "text")?.text ?? "");
+  const judgments = (b: { entries: { type: string }[] }) => b.entries.filter((e) => e.type === "tutor_judgment").length;
+  const level10 = async (b: Awaited<ReturnType<typeof boot>>) => b.commands["tutor-level"].handler("10", b.ctx);
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+  /** A run Pi starts from a custom message (sendMessage with triggerTurn): before_agent_start with messageType "custom". */
+  const customTurn = async (b: Awaited<ReturnType<typeof boot>>, message: object, ...replies: unknown[]) => {
+    const opts = { sections: {} as Record<string, string> };
+    const r = (await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, b.ctx)) as { message?: { content: string } } | undefined;
+    for (const m of replies) {
+      const e = (await b.events["message_end"]({ type: "message_end", message: m }, b.ctx)) as { message?: object } | undefined;
+      if (e?.message) { for (const k of Object.keys(m as object)) delete (m as Record<string, unknown>)[k]; Object.assign(m as object, e.message); }
+      await b.events["turn_end"]({ type: "turn_end", message: m }, b.ctx);
+    }
+    return Object.assign(opts, { message: r?.message });
+  };
+
+  it("a hint showing a line of the hidden reference is held, though no task names it (spec 2026-10-21 §7)", async () => {
+    const { realpathSync } = await import("node:fs");
+    const dir = realpathSync(mkd(pjoin(tmp(), "pitutor-ref-")));
+    mkdir(pjoin(dir, "spec")); mkdir(pjoin(dir, "src"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 share the bill\n");
+    wfile(pjoin(dir, "src", "main.py"), "print('hi')\n");
+    const file = pjoin(mkd(pjoin(tmp(), "pitutor-refprof-")), "p.sqlite");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(file);
+    p.saveLanguage("python", 10, {}, 1); p.addProject("python", dir, "Split", 1);
+    p.setSetting(`checks:${dir}`, JSON.stringify({ milestones: { 1: { ran: true, checks: [], reference: "def share(total, people):\n    return round(total / people, 2)\n" } } }));
+    p.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ cwd: dir, branch: [ep(1)] });
+      await level10(b);
+      const leak = reply("Try `return round(total / people, 2)` there.");
+      await turn(b.events, b.ctx, "help", leak);
+      expect(textOf(leak)).toBe(REWRITE_TEXT);
+      expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["own-code"] });
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+  it("a leaking hint is replaced, re-asked through a fresh run, and the second reply is checked too", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const leak = reply("Change it to `return total / people`.");
+    await turn(b.events, b.ctx, "help", leak);
+    expect(textOf(leak)).toBe(REWRITE_TEXT);
+    expect(judgments(b)).toBe(0);
+    // Live audits need the rejected text (never shown): was it a real leak or a too-strict check?
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["own-code"], rejected: expect.stringContaining("return total / people") });
+    const sentBefore = b.sent.length;
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(b.sent.length).toBe(sentBefore); // nothing typed into the learner's chat (live check 2026-10-21)
+    const ask = b.messages.at(-1) as { message: { customType: string; display: boolean; content: string }; options: { triggerTurn?: boolean } };
+    expect(ask.message).toMatchObject({ customType: "tutor_rewrite", display: false });
+    expect(ask.options.triggerTurn).toBe(true);
+    const good = reply("Look at the operator inside `split_amount`.");
+    const t2 = await customTurn(b, ask.message, good);
+    expect(t2.message?.content).toMatch(/\[tutor-check\]/);
+    expect(textOf(good)).toContain("Look at the operator inside `split_amount`.");
+    expect(judgments(b)).toBe(1);
+  });
+  it("Review Focus #2/#5: after two failed re-asks the learner sees the fallback, with no code, and no fourth ask", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const shown: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const leak = reply("Write `return total / people`.");
+      const rewrites = b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite");
+      if (i === 0) await turn(b.events, b.ctx, "help", leak);
+      else await customTurn(b, (rewrites.at(-1) as { message: object }).message, leak);
+      shown.push(textOf(leak));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+    }
+    expect(shown.slice(0, 2)).toEqual([REWRITE_TEXT, REWRITE_TEXT]);
+    expect(shown[2]).toBe(fallbackReply("hint", "ZeroDivisionError: x"));
+    expect(shown[2]).not.toMatch(/`/);
+    expect(b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite")).toHaveLength(2);
+  });
+  it("final review M2: a cut-off reply that fails its check shows the fallback, never nothing", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const cut = assistant("Change it to `return total / people` and", "length");
+    await turn(b.events, b.ctx, "help", cut);
+    expect(textOf(cut)).toBe(fallbackReply("hint", "ZeroDivisionError: x"));
+  });
+  it("the transformer holds a streaming reply and hides the judgment block after it", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, b.ctx);
+    const t = b.transformers[0];
+    expect(t("Change it to `return total / people`", { messageType: "assistant", isStreaming: true, availableWidth: 68 })).toBe(HOLD_TEXT);
+    const after = t("Look here.\n```tutor-judgment\n{\"judgment\":\"wrong\"}\n```", { messageType: "assistant", isStreaming: false, availableWidth: 68 });
+    expect(after).toContain("Look here.");
+    expect(after).not.toMatch(/tutor-judgment|"judgment"/);
+  });
+  it("final review I2: only the reply to the failed run gets the fix; a chat question after it is at why", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(4)] });
+    await level10(b);
+    const nudge = await turn(b.events, b.ctx, "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", reply("ok"));
+    expect(nudge.message?.content).toContain("this turn: Give the fix for only the stuck part");
+    const chat = await turn(b.events, b.ctx, "thanks, and what about the next task?", reply("ok"));
+    expect(chat.message?.content).toContain("this turn: Say clearly why it is wrong");
+  });
+  it("thinking is hidden while the fix is not allowed, whatever the setting", async () => {
+    const think = { messageType: "assistant-thinking", isStreaming: true, availableWidth: 68 };
+    const hint = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(hint);
+    await hint.commands["tutor-thinking"].handler("show", hint.ctx);
+    await hint.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, hint.ctx);
+    expect(hint.transformers[0]("so it is total / people", think)).toBe(THINKING_LABEL);
+    const fix = await boot({ cwd: project(), branch: [ep(4)] });
+    await level10(fix);
+    await fix.commands["tutor-thinking"].handler("show", fix.ctx);
+    await fix.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", systemPromptOptions: { sections: {} } }, fix.ctx);
+    expect(fix.transformers[0]("so it is total / people", think)).toBe("so it is total / people");
   });
 });

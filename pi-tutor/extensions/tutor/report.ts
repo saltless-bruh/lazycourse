@@ -24,9 +24,9 @@ export function progressReport(i: { language: string; level: number | null; epis
   if (!i.episodes.length && !i.exams.length) return [...lines, "no episodes or exams yet"].join("\n");
   const recent = i.episodes.slice(-20).map((e) => e.rungs_used);
   if (recent.length) {
-    lines.push("Hints per episode, oldest → newest:", `\`${recent.map((r) => SPARK[Math.min(Math.max(r, 1), 5) - 1]).join("")}\``);
+    lines.push("Tries per episode, oldest → newest:", `\`${recent.map((r) => SPARK[Math.min(Math.max(r, 1), 5) - 1]).join("")}\``);
     const half = Math.floor(recent.length / 2);
-    lines.push(recent.length >= 4 ? `hint levels used: ${avg(recent.slice(0, half))} → ${avg(recent.slice(half))}` : `hint levels used: ${avg(recent)}`, "");
+    lines.push(recent.length >= 4 ? `tries used: ${avg(recent.slice(0, half))} → ${avg(recent.slice(half))}` : `tries used: ${avg(recent)}`, "");
   }
   if (i.exams.length) {
     lines.push("Exams:", ...i.exams.slice(-5).map((e) => `- ${e.exam.slice(0, 18)} ${e.score} · ${e.minutes} min${e.late ? " · late" : ""}`));

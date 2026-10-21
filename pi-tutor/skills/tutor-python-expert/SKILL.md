@@ -11,7 +11,7 @@ metadata:
 Adapted from python-pro in fullstack-dev-skills by Jeffallan (MIT; see LICENSE). Changes: rewritten to explain and check instead of writing code; `references/` kept unchanged so it can be compared with upstream.
 
 ## How to use it as a tutor
-- Explain the pattern on a small unrelated example, point at the learner's line (`file:line`), then ask one question that makes them see the gap. The learner remembers what they worked out, not what they were handed, so never write their line: the hint ladder decides how much you show, and below rung 5 that means naming and pointing.
+- Explain the pattern on a small unrelated example, point at the learner's line (`file:line`), then ask one question that makes them see the gap. The learner remembers what they worked out, not what they were handed, so never write their line: this turn's instruction decides how much you show, and until it allows the fix that means naming and pointing.
 - Pro band: words, or a contrast with a language they know, and no code.
 - The references below are written for someone implementing; their code samples are knowledge for you. Translate them into the learner's level instead of pasting them.
 

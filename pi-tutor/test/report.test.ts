@@ -20,8 +20,9 @@ describe("progressReport (gap #8)", () => {
   });
   it("shows level, hint use over time, exams with trend, and the concept map", () => {
     expect(r).toContain("**python** · level 45 (intermediate)");
-    expect(r).toContain("`▇▇▅▃▃▁`"); // rungs 4,4,3,2,2,1 → ▁▃▅▇█ by index rung−1
-    expect(r).toMatch(/hint levels used: 3\.7 → 1\.7/);
+    expect(r).toContain("Tries per episode, oldest → newest:");
+    expect(r).toContain("`▇▇▅▃▃▁`"); // stored 4,4,3,2,2,1 (attempts + 1) → ▁▃▅▇█ by index
+    expect(r).toMatch(/tries used: 3\.7 → 1\.7/);
     expect(r).toContain("- 01-word-frequency 85 · 18 min"); // ExamRecord has no limit: minutes only
     expect(r).toMatch(/02-parse-csv 60 · 51\.2 min · late/);
     expect(r).toMatch(/trend: 85 → 60/);

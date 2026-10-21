@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import { RUNG_NAMES, describeTrigger, type Episode } from "./ladder.js";
+import { describeTrigger, type Episode } from "./ladder.js";
 
 // /tutor-learn (spec §7): last closed episode → a drafted SKILL.md the learner edits, keeps, or discards.
 export interface Learned { slug: string; description: string; body: string }
@@ -11,7 +11,8 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export function lastClosedEpisode(branch: unknown[]): Episode | null {
   for (let i = branch.length - 1; i >= 0; i--) {
     const e = branch[i] as { type?: string; customType?: string; data?: Episode };
-    if (e.type === "custom" && e.customType === "tutor_episode" && e.data && e.data.closed !== undefined) return e.data;
+    // An episode closed before attempts existed (spec 2026-10-21) was saved with a rung: it reads as 0 attempts.
+    if (e.type === "custom" && e.customType === "tutor_episode" && e.data && e.data.closed !== undefined) return { ...e.data, attempts: typeof e.data.attempts === "number" ? e.data.attempts : 0 };
   }
   return null;
 }
@@ -44,7 +45,7 @@ export function learnPrompt(language: string, ep: Episode, convo: string): strin
     `language: ${language}`,
     `stuck on: ${describeTrigger(ep.trigger)}`,
     `concepts: ${ep.concept_tags.join(", ") || "none tagged"}`,
-    `closed at rung ${ep.rung} (${RUNG_NAMES[ep.rung - 1]}) after ${ep.turns} turn(s)`,
+    `closed after ${ep.attempts} failed attempt(s) and ${ep.turns} turn(s)`,
     "",
     "conversation:",
     convo || "(none recorded)",

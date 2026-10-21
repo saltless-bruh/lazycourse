@@ -49,6 +49,16 @@ describe("start building blocks (spec 2026-10-19 §5, Q4, Q23)", () => {
     expect(profile.language("python")?.level).toBe(10);
     expect(profile.projectAt(r.dir)?.title).toBe("Tip Calculator");
   });
+  it("a Lua project gets a .luarc.json naming the installed Lua; other languages do not (author 2026-10-21)", () => {
+    profile = Profile.open(":memory:");
+    const base = mkdtempSync(join(tmpdir(), "start-"));
+    const lua = createProject(profile, { language: "lua", level: 10, project, dir: join(base, "lua-tip"), about: {}, now: 5, luaRuntime: "Lua 5.5" });
+    expect(JSON.parse(readFileSync(join(lua.dir, ".luarc.json"), "utf8"))["runtime.version"]).toBe("Lua 5.5");
+    const py = createProject(profile, { language: "python", level: 10, project, dir: join(base, "py-tip"), about: {}, now: 5, luaRuntime: "Lua 5.5" });
+    expect(existsSync(join(py.dir, ".luarc.json"))).toBe(false);
+    const none = createProject(profile, { language: "lua", level: 10, project, dir: join(base, "lua-none"), about: {}, now: 5, luaRuntime: null });
+    expect(existsSync(join(none.dir, ".luarc.json"))).toBe(false);
+  });
   it("keeps an existing language level row, and refuses a non-empty folder", () => {
     profile = Profile.open(":memory:");
     profile.saveLanguage("python", 70, {}, 1);

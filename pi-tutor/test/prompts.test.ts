@@ -26,7 +26,7 @@ describe("tutorPrompt", () => {
     expect(tutorPrompt("pro")).toMatch(/never write code/i);
     expect(tutorPrompt("beginner")).toMatch(/why each part exists/i);
   });
-  it("tells the model to load and cite a tutor-<lang>-* skill for a rung 3 pointer (spec §7)", () => {
+  it("tells the model to load and cite a tutor-<lang>-* skill when it points (spec §7)", () => {
     expect(tutorPrompt("beginner")).toMatch(/tutor-<lang>-\*/);
     expect(tutorPrompt("beginner")).toMatch(/cite the skill('s)? name/i);
   });
@@ -62,8 +62,21 @@ describe("turn protocol (live findings 2026-10-13)", () => {
   it("judgment tags come from the card's list (spec §5.4)", () => {
     expect(j()).toMatch(/`concept_tags`: .*Concept tags/);
   });
-  it("the ladder forbids writing the fix below rung 5", () => {
-    expect(systemText("ladder")).toMatch(/below rung 5, never write the corrected line/i);
+  it("the ladder forbids writing the corrected line until this turn's instruction allows the fix", () => {
+    expect(systemText("ladder")).toMatch(/until this turn's instruction allows the fix, never write the corrected line/i);
+  });
+  it("final review I5: the Example part never asks for the learner's own code", async () => {
+    expect(systemText("style")).not.toMatch(/the learner's own code \(`path:line`\)/);
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    expect(readFileSync(join(import.meta.dirname, "..", "skills", "tutor-teaching-style", "SKILL.md"), "utf8")).not.toMatch(/Example\*\*: concrete: the learner's own code/);
+  });
+  it("no system prompt or skill talks about rungs (spec 2026-10-21: attempts replace them)", async () => {
+    for (const name of ["ladder", "style"]) expect(systemText(name)).not.toMatch(/\brung/i);
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const root = join(import.meta.dirname, "..", "skills");
+    for (const d of readdirSync(root)) expect(readFileSync(join(root, d, "SKILL.md"), "utf8"), d).not.toMatch(/\brung/i);
   });
 });
 
