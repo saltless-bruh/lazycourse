@@ -157,7 +157,7 @@ describe("M3 episodes, ladder and guard", () => {
     const ep = { id: "ep-1", trigger: { kind: "chat" }, band: "intermediate", attempts: 2, opened: 1, turns: 3, concept_tags: [] };
     const entry = (data: unknown) => ({ type: "custom", customType: "tutor_episode", data });
     const open = await boot({ branch: [entry(ep)] });
-    expect(open.widgets["tutor"]?.[0]).toBe("tutor  lvl 50 · try 2");
+    expect(open.widgets["tutor"]?.[0]).toBe("tutor  try 2 · lvl 50");
     const old = await boot({ branch: [entry({ id: "ep-0", trigger: { kind: "chat" }, band: "intermediate", rung: 4, opened: 1, turns: 3, concept_tags: [] })] });
     expect(old.widgets["tutor"]?.[0]).toBe("tutor  lvl 50");
     const closed = await boot({ branch: [entry(ep), entry({ ...ep, closed: 5, closeReason: "judged" })] });

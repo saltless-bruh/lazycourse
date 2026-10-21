@@ -7,6 +7,7 @@ import { checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, 
 import type { Check } from "../extensions/tutor/checks.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import { realExec } from "./fake-pi.js";
+import { systemText } from "../extensions/tutor/prompts.js";
 
 const TASKS = [
   "# Tasks",
@@ -43,6 +44,11 @@ describe("prompts (spec §7 cross-check)", () => {
     expect(p).not.toContain("P2.T1");
     expect(p).toContain("check <task id>: <expression> == <expected value>");
     expect(checksPrompt({ language: "go", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
+  });
+  it("asks for inputs that tell a near miss apart: 48 / 3 let `//` tick a task in the phase 2 live check", () => {
+    const p = systemText("checks");
+    expect(p).toMatch(/do not divide evenly/);
+    expect(p).toMatch(/a wrong answer that is close/);
   });
   it("the reference never sees a done-when or its expected values", () => {
     const p = referencePrompt({ language: "python", tasksMd: TASKS, milestone: 2, entry: "src/main.py" });

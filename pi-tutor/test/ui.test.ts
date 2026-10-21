@@ -8,9 +8,9 @@ describe("renderWidget", () => {
     expect(renderWidget({ ...base, attempt: 2 }).join("\n")).toMatch(/try 2/);
     expect(renderWidget({ ...base }).join("\n")).not.toMatch(/rung|try/);
   });
-  it("renders language, level, tries, task on line 1 and state on line 2", () => {
+  it("renders tries, task, language, level on line 1 and state on line 2", () => {
     const w = renderWidget({ language: "python", level: 30, attempt: 2, task: "P1.T2.S1", state: "idle", connected: true });
-    expect(w).toEqual(["tutor  python · lvl 30 · try 2 · P1.T2.S1", "idle"]);
+    expect(w).toEqual(["tutor  try 2 · P1.T2.S1 · python · lvl 30", "idle"]);
   });
   it("appends the last judgment to line 2", () => {
     const w = renderWidget({ level: 30, state: "clean", connected: true, last: "correct" });
@@ -66,7 +66,11 @@ describe("renderStatus", () => {
 describe("lesson label (spec 2026-10-19 Q15)", () => {
   it("comes first on line 1, after an exam timer, so clipping never hides it", () => {
     const [l1] = renderWidget({ lesson: "lesson: basics 1/2", language: "python", level: 10, attempt: 3, state: "idle", connected: true });
-    expect(l1.startsWith("tutor  lesson: basics 1/2 · python")).toBe(true);
+    expect(l1.startsWith("tutor  lesson: basics 1/2 · ")).toBe(true);
+  });
+  it("the try count follows the lesson label, so a long label never clips it (phase 2 live check)", () => {
+    const [l1] = renderWidget({ lesson: "build: milestone 1", language: "python", level: 10, attempt: 2, task: "P1.T1", state: "idle", connected: true });
+    expect(l1.startsWith("tutor  build: milestone 1 · try 2 · P1.T1")).toBe(true);
   });
   it("the spec status fits beside the outside-nvim prefix", () => {
     const [, l2] = renderWidget({ state: "spec error: /tutor-start spec", connected: false });
