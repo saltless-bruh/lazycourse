@@ -164,6 +164,13 @@ describe("attempt spots (spec 2026-10-21 §5)", () => {
     expect(spotOf("all good\nbut nothing matched here")).toBe("all good"); // no error word: the first line (Lua prints its message first)
     expect(spotOf("x".repeat(300) + " error")).toHaveLength(120);
   });
+  it("final review I3: a bare exception name or a panic header keeps the line that says what failed", () => {
+    const py = (code: string) => `Traceback (most recent call last):\n  File "check.py", line 3, in <module>\n    ${code}\nAssertionError`;
+    expect(spotOf(py("assert split_amount(48, 3) == 16.0"))).not.toBe(spotOf(py("assert tip_rate(True) == 0.2")));
+    const rust = (msg: string) => `thread 'main' panicked at src/main.rs:4:5:\n${msg}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
+    expect(spotOf(rust("attempt to divide by zero"))).not.toBe(spotOf(rust("index out of bounds: the len is 3 but the index is 7")));
+    expect(spotOf("# example.com/bill\n./main.go:5:2: undefined: total")).toBe("./main.go:#:#: undefined: total");
+  });
   it("spotLine is the same line as spotOf, as printed", () => {
     expect(spotLine("lua: split_amount(10, 4) gave 2, expected 2.5\nstack traceback:\n\t[C]: in ?")).toBe("lua: split_amount(10, 4) gave 2, expected 2.5");
   });

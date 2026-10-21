@@ -40,10 +40,15 @@ export function spotLine(trace: string): string {
   // Stack frames name functions, not what went wrong: Lua's "[C]: in function 'error'", Node's "at …", Go's
   // goroutine dump, Python's "File …" lines.
   // Lua frames also read "check.lua:6: in local 'check'" or "in global 'require'".
-  const frame = /^(?:at |\[C\]|stack traceback|Traceback \(most recent call last\)|goroutine |File "|\S+:\d+: in |.*\bin (?:function|main chunk|\?)|\/.*:\d+ \+0x)/;
+  const frame = /^(?:at |\[C\]|stack traceback|Traceback \(most recent call last\)|goroutine |File "|# \S|note: run with|\S+:\d+: in |.*\bin (?:function|main chunk|\?)|\/.*:\d+ \+0x)/;
   const lines = trace.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !frame.test(l));
   // A message without an error word (Lua's error(msg, 0)) comes first, before its frames.
-  const line = [...lines].reverse().find((l) => /error|exception|panic|assert|failed/i.test(l)) ?? lines[0] ?? "";
+  const i = lines.map((l) => /error|exception|panic|assert|failed/i.test(l)).lastIndexOf(true);
+  let line = i >= 0 ? lines[i] : lines[0] ?? "";
+  // Final review I3: a bare exception name (Python's message-less assert) says what failed only with the code line
+  // printed above it; a Rust "panicked at …:" header has its message on the line below.
+  if (i >= 0 && /^\w+:?$/.test(line) && i > 0) line = `${line} at ${lines[i - 1]}`;
+  else if (i >= 0 && /panicked at .*:$/.test(line) && lines[i + 1]) line = `${line} ${lines[i + 1]}`;
   return line.slice(0, 200);
 }
 
