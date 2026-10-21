@@ -285,6 +285,12 @@ describe("checkTurn (spec 2026-10-21 §6)", () => {
     const glm = "Look at the operator in this slot:\n\n```\nreturn total * people\n             ^\n```\nWhich one did you type?";
     expect(checkTurn(glm, { step: "hint", names, sourceLines: src })).not.toContain("own-code");
   });
+  it("quoting what the learner already saw passes: part of their line, or the run's own error text (live audit 2026-10-21)", () => {
+    const seen = [...src, "lua: split_amount(48, 3) gave 144.0, expected 16.0"];
+    expect(checkTurn("The function `split_amount(48, 3)` gives 144.0, not 16.0.", { step: "why", names, sourceLines: seen })).not.toContain("own-code");
+    expect(checkTurn("Your `total * people` grows the bill.", { step: "why", names, sourceLines: seen })).not.toContain("own-code");
+    expect(checkTurn("It should be `total / people`.", { step: "why", names, sourceLines: seen })).toContain("own-code");
+  });
   it("an unrelated example passes; naming a function alone passes", () => {
     expect(checkTurn("Try it on `12 / 4`, then look at `split_amount`.", { step: "hint", names, sourceLines: src })).toEqual([]);
   });

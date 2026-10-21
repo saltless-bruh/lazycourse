@@ -550,7 +550,9 @@ export default function (pi: ExtensionAPI): void {
       const sources = projectSources(root);
       if (snap && realCwd(snap.path).startsWith(root + "/")) sources.push(snap.lines.join("\n"));
       run.names = ownNames({ tasksMd, sources });
-      run.sourceLines = sources.flatMap((t) => t.split(/\r?\n/));
+      // The failed run's output is what the learner saw too: quoting it is not a leak.
+      const trace = episode?.trigger.kind === "run" ? episode.trigger.trace : "";
+      run.sourceLines = [...sources, trace].flatMap((t) => t.split(/\r?\n/));
     }
     // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
     const lang = project?.language ?? editorLanguage();

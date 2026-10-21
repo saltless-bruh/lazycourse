@@ -218,7 +218,8 @@ function usesOwnName(code: string, names: Set<string>): boolean {
   return rest.length > 0 || tokens.filter((t) => names.has(t)).length > 1;
 }
 
-/** Spec §6: what code can check about one reply before the learner sees it. */
+/** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
+ *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
 export function checkTurn(text: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[] }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
@@ -233,7 +234,10 @@ export function checkTurn(text: string, o: { step: TurnStep; names: Set<string>;
     if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
   }
   const prose = text.replace(FENCES, "");
-  if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => leaks(m[1]))) issues.add("own-code");
+  // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
+  const seen = [...quoted];
+  const spanLeaks = (span: string) => leaks(span) && !seen.some((l) => l.includes(span.trim()));
+  if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   const plain = prose.replace(/`[^`\n]*`/g, "x");
   const sentences = plain.split(/[.!?]+(?=\s|$)/).filter((x) => /\w/.test(x)).length;
   if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");
