@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols } from "../extensions/tutor/compliance.js";
+import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -262,5 +262,57 @@ describe("M6a minors: fence forms", () => {
 describe("M6c: closing fence length (M6b #61)", () => {
   it("a longer closing fence closes the block", () => {
     expect(checkReply(["```", "a", "`````", "See INDEX.md.", JUDGED].join("\n"), ok)).toEqual(["internals"]); // prose after the fence is still checked
+  });
+});
+
+// Spec 2026-10-21 §6, §10: code checks a reply against this turn (strings from the 2026-10-20/21 spike).
+const names = ownNames({ tasksMd: "- [ ] P2.T2 add `split_amount(total, people)` = total / people", sources: ["def tip_rate(generous):\n    return 0.1\n"] });
+describe("ownNames", () => {
+  it("task signatures and the learner's definitions, with their parameters", () => {
+    expect([...names].sort()).toEqual(["generous", "people", "split_amount", "tip_rate", "total"]);
+  });
+  it("reads typed and defaulted parameters in other languages, and leaves out short names and self", () => {
+    const n = ownNames({ tasksMd: null, sources: ["fn split(total: f64, people: u32) -> f64 {}", "func (r Bill) Share(amount float64) float64 {}", "function M.ask_number(read) end", "def area(self, w, height=2): pass"] });
+    expect([...n].sort()).toEqual(["Share", "amount", "area", "ask_number", "height", "people", "read", "split", "total"]);
+  });
+});
+describe("checkTurn (spec 2026-10-21 §6)", () => {
+  const src = ["def split_amount(total, people):", "    return total * people"];
+  it("nemotron attempt 1, run 1: the fix in the summary is own code", () => {
+    expect(checkTurn("Look at the operator.\n\n**In short**: Change `*` to `/` in `return total / people`.", { step: "hint", names, sourceLines: src })).toContain("own-code");
+  });
+  it("Review Focus #1: quoting the learner's own current line with a marker is allowed", () => {
+    const glm = "Look at the operator in this slot:\n\n```\nreturn total * people\n             ^\n```\nWhich one did you type?";
+    expect(checkTurn(glm, { step: "hint", names, sourceLines: src })).not.toContain("own-code");
+  });
+  it("an unrelated example passes; naming a function alone passes", () => {
+    expect(checkTurn("Try it on `12 / 4`, then look at `split_amount`.", { step: "hint", names, sourceLines: src })).toEqual([]);
+  });
+  it("a fenced block with the learner's names is own code", () => {
+    expect(checkTurn("Like this:\n```python\ndef split_amount(total, people):\n    return total / people\n```", { step: "why", names, sourceLines: src })).toContain("own-code");
+  });
+  it("hint: too long; ask: needs a question", () => {
+    expect(checkTurn("One. Two. Three.", { step: "hint", names, sourceLines: src })).toContain("too-long");
+    expect(checkTurn("Tell me your thinking.", { step: "ask", names, sourceLines: src })).toContain("no-question");
+  });
+  it("the fix step may show their line", () => {
+    expect(checkTurn("```python\nreturn total / people\n```\nOne slash keeps the decimals.", { step: "fix", names, sourceLines: src })).toEqual([]);
+  });
+  it("machinery: third person, attempt notes, the half-scrubbed rung", () => {
+    expect(checkTurn("The learner asks how to divide.", { step: "why", names, sourceLines: src })).toContain("machinery");
+    expect(checkTurn("You're at this stage/5 (pointer).", { step: "why", names, sourceLines: src })).toContain("machinery");
+    expect(checkTurn("[attempt 2] says so.", { step: "why", names, sourceLines: src })).toContain("machinery");
+  });
+});
+describe("foldPreamble (C)", () => {
+  it("planning before the first heading goes; a reply without headings stays", () => {
+    expect(foldPreamble("The user wants a lesson. We need to ask.\n\n**What's happening**: x")).toBe("**What's happening**: x");
+    expect(foldPreamble("What were you thinking?")).toBe("What were you thinking?");
+    expect(foldPreamble("```python\nx = 1\n```\n**Why**: y")).toBe("```python\nx = 1\n```\n**Why**: y");
+  });
+});
+describe("scrubInternals rung forms (spike run 2)", () => {
+  it("'hint rung 3/5 (pointer)' is reworded whole", () => {
+    expect(scrubInternals("You're at hint rung 3/5 (pointer) of the Map step.")).toBe("You're at this stage of the Map step.");
   });
 });

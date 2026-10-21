@@ -2,7 +2,7 @@ import { stripIntake } from "./onboard.js";
 import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import type { TurnStep } from "./ladder.js";
-import { turnInstruction } from "./turns.js";
+import { turnInstruction, TURN_LIMITS } from "./turns.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -123,6 +123,8 @@ function scrubLine(line: string): string {
     .replace(/,\s*rung \d(?=\))/gi, "")
     .replace(/\(rung \d,\s*/gi, "(")
     .replace(RUNG_LEAD, (_m, lead: string, next: string) => lead + next.toUpperCase())
+    // Spike run 2 (2026-10-21): "at hint rung 3/5 (pointer)" lost only "rung 3" and became "this stage/5 (pointer)".
+    .replace(/\b(at|on) (?:hint )?rung \d(?:\/\d)?(?: \([\w-]+\))?/gi, (_m, p: string) => `${p} this stage`)
     .replace(/\b(at|on) rung \d\b(?![-\d])/gi, (_m, p: string) => `${p} this stage`);
   return l === line ? line : l.replace(/(\S) {2,}(?=\S)/g, "$1 ");
 }
@@ -172,4 +174,74 @@ export function formatCheck(issues: Issue[], cols = DIAGRAM_COLS): string {
     "[tutor-check] Your own previous reply (the tutor's, not the learner's) broke these rules. Follow them in this reply, and do not mention this note to the learner:",
     ...issues.map((i) => `- ${FIX[i](cols)}`),
   ].join("\n");
+}
+
+// ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
+
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery";
+
+/** Parameter-ish names every example uses; never the learner's own. */
+const COMMON = new Set(["self", "this", "cls", "args", "kwargs"]);
+const SIGNATURE = /([A-Za-z_][\w.:]*)\s*\(([^)]*)\)/g;
+const DEFINITION = /\b(?:def|function|fn|func)\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w.:]*)\s*\(([^)]*)\)/g;
+
+function addSignature(out: Set<string>, name: string, params: string) {
+  const add = (n: string) => { if (n.length >= 3 && !COMMON.has(n)) out.add(n); };
+  add(name.split(/[.:]/).pop() ?? name);
+  for (const p of params.split(",")) {
+    // `total: f64`, `height=2`, `*args`, `mut x`, Go's `a, b int` (the name comes first in each part).
+    const m = p.replace(/^\s*(?:mut\s+|&|\*+)*/, "").match(/^\s*([A-Za-z_]\w*)/);
+    if (m) add(m[1]);
+  }
+}
+
+/** The learner's own names: task signatures in spec/tasks.md backticks and the definitions in their sources. */
+export function ownNames(i: { tasksMd: string | null; sources: string[] }): Set<string> {
+  const out = new Set<string>();
+  for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) for (const m of span[1].matchAll(SIGNATURE)) addSignature(out, m[1], m[2]);
+  for (const src of i.sources) for (const m of src.matchAll(DEFINITION)) addSignature(out, m[1], m[2]);
+  return out;
+}
+
+const DIAGRAM_ONLY = /^[\s^|│┃─━┌┐└┘├┤┬┴┼▶◀►◄→←↑↓<>v+*#=~.:'"-]*$/;
+const TOKENS = /[A-Za-z_]\w*|\d+(?:\.\d+)?|[^\sA-Za-z_\d]/g;
+
+/** Code that uses one of the learner's names beyond naming it (`split_amount` or `split_amount()` alone is a pointer). */
+function usesOwnName(code: string, names: Set<string>): boolean {
+  const tokens = code.match(TOKENS) ?? [];
+  if (!tokens.some((t) => names.has(t))) return false;
+  const rest = tokens.filter((t) => !names.has(t) && t !== "(" && t !== ")");
+  return rest.length > 0 || tokens.filter((t) => names.has(t)).length > 1;
+}
+
+/** Spec §6: what code can check about one reply before the learner sees it. */
+export function checkTurn(text: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[] }): TurnIssue[] {
+  const limits = TURN_LIMITS[o.step];
+  const issues = new Set<TurnIssue>();
+  const quoted = new Set(o.sourceLines.map((l) => l.trim()).filter(Boolean));
+  const leaks = (line: string) => {
+    const t = line.trim();
+    return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && usesOwnName(t, o.names);
+  };
+  for (const m of text.matchAll(FENCES)) {
+    const tag = m[2].trim().toLowerCase();
+    if (tag === "tutor-judgment" || QUOTES.has(tag) || m[3].includes('"judgment"')) continue;
+    if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
+  }
+  const prose = text.replace(FENCES, "");
+  if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => leaks(m[1]))) issues.add("own-code");
+  const plain = prose.replace(/`[^`\n]*`/g, "x");
+  const sentences = plain.split(/[.!?]+(?=\s|$)/).filter((x) => /\w/.test(x)).length;
+  if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");
+  if (limits.question && !plain.includes("?")) issues.add("no-question");
+  if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
+  return [...issues];
+}
+
+/** C: a weak model's planning before the reply's first heading is folded away; a reply with no heading stays. */
+export function foldPreamble(text: string): string {
+  const m = /^\*\*[^*\n]+\*\*\s*:/m.exec(text);
+  if (!m || m.index === 0) return text;
+  const before = text.slice(0, m.index);
+  return /`{3}|~{3}/.test(before) ? text : text.slice(m.index);
 }
