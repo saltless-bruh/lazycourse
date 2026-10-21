@@ -56,6 +56,10 @@ skill from it in Pi's editor — edit and submit to keep, Esc to discard. Concep
 you know start one hint rung lower. Pin a docs version: `~/.config/nvim-tutor/sources.json` (`{ "python": "python~3.12" }`). See:
 
 - Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
+Teaching turns, phase 1 (2026-10-21, branch `teaching-turns`): help climbs with failed tries instead of
+the tutor's judgment, and each reply is held and checked before you see it (see "How it works"). Design:
+[`docs/superpowers/specs/2026-10-21-teaching-turns-design.md`](docs/superpowers/specs/2026-10-21-teaching-turns-design.md).
+
 - Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start, M5 knowledge/learn, M6a roles & rules)
 
 Milestone 6a (2026-10-13): every tutor reply follows one structure: **What's happening**
@@ -146,7 +150,8 @@ the editor exited; either way it still shows the tutor's state and last judgment
 ## How it works
 
 - **Level slider (0–100)** per language. Beginner (0–33) streams buffer snapshots, diagnostics, idle time and run output to the tutor and explains how code is structured. Intermediate (34–66) names concepts and points at docs. Pro (67–100) sends diagnostics, idle time and run output only, and gives hints, never code.
-- **Hint ladder.** When you're stuck, the tutor starts with a question. Each reply where you reason correctly unlocks a more concrete rung: concept, pointer to docs, pseudocode, and finally the line itself. Pro never reaches the last rung.
+- **Help climbs with your tries** (2026-10-21). Only graded tries count: a `:TutorRun` that fails with no error marked in your file. A typo the editor already marks, running unchanged code again, or chatting never moves help. The steps: teach (an unrelated example) → a small hint → why it is wrong → "what were you thinking?" → only the stuck line. Beginners get the line on try 4, intermediate on try 6; at pro it comes only when you ask with `/tutor-fix`. The widget shows `try N`. Coming back to a spot after a different error keeps its count until a run passes.
+- **Every teaching reply is checked before you see it.** It shows "tutor is checking this reply…" while it is written; code checks it against this step (no code with your task's names before the fix, short enough, a question when it must ask, no talk about the tutor's machinery). A reply that fails is written again (at most twice), else you get a short safe note. The model's thinking stays hidden until the fix is allowed.
 - **Getting started.** A short conversation builds your profile (the model talks; the code keeps the checklist and makes the decisions). The tutor proposes one project targeting your weak or unknown concepts and writes `spec/design.md`, `spec/tasks.md`, `spec/requirements.md` with stable task ids, grouped into milestones when you learn first.
 - **Knowledge base.** Instructions, skills, and workflows map onto Pi's `AGENTS.md`, `SKILL.md`, and prompt templates. Official docs are fetched into skills per language; you can edit them, and `/tutor-learn` drafts a new skill from a finished stuck episode.
 - **Language packs** (Python, Rust, Go, TypeScript, Lua, JavaScript, plus the editor). Every turn carries a short

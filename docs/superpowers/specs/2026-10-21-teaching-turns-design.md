@@ -38,6 +38,15 @@ decision from a prompt rule into code. This design does the same for teaching.
     10/12 and 32/36. The disagreements: 2 wrong checks (exact decimal comparison, `17.599999… ≠ 17.6`) and
     4 right checks where *both* references, from two different models, made the same mistake. So
     disagreement is a useful alarm, and neither side can be trusted blindly.
+- **Phase 1 live result (2026-10-21, real LazyVim, Lua project, wrong `split_amount`, 6 runs):** both models
+  reached try 1, 2, 2 (unchanged rerun), 2 (a typo lua_ls marked), 3, 4. nemotron: hint after rewrites, why
+  ended in the code-written fallback after 3 broken replies, "What were you thinking when you used
+  `math.floor`…?" at try 3, the line at try 4. glm: hint after one rewrite, a why with a diagram and no code,
+  the ask, and "replace line 4 with exactly this: `return total / people`". The live runs found six defects,
+  each fixed test-first: the spot key (numbers that change, stack frames, Lua's message line), a typo in
+  between resetting a spot's count, re-ask requests showing in the chat, the fallback printing the internal
+  key, the model closing a run's episode, and quoting the error's own text counted as a leak. Not yet live:
+  Python typos with no Python language server (nothing marks them, so they count as tries).
 - **Published work:** CodeAid (CHI 2024: pseudo-code with line-by-line explanation, no solutions, 700
   students); CodeHelp (Koli Calling 2023: prompt rules leaked code, so it added a code-removal pass);
   Phung et al. (LAK 2024: a weaker model validating a stronger model's hints raised hint quality);
