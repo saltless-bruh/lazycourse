@@ -1720,6 +1720,23 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     await exchange(b, note({ path: "build" }));
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
+  it("a checks job still running at /new or /reload stays silent afterwards (pane check #2)", async () => {
+    const b = await boot({ cwd: dir });
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { systemPrompt: string }) => {
+      if (c.systemPrompt.startsWith("You write the specification")) return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: SPEC([]) }] };
+      await held;
+      throw new Error("This extension ctx is stale after session replacement or reload.");
+    };
+    await exchange(b, note({ path: "build" }));
+    await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+    await new Promise((r) => setTimeout(r, 50));
+    await b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    release();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(b.notes.filter((n) => /checks could not be written/.test(n))).toEqual([]);
+  });
   async function failingPlan(errorMessage: string) {
     const { PROVIDER_RETRY } = await import("../extensions/tutor/progress.js");
     const base = PROVIDER_RETRY.baseDelayMs;

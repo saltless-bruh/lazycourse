@@ -255,6 +255,19 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
     expect(readFileSync(outside, "utf8")).toBe("keep me\n");
   }, 30000);
+  it("unsaved edits made to spec/tasks.md while the checks run are not overwritten by the tick (pane check #1)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    const path = join(root, "spec", "tasks.md");
+    let edited = false;
+    (b.pi as { exec: unknown }).exec = async (c: string, a: string[], o: { cwd: string; timeout: number }) => {
+      if (!edited) { edited = true; await nvim!.command(`edit ${path}`); await nvim!.command("normal! Gonote to self"); }
+      return realExec(c, a, o);
+    };
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(path, "utf8")).toContain("- [ ] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/unsaved edits/);
+    expect(await nvim!.call("getline", ["$"])).toBe("note to self");
+  }, 30000);
   it("waits while spec/tasks.md has unsaved edits in Neovim, and runs nothing", async () => {
     const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
     await nvim!.command(`edit ${join(root, "spec", "tasks.md")}`);

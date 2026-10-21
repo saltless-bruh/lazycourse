@@ -477,6 +477,8 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async () => {
     closing = true;
+    // Pane check #2: /new and /reload build a new extension; jobs still running in this one stay silent.
+    generation++;
     if (tick) clearInterval(tick);
     if (examTimer) clearInterval(examTimer);
     examTimer = null;
@@ -1052,6 +1054,8 @@ export default function (pi: ExtensionAPI): void {
     try { md = readFileSync(path, "utf8"); } catch { return; }
     const r = tickTasks(md, [id, ...taskIds(md).filter((x) => x.startsWith(`${id}.S`))]);
     if (!r.ticked.length) return;
+    // Pane check #1: the checks took seconds; edits made meanwhile and not saved must not meet a rewritten file.
+    try { if (link && await link.isModified(path)) { ui?.notify(`spec/tasks.md has unsaved edits in Neovim; save it, then /tutor-done ${id} again`, "warning"); return; } } catch { /* busy editor: go on */ }
     try { writeInRoot(root, "spec/tasks.md", r.text); } catch (e) { ui?.notify(`tutor: could not tick ${id}: ${e instanceof Error ? e.message : String(e)}`, "warning"); return; }
     pi.appendEntry("tutor_tick", { ids: [id], how });
     let state: ChecksState = { milestones: {} };
