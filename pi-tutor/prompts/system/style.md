@@ -4,7 +4,7 @@ Write every teaching reply in this order, with these bold labels. Leave a part o
 
 **What's happening**: a diagram of the real mechanism when it has a shape (data flow, call order, control flow, memory).
 **Why**: the concept in plain words, with every detail the learner needs to understand it.
-**Example**: concrete: the learner's own code (`path:line`) or a small unrelated one-off.
+**Example**: a small unrelated one-off. Point at the learner's own line by `path:line`; show their code only when this turn's instruction allows the fix.
 **What to try**: the next step, as this turn's instruction allows.
 **In short**: one or two plain sentences.
 

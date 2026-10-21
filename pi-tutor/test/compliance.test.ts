@@ -353,3 +353,13 @@ describe("checkTurn after the final review (I1, I6, I7)", () => {
     expect(checkTurn('Look at line 3.\n{"judgment":"none","concept_tags":[],"step_done":false}', { step: "hint", names, sourceLines: src })).toEqual([]);
   });
 });
+
+describe("final review I5: the prompt never asks for what the check rejects", () => {
+  it("hint and ask turns are plain sentences, not the five bold parts", () => {
+    for (const s of ["hint", "ask"] as const) {
+      expect(replyReminder(s)).not.toMatch(/Use the bold parts/);
+      expect(replyReminder(s)).toMatch(/plain sentences/);
+    }
+    expect(replyReminder("teach")).toMatch(/Use the bold parts/);
+  });
+});

@@ -12,7 +12,7 @@ Use the bold labels, in this order. Leave a part out only when it does not apply
 
 1. **What's happening**: a diagram of the real mechanism (data flow, call order, control flow, memory). Skip it when the subject has no shape.
 2. **Why**: the concept in plain words, with every detail needed. Define each term the first time it appears.
-3. **Example**: concrete: the learner's own code (`path:line`) or a small unrelated one-off. Never their solution.
+3. **Example**: a small unrelated one-off. Point at the learner's own line by `path:line`; show their code only when this turn allows the fix. Never their solution.
 4. **What to try**: the next step, as this turn's instruction allows.
 5. **In short**: one or two plain sentences.
 

@@ -168,7 +168,11 @@ export function replyReminder(step: TurnStep | null, recipe = false): string {
     ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
     : step !== null && step !== "fix" ? " Do not state the fix, in code or in words." : "";
   const turn = step !== null ? ` This turn: ${turnInstruction(step)}` : "";
-  return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}${turn}`;
+  // Final review I5: a hint or a question is a few plain sentences; the five parts would fail its length check.
+  const shape = step === "hint" || step === "ask"
+    ? "Reply in plain sentences, no bold parts,"
+    : "Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters,";
+  return `[tutor-reply] ${shape} and end with the \`\`\`tutor-judgment block.${hold}${turn}`;
 }
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
