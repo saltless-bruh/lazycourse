@@ -184,17 +184,15 @@ describe("task ticking (M8 D6)", () => {
 });
 
 describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
-  it("a failing run takes over an open error episode and nudges inside the gap", async () => {
+  it("a failing run while the file shows an error is a typo run: the error episode stays, no attempt, no nudge (spec 2026-10-21 §5)", async () => {
     const b = await linked();
     await setError("boom");
-    await until(() => b.sent.length === 1); // the error episode's nudge starts the 2-minute gap
+    await until(() => b.sent.length === 1); // the error episode's own nudge
     await runPayload(1, "Traceback (most recent call last):\n  File \"a.py\", line 1\nKeyError: 'x'");
-    await until(() => b.sent.length === 2);
-    expect(b.sent[1].text).toBe("[tutor] stuck signal: run failed (exit 1): python3 a.py");
-    const eps = episodes(b.entries);
-    expect(eps.at(-1)).toMatchObject({ trigger: { kind: "run", code: 1, trace: expect.stringContaining("KeyError: 'x'") } });
-    expect(eps.find((e) => (e.trigger as { kind: string }).kind === "error" && e.closeReason === "superseded")).toBeTruthy();
-    expect(b.widgets["tutor"]?.[1]).toBe("stuck: run failed (exit 1): python3 a.py");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(b.sent).toHaveLength(1);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error", msg: "boom" }, attempts: 0 });
+    expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
   }, 20000);
 
   it("a passing run closes the run episode; an editor error does not replace it", async () => {
