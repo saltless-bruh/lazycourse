@@ -690,9 +690,11 @@ export default function (pi: ExtensionAPI): void {
       if (issues.length) {
         // The session keeps what was rejected (never shown) so a live audit can tell a leak from a too-strict check.
         pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000) });
-        const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
+        // Final review M2: a reply cut off (length) or broken (error) is still the last word of its run: it gets the
+        // fallback, never an empty reply. Only a clean stop is re-asked.
+        const final = !m.content.some((c) => c.type === "toolCall");
         let replacement = "";
-        if (final && (cur.reasks ?? 0) < MAX_REASKS) {
+        if (final && m.stopReason === "stop" && (cur.reasks ?? 0) < MAX_REASKS) {
           replacement = REWRITE_TEXT;
           rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step };
           pendingRewrite = issues;

@@ -1759,6 +1759,13 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     expect(shown[2]).not.toMatch(/`/);
     expect(b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite")).toHaveLength(2);
   });
+  it("final review M2: a cut-off reply that fails its check shows the fallback, never nothing", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const cut = assistant("Change it to `return total / people` and", "length");
+    await turn(b.events, b.ctx, "help", cut);
+    expect(textOf(cut)).toBe(fallbackReply("hint", "ZeroDivisionError: x"));
+  });
   it("the transformer holds a streaming reply and hides the judgment block after it", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, b.ctx);
