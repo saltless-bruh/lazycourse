@@ -47,6 +47,20 @@ decision from a prompt rule into code. This design does the same for teaching.
   between resetting a spot's count, re-ask requests showing in the chat, the fallback printing the internal
   key, the model closing a run's episode, and quoting the error's own text counted as a leak. Not yet live:
   Python typos with no Python language server (nothing marks them, so they count as tries).
+- **Phase 2 live result (2026-10-22, real LazyVim, Python with no language server, a learn-first project one
+  concept short of milestone 1, `:TutorLesson skip` → building):** both models wrote `spec/checks.md` within a
+  minute (nemotron 2 checks for P1.T1 and 1 for P1.T2, glm 2 and 2), all trusted by the separate reference.
+  `:TutorDone P1.T1` on `* people`, `* 1.0`, the same code again, three syntax errors (unclosed bracket, missing
+  `:`, unindented body), `//`, then `/`: try 1, 2, 2, 2, 2, 2, try 1 on the new check, ticked ("2 check(s)
+  passed"). The syntax notes quote Python's own message with the line. The reference never entered the
+  project; Pi's settings were unchanged. The first nemotron run found two defects, fixed test-first before the
+  reruns: the widget clipped `try N` behind "build: milestone 1", and its only check was
+  `split_amount(48, 3)`, where `//` and `/` agree, so floor division ticked the task (the checks prompt now
+  asks for inputs that tell a close wrong answer apart; both models then added `50, 3`). Replies: glm gave a
+  hint at try 1 and a why with an unrelated example at try 2; nemotron named the fix in prose at try 1 ("use
+  `/` instead of `*`", "true division is needed"). The leak check compares code only, so prose fixes pass.
+  Lua: with the generated `.luarc.json` ("Lua 5.5" from `lua -v`), LazyVim's lua_ls stops marking `7 // 2`;
+  without it, it reports "LuaJIT does not support this grammar".
 - **Published work:** CodeAid (CHI 2024: pseudo-code with line-by-line explanation, no solutions, 700
   students); CodeHelp (Koli Calling 2023: prompt rules leaked code, so it added a code-removal pass);
   Phung et al. (LAK 2024: a weaker model validating a stronger model's hints raised hint quality);
