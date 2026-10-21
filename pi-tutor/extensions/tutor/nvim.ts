@@ -6,10 +6,10 @@ import { PUSH_LUA } from "./push.lua.js";
 
 // The neovim client logs through winston and patches console; route it to a file
 // before it loads so nothing ever reaches Pi's terminal.
-/** Per-user log for the neovim client (M1b #6): never one /tmp file shared by every user. */
 /** A failed connect waits at most this long for its abandoned request before closing the socket. */
 const CLOSE_WAIT_MS = 10_000;
 
+/** Per-user log for the neovim client (M1b #6): never one /tmp file shared by every user. */
 export function nvimLogPath(env: NodeJS.ProcessEnv): string {
   const state = env.XDG_STATE_HOME || join(env.HOME || homedir(), ".local", "state");
   return join(state, "pi-tutor", "nvim.log");
