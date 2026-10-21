@@ -177,3 +177,25 @@ describe("final review: the existing project folder", () => {
     expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
   });
 });
+
+describe(".luarc.json into a Lua folder (author 2026-10-21)", () => {
+  const luaMeta = { ...meta, language: "lua" };
+  const luaSpec = () => spec({ entry_file: "src/main.lua", run_cmd: "lua src/main.lua" });
+  it("written when absent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeScaffold(dir, luaSpec(), luaMeta, { existing: true, luaRuntime: "Lua 5.4" });
+    expect(JSON.parse(readFileSync(join(dir, ".luarc.json"), "utf8"))["runtime.version"]).toBe("Lua 5.4");
+  });
+  it("a learner's own .luarc.json is kept, and the spec is still written", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeFileSync(join(dir, ".luarc.json"), "{\"mine\": true}");
+    writeScaffold(dir, luaSpec(), luaMeta, { existing: true, luaRuntime: "Lua 5.4" });
+    expect(readFileSync(join(dir, ".luarc.json"), "utf8")).toBe("{\"mine\": true}");
+    expect(existsSync(join(dir, "spec", "tasks.md"))).toBe(true);
+  });
+  it("not for another language", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
+    writeScaffold(dir, spec(), meta, { existing: true, luaRuntime: "Lua 5.4" });
+    expect(existsSync(join(dir, ".luarc.json"))).toBe(false);
+  });
+});

@@ -8,6 +8,7 @@ import { loadPack, vocabOf, weakConcepts } from "./packs.js";
 import { suggestPrompt, checkSuggestions, type Suggestion } from "./suggest.js";
 import { agents, slugify, isEmptyOrMissing } from "./scaffold.js";
 import { LANGS } from "./knowledge/versions.js";
+import { luarcJson } from "./luarc.js";
 
 // /tutor-start building blocks (spec 2026-10-19 §5): the conversation lives in index.ts and onboard.ts;
 // these make the one project suggestion and the project folder. The spec is written later (Task 7).
@@ -43,7 +44,7 @@ export function defaultProjectDir(home: string, language: string, title: string)
  * The project folder before any spec (Q23): README front matter (language, test), AGENTS.md, and the
  * profile rows, so the Pi that restarts there finds its project. Refuses a non-empty folder.
  */
-export function createProject(profile: Profile, i: { language: string; level: number; project: Suggestion; dir: string; about: Record<string, string>; now: number }): { dir: string } {
+export function createProject(profile: Profile, i: { language: string; level: number; project: Suggestion; dir: string; about: Record<string, string>; now: number; luaRuntime?: string | null }): { dir: string } {
   const dir = resolve(i.dir);
   if (!isEmptyOrMissing(dir)) throw new Error(`${dir} is not empty; pick another folder`);
   mkdirSync(dir, { recursive: true });
@@ -51,6 +52,7 @@ export function createProject(profile: Profile, i: { language: string; level: nu
   const meta = { language: i.language, level: i.level, band: bandFor(i.level), title: i.project.title, summary: i.project.summary };
   writeFileSync(join(dir, "README.md"), `---\n${test ? `test: ${test}\n` : ""}language: ${i.language}\n---\n# ${i.project.title}\n\n${i.project.summary}\n\nThe plan arrives in \`spec/\` shortly; the tutor is writing it.\n`, { flag: "wx" });
   writeFileSync(join(dir, "AGENTS.md"), agents(meta), { flag: "wx" });
+  if (i.language === "lua" && i.luaRuntime) writeFileSync(join(dir, ".luarc.json"), luarcJson(i.luaRuntime), { flag: "wx" });
   // M4 #25: the tutor finds its project by realpath(cwd); a symlinked parent must not hide it.
   const real = realpathSync(dir);
   if (profile.language(i.language)) profile.setLevel(i.language, i.level);

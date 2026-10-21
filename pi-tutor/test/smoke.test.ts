@@ -440,6 +440,17 @@ describe("M5-finish /tutor-docs and /tutor-start (DevDocs)", () => {
     expect(b.notes.some((n) => /go docs fetch failed/.test(n))).toBe(true);
     expect(b.notes.at(-1)).toContain(`cd ${join(root, "p1")} && pi`);
   });
+
+  it("a Lua project gets a .luarc.json naming the installed Lua (author 2026-10-21)", async () => {
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "pitutor-luarc-"));
+    const b = await boot({ cwd: root });
+    b.execOut["lua"] = { stdout: "Lua 5.5.1  Copyright (C) 1994-2025 Lua.org, PUC-Rio\n", stderr: "", code: 0 };
+    await toProject(b, "lua", join(root, "p1"));
+    expect(JSON.parse(readFileSync(join(root, "p1", ".luarc.json"), "utf8"))["runtime.version"]).toBe("Lua 5.5");
+  });
 });
 
 describe("one judgment per run", () => {

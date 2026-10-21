@@ -19,6 +19,7 @@ import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
+import { luaRuntime } from "./luarc.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -1195,8 +1196,9 @@ export default function (pi: ExtensionAPI): void {
       const answer = await ctx.ui.input(`Project folder (Enter for ${def})`, def);
       if (answer === undefined) { saveOnboarding(o); return; }
       let dir: string;
+      const lua = await luaRuntimeFor(lang);
       try {
-        dir = createProject(profile, { language: lang, level: o.level ?? levelFrom(o), project: { ...o.project, size: "small" }, dir: resolve(expandHome(answer.trim() || def, homedir())), about: aboutOf(o), now: Date.now() }).dir;
+        dir = createProject(profile, { language: lang, level: o.level ?? levelFrom(o), project: { ...o.project, size: "small" }, dir: resolve(expandHome(answer.trim() || def, homedir())), about: aboutOf(o), now: Date.now(), luaRuntime: lua }).dir;
       } catch (e) { saveOnboarding(o); ctx.ui.notify(e instanceof Error ? e.message : String(e), "warning"); return; }
       saveOnboarding({ ...o, stage: "choose", presented: null, dir });
       await fetchDocs(ctx, lang, false); // the switched Pi loads the language's docs (spec §6 last step)
@@ -1205,6 +1207,15 @@ export default function (pi: ExtensionAPI): void {
         await link.switchProject(dir, "README.md");
       } else ctx.ui.notify(`made ${o.project.title} in ${dir}. Continue with: cd ${dir} && pi`, "info");
     }
+  }
+
+  /** Author 2026-10-21: the installed Lua as lua_ls names it, for a Lua project's .luarc.json; null when absent. */
+  async function luaRuntimeFor(language: string): Promise<string | null> {
+    if (language !== "lua") return null;
+    try {
+      const r = await pi.exec("lua", ["-v"], { timeout: 5000 });
+      return r.code === 0 ? luaRuntime(`${r.stdout}\n${r.stderr}`) : null;
+    } catch { return null; }
   }
 
   /** `/tutor-start check`: run the level task in the sandbox; passing or not only sets the level (Q13). */
@@ -1268,7 +1279,7 @@ export default function (pi: ExtensionAPI): void {
         const spec = await completeJson(rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
           scaffoldPrompt({ language: proj.language, level: job.level, band: meta.band, project: { ...job.project, size: "small" }, about: job.about, rounds: job.rounds }),
           (v) => checkScaffold(v, job.rounds));
-        writeScaffold(proj.path, spec, meta, { existing: true });
+        writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language) });
         if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
         if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
       } catch (e) {
