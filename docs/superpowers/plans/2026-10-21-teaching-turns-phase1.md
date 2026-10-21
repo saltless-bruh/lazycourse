@@ -27,6 +27,8 @@ re-asked through a fresh run, at most twice, then replaced by a safe fallback.
 - Thinking (spec §6, author): hidden on teaching turns while the fix is not allowed, whatever `/tutor-thinking` says; the learner's setting applies again after the fix and outside teaching turns.
 - Which runs count (spec §5, author): a failed run while the editor shows an error in a project file is not an attempt (a typo); a failed run with no error shown is an attempt; a run that succeeds is never an attempt.
 - Running code that has not changed since the last failed attempt on that spot is not a new attempt (spec §11a).
+- Only graded tries count (spec §5, author): a chat message never moves the attempt count, whatever it says and whether or not the code changed; it is answered at the current step.
+- Phases 1 and 2 merge to main together (spec §13): this plan ends on the `teaching-turns` branch with its live check; it is not merged alone.
 - Exams: only the teach, hint and why steps; never the ask step, never the fix (spec §11a).
 - Out of scope for phase 1: checks and the reference solution (phase 2), the recipe default and teaching format (phase 3), the right-click menu and removing the error nudge (phase 4), intermediate/pro testing (phase 5), the model checker (phase 6). Ticking from `task_done_ids` stays as it is until phase 2.
 
@@ -353,6 +355,10 @@ it("changes when a source file changes, not when spec/ does", () => {
 it("failed runs on one spot climb; an unchanged rerun and a typo run do not", async () => {
   // boot in a temp project; push run_output (code 1, the same trace) after editing src/main.py → attempts 1, 2;
   // push the same run without editing → still 2; push a diagnostics error in src/main.py, then a failed run → still 2, no nudge sent
+});
+it("a chat message never counts as an attempt, even after the code changed (only graded tries count)", async () => {
+  // with a run episode at attempts 1: edit src/main.py, then run a chat turn "I changed it, still wrong"
+  // → attempts stays 1, and that turn's step is still "hint"
 });
 ```
 

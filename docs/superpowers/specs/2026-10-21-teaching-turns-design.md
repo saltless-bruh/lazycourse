@@ -104,6 +104,11 @@ check), or, for a task with no check, a failed `:TutorRun` inside the same stuck
 `run` episode keeps its place across reruns, `index.ts:281`). *(Builder: what counts as "the same spot"
 for runs without checks; the error line and message are the obvious key.)*
 
+Only graded tries count (author's decision, 2026-10-21, after comparing established tutors: Cognitive
+Tutor, ASSISTments, autograders all count a submission judged against a known answer). A chat message is a
+question: it is answered at the current step and never moves help forward, even when the learner says it is
+still wrong or their code changed, because nothing grades it.
+
 Which runs count (author's decision, 2026-10-21):
 
 ```
@@ -258,6 +263,9 @@ spot" key for runs without checks; where checks and the reference live on disk (
 out of the learner's reach and out of the tutor's read tools); the build order inside each phase.
 
 ## 13. Suggested order
+
+Phases 1 and 2 are built on one branch and merged to main together (author, 2026-10-21): without phase 2's
+checks, code that runs but gives the wrong answer is never a graded try. Each phase gets its own live check.
 
 1. Held replies + code checks + C/D fixes + attempt counting from runs (the foundation; helps every model
    at once).
