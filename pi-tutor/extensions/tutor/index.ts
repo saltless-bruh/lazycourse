@@ -681,7 +681,8 @@ export default function (pi: ExtensionAPI): void {
     if (held() && cur && cur.step !== null && text.trim()) {
       const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [] });
       if (issues.length) {
-        pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0 });
+        // The session keeps what was rejected (never shown) so a live audit can tell a leak from a too-strict check.
+        pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000) });
         const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
         let replacement = "";
         if (final && (cur.reasks ?? 0) < MAX_REASKS) {

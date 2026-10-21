@@ -1726,6 +1726,8 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     await turn(b.events, b.ctx, "help", leak);
     expect(textOf(leak)).toBe(REWRITE_TEXT);
     expect(judgments(b)).toBe(0);
+    // Live audits need the rejected text (never shown): was it a real leak or a too-strict check?
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["own-code"], rejected: expect.stringContaining("return total / people") });
     const sentBefore = b.sent.length;
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
     await settle();
