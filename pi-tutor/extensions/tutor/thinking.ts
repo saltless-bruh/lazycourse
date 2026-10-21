@@ -11,6 +11,7 @@ export function parseThinkingMode(s: string): ThinkingMode | null {
   return (MODES as readonly string[]).includes(m) ? (m as ThinkingMode) : null;
 }
 
-export function thinkingHidden(mode: ThinkingMode, band: Band): boolean {
-  return mode === "hide" || (mode === "auto" && band === "pro");
+/** `guarded`: a teaching turn before the fix is allowed, where the thinking holds the fix (spec 2026-10-21 §6). */
+export function thinkingHidden(mode: ThinkingMode, band: Band, guarded = false): boolean {
+  return guarded || mode === "hide" || (mode === "auto" && band === "pro");
 }

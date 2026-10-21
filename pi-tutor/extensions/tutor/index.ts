@@ -10,7 +10,8 @@ import { bandFor, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, type Issue } from "./compliance.js";
+import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
+import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "./turns.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
 import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
@@ -19,7 +20,7 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { StuckDetector, spotOf, type StuckEvent } from "./stuck.js";
-import { sourceHash } from "./source-hash.js";
+import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
 import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
@@ -168,7 +169,12 @@ export default function (pi: ExtensionAPI): void {
   /** `episodeId`: the episode a ladder-role run answers, `null` when it started without one (M6c M6). */
   /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
   /** `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role. */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null } | null = null;
+  /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[] } | null = null;
+  /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
+  let rewrite: { reasks: number; issues: TurnIssue[] } | null = null;
+  /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
+  let pendingRewrite: TurnIssue[] | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
   let pendingSteers = 0;
   /** M8 D6: task ids the model reported done, ticked in spec/tasks.md by the next passing run. */
@@ -512,12 +518,25 @@ export default function (pi: ExtensionAPI): void {
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
-    run = { prompt, step: role.ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined };
+    // Spec 2026-10-21 §6: a rewrite run keeps the re-ask count of the reply it replaces; any other run starts at 0.
+    const isRewrite = prompt.startsWith(`${TUTOR_PREFIX} rewrite:`);
+    if (!isRewrite) rewrite = null;
+    run = { prompt, step: role.ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
     }
     if (snap?.filetype) { state.language = snap.filetype; paint(); }
+    if (run.step !== null) {
+      // The learner's own names for the reply check: task signatures and their definitions, inside the root only.
+      const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
+      let tasksMd: string | null = null;
+      try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { tasksMd = null; }
+      const sources = projectSources(root);
+      if (snap && realCwd(snap.path).startsWith(root + "/")) sources.push(snap.lines.join("\n"));
+      run.names = ownNames({ tasksMd, sources });
+      run.sourceLines = sources.flatMap((t) => t.split(/\r?\n/));
+    }
     // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
     const lang = project?.language ?? editorLanguage();
     run.lang = lang;
@@ -539,7 +558,8 @@ export default function (pi: ExtensionAPI): void {
       const index = packIndex(lang);
       if (index) parts.push(index);
     }
-    if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
+    if (isRewrite && rewrite) parts.push(formatCheck(rewrite.issues, diagramCols(paneWidth)));
+    else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
     parts.push(replyReminder(run.step, workflow !== null && role.ladder));
@@ -611,11 +631,17 @@ export default function (pi: ExtensionAPI): void {
   // Style guards (golden 2026-10-13: "At rung 1, …", "line 4597 in INDEX.md"). The screen shows the
   // reworded text while it streams; message_end swaps it into the finished reply before turn_end,
   // the saved session and the model's next context see it. Fences (the judgment block) are kept.
+  /** A teaching turn: its reply is held off screen while it streams and checked before it is shown. */
+  const held = () => run !== null && run.step !== null && !onboardingActive();
+  const guarded = () => held() && run!.step !== "fix";
   pi.registerMarkdownTransformer((md, c) => {
-    if (c.messageType === "assistant-thinking") return thinkingHidden(thinking, bandFor(level())) ? THINKING_LABEL : md;
+    // Spec 2026-10-21 §6: before the fix is allowed the thinking (where the model works the fix out) stays hidden.
+    if (c.messageType === "assistant-thinking") return thinkingHidden(thinking, bandFor(level()), guarded()) ? THINKING_LABEL : md;
     if (c.messageType !== "assistant") return md;
     paneWidth = c.availableWidth;
-    return scrubInternals(md);
+    if (held() && c.isStreaming) return HOLD_TEXT;
+    const shown = hideJudgment(scrubInternals(md));
+    return held() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", (event) => {
     const m = event.message;
@@ -628,13 +654,41 @@ export default function (pi: ExtensionAPI): void {
       if (text.trim()) intake = parseIntake(text);
     }
     let changed = false;
-    const content = m.content.map((c) => {
+    let content = m.content.map((c) => {
       if (c.type !== "text") return c;
-      const text = scrubInternals(c.text);
+      const text = held() ? foldPreamble(scrubInternals(c.text)) : scrubInternals(c.text);
       if (text === c.text) return c;
       changed = true;
       return { ...c, text };
     });
+    const cur = run;
+    const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+    if (held() && cur && cur.step !== null && text.trim()) {
+      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [] });
+      if (issues.length) {
+        pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0 });
+        const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
+        let replacement = "";
+        if (final && (cur.reasks ?? 0) < MAX_REASKS) {
+          replacement = REWRITE_TEXT;
+          rewrite = { reasks: (cur.reasks ?? 0) + 1, issues };
+          pendingRewrite = issues;
+        } else if (final) {
+          replacement = fallbackReply(cur.step, episode?.spot);
+          rewrite = null;
+        }
+        // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.
+        if (final) cur.rejected = true;
+        let placed = false;
+        const next: typeof content = [];
+        for (const c of content) {
+          if (c.type !== "text") next.push(c);
+          else if (!placed) { placed = true; next.push({ ...c, text: replacement }); }
+        }
+        content = next;
+        changed = true;
+      }
+    }
     return changed ? { message: { ...m, content } } : undefined;
   });
 
@@ -646,6 +700,8 @@ export default function (pi: ExtensionAPI): void {
     // Aborted, errored and truncated turns carry no judgment.
     if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
     const cur = run ?? (run = { prompt: "", step: roleNamed(activeRole).ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false });
+    // A held reply that failed its check was replaced: it carries no judgment and is not checked again here.
+    if (cur.rejected) { paint(); return; }
     let callArgs: unknown;
     for (const c of m.content) if (c.type === "toolCall" && isJudgmentTool(c.name)) callArgs = c.arguments;
     const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
@@ -1306,6 +1362,12 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (pendingRewrite) {
+      const issues = pendingRewrite;
+      pendingRewrite = null;
+      // A fresh run (before_agent_start builds its context), started once Pi is idle (live check 2026-10-19).
+      sendWhenIdle(ctx, `${TUTOR_PREFIX} rewrite: your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
+    }
     if (!onboardingActive() || !onboarding) return;
     const note = intake;
     intake = undefined;

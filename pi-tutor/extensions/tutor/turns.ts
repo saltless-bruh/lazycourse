@@ -3,6 +3,12 @@ import type { TurnStep } from "./ladder.js";
 // One narrow instruction per turn (spec 2026-10-21 §6): a long rule list does not steer a weak model, so code
 // picks the step from the attempt count and the model gets only that step's job and limits.
 
+/** Re-asks of one reply before the learner gets the code-written fallback (spec §6). */
+export const MAX_REASKS = 2;
+/** Shown while a held reply streams, and in place of a reply that is being written again. */
+export const HOLD_TEXT = "_(tutor is checking this reply…)_";
+export const REWRITE_TEXT = "_(tutor is rewriting this reply…)_";
+
 /** What a reply at each step may be; the reply check (compliance.checkTurn) holds it to these. */
 export const TURN_LIMITS: Record<TurnStep, { maxSentences: number | null; ownCode: boolean; question: boolean }> = {
   teach: { maxSentences: null, ownCode: false, question: false },

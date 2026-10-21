@@ -126,12 +126,19 @@ Re-verify every line when bumping versions.
   `_replaceMessageInPlace` swaps it into the same object before `turn_end`, session persistence and
   `--mode json` output (probe 2026-10-14, Pi 1.1.0: `turn_end` and the JSON `message_end` both had the
   replaced text). Used to reword internals in assistant replies (compliance.scrubInternals).
+  Pi 1.3.0 (verified 2026-10-21): handlers are awaited one by one (extensions/runner.js `emitMessageEnd`), and
+  agent-session.js emits to extensions before the UI ("Emit to extensions first, then notify public
+  listeners"), so an async check here runs before the screen gets the final message. Used for held teaching
+  replies (spec 2026-10-21 §6): the reply is checked (compliance.checkTurn) and replaced when it fails. Live
+  spike 2026-10-20: a reply held behind a placeholder through an 8 s async check, then released replaced.
 - `pi.registerMarkdownTransformer((markdown, { messageType, isStreaming, availableWidth }) => string)`
   (types.d.ts:1128-1141, 1228): interactive TUI only, display only; pi-tui caches the result by text
   and width (markdown.js:185), so it reruns on each streaming update and on resize. Only
   `AssistantMessageComponent` passes `"assistant"` (thinking is `"assistant-thinking"`). `availableWidth` is the Markdown content width (terminal minus `paddingX` 1 each
   side; probe: 70-col tmux → 68); code block lines are indented by `codeBlockIndent` (default 2, pi-tui
-  markdown.js:393). Used for the screen rewording and the real diagram width.
+  markdown.js:393). Used for the screen rewording and the real diagram width. `isStreaming` (Pi 1.3.0,
+  types.d.ts:1162) is true while the reply streams: a held reply shows a placeholder until message_end.
+  Not used: `message_start` (types.d.ts:1216) — the run's step from before_agent_start already marks a held run.
   Thinking blocks come through as `"assistant-thinking"` (assistant-message.js:118). When Pi's own
   `hideThinkingBlock` is on, Pi draws its label and never calls the transformer (:112-113). No
   extension API sets `hideThinkingBlock` (only `ctx.ui.setHiddenThinkingLabel`), so `/tutor-thinking`

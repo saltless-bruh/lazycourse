@@ -87,12 +87,16 @@ export function checkReply(text: string, o: { band: Band; step: TurnStep | null;
   return [...issues];
 }
 
-const FIX: Record<Issue, (cols: number) => string> = {
+const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "missing-judgment": () => "it did not end with the fenced tutor-judgment block (plain text, not a tool call)",
   "code-above-rung": () => "it showed code the current rung does not allow; point and explain instead",
   "wide-diagram": (cols) => `a diagram line was wider than the learner's pane (${cols} characters); stack it vertically`,
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
   "no-summary": () => "a long reply had no **In short** line",
+  "own-code": () => "it showed the learner's own code (their names) before this turn allows the fix; teach on an unrelated example or point at the place",
+  "too-long": () => "it was longer than this turn allows",
+  "no-question": () => "this turn must ask a question, and it asked none",
+  "machinery": () => "it talked about the tutor's machinery or about \"the learner\"; talk to them directly about the code",
 };
 
 // Rewrites for the machinery checkReply calls "internals" (golden leaks 2026-10-13: "At rung 1, I'll
@@ -168,7 +172,7 @@ export function replyReminder(step: TurnStep | null, recipe = false): string {
 }
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
-export function formatCheck(issues: Issue[], cols = DIAGRAM_COLS): string {
+export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS): string {
   // Live check: worded as "your last reply", the model blamed the learner's diagram for its own.
   return [
     "[tutor-check] Your own previous reply (the tutor's, not the learner's) broke these rules. Follow them in this reply, and do not mention this note to the learner:",
@@ -244,4 +248,12 @@ export function foldPreamble(text: string): string {
   if (!m || m.index === 0) return text;
   const before = text.slice(0, m.index);
   return /`{3}|~{3}/.test(before) ? text : text.slice(m.index);
+}
+
+/** D: the judgment block is for the extension only; the screen never shows it (the stored reply keeps it). */
+export function hideJudgment(md: string): string {
+  let out = md.replace(/^ {0,3}(`{3,}|~{3,})(?:tutor-judgment|json)?[ \t]*\r?\n[\s\S]*?"judgment"[\s\S]*?^ {0,3}\1[`~]*[ \t]*$\r?\n?/gm, "");
+  out = out.replace(/(`{3,}|~{3,})tutor-judgment[ \t]*\r?\n[\s\S]*?(?:\1|$)/g, "");
+  out = out.replace(/\{[^{}]*"judgment"[^{}]*\}\s*$/, "");
+  return out === md ? md : out.trimEnd();
 }

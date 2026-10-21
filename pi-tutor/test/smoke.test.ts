@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
+import { HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
 import { PY_EXAM } from "./exam-fixtures.js";
@@ -1689,5 +1690,81 @@ describe("/tutor-fix (spec 2026-10-21 §5: at pro the fix comes only when asked)
     const none = await boot();
     await none.commands["tutor-fix"].handler("", none.ctx);
     expect(none.notes.at(-1)).toMatch(/nothing to fix/);
+  });
+});
+
+describe("held replies (spec 2026-10-21 §6)", () => {
+  const project = () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-held-"));
+    mkdir(pjoin(dir, "src")); mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "src", "main.py"), "def split_amount(total, people):\n    return total * people\n");
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P2.T2 add `split_amount(total, people)` = total / people\n");
+    return dir;
+  };
+  const ep = (attempts: number) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "run", cmd: ["python3", "src/main.py"], code: 1, trace: "ZeroDivisionError: x" }, band: "beginner", attempts, spot: "ZeroDivisionError: x", opened: 1, turns: 0, concept_tags: [] } });
+  const reply = (text: string) => assistant(`${text}\n\`\`\`tutor-judgment\n{"judgment":"wrong"}\n\`\`\``);
+  const textOf = (m: unknown) => ((m as { content: { type: string; text?: string }[] }).content.find((c) => c.type === "text")?.text ?? "");
+  const judgments = (b: { entries: { type: string }[] }) => b.entries.filter((e) => e.type === "tutor_judgment").length;
+  const level10 = async (b: Awaited<ReturnType<typeof boot>>) => b.commands["tutor-level"].handler("10", b.ctx);
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+
+  it("a leaking hint is replaced, re-asked through a fresh run, and the second reply is checked too", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const leak = reply("Change it to `return total / people`.");
+    await turn(b.events, b.ctx, "help", leak);
+    expect(textOf(leak)).toBe(REWRITE_TEXT);
+    expect(judgments(b)).toBe(0);
+    const sentBefore = b.sent.length;
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(b.sent.length).toBe(sentBefore + 1);
+    const ask = b.sent.at(-1)!.text;
+    expect(ask).toMatch(/^\[tutor\] rewrite:/);
+    const good = reply("Look at the operator inside `split_amount`.");
+    const t2 = await turn(b.events, b.ctx, ask, good);
+    expect(t2.message?.content).toMatch(/\[tutor-check\]/);
+    expect(textOf(good)).toContain("Look at the operator inside `split_amount`.");
+    expect(judgments(b)).toBe(1);
+  });
+  it("Review Focus #2/#5: after two failed re-asks the learner sees the fallback, with no code, and no fourth ask", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    let prompt = "help";
+    const shown: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const leak = reply("Write `return total / people`.");
+      await turn(b.events, b.ctx, prompt, leak);
+      shown.push(textOf(leak));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      prompt = b.sent.at(-1)!.text;
+    }
+    expect(shown.slice(0, 2)).toEqual([REWRITE_TEXT, REWRITE_TEXT]);
+    expect(shown[2]).toBe(fallbackReply("hint", "ZeroDivisionError: x"));
+    expect(shown[2]).not.toMatch(/`/);
+    expect(b.sent.filter((m) => /^\[tutor\] rewrite:/.test(m.text))).toHaveLength(2);
+  });
+  it("the transformer holds a streaming reply and hides the judgment block after it", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, b.ctx);
+    const t = b.transformers[0];
+    expect(t("Change it to `return total / people`", { messageType: "assistant", isStreaming: true, availableWidth: 68 })).toBe(HOLD_TEXT);
+    const after = t("Look here.\n```tutor-judgment\n{\"judgment\":\"wrong\"}\n```", { messageType: "assistant", isStreaming: false, availableWidth: 68 });
+    expect(after).toContain("Look here.");
+    expect(after).not.toMatch(/tutor-judgment|"judgment"/);
+  });
+  it("thinking is hidden while the fix is not allowed, whatever the setting", async () => {
+    const think = { messageType: "assistant-thinking", isStreaming: true, availableWidth: 68 };
+    const hint = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(hint);
+    await hint.commands["tutor-thinking"].handler("show", hint.ctx);
+    await hint.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, hint.ctx);
+    expect(hint.transformers[0]("so it is total / people", think)).toBe(THINKING_LABEL);
+    const fix = await boot({ cwd: project(), branch: [ep(4)] });
+    await level10(fix);
+    await fix.commands["tutor-thinking"].handler("show", fix.ctx);
+    await fix.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "help", systemPromptOptions: { sections: {} } }, fix.ctx);
+    expect(fix.transformers[0]("so it is total / people", think)).toBe("so it is total / people");
   });
 });

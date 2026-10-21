@@ -21,3 +21,11 @@ describe("thinking visibility", () => {
     expect(Array.from(THINKING_LABEL).length).toBeLessThanOrEqual(40);
   });
 });
+
+describe("guarded turns (spec 2026-10-21 §6: the thinking is where a model works out the fix)", () => {
+  it("hide thinking whatever the setting", () => {
+    expect(thinkingHidden("show", "beginner", true)).toBe(true);
+    expect(thinkingHidden("show", "beginner", false)).toBe(false);
+    expect(thinkingHidden("show", "beginner")).toBe(false);
+  });
+});
