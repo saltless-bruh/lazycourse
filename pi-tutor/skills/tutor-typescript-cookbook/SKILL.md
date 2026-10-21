@@ -5,7 +5,7 @@ description: "Plain-words step → TypeScript idiom, each shown on a small unrel
 
 # TypeScript cookbook
 
-How to use: find the learner's plain step below and show the idiom on the example here, not on their task. Seeing the construct work somewhere neutral and then applying it to their own code is where the learning happens; writing their line takes that away. The hint ladder still decides how much to give, so below rung 5 name the idiom and point at it.
+How to use: find the learner's plain step below and show the idiom on the example here, not on their task. Seeing the construct work somewhere neutral and then applying it to their own code is where the learning happens; writing their line takes that away. The hint ladder still decides how much to give, so until this turn's instruction allows the fix, name the idiom and point at it.
 
 Every example runs as `node file.ts` (Node 22.18+), so it uses only syntax Node can strip: no `enum`, `namespace` or constructor parameter properties.
 

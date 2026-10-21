@@ -1,6 +1,6 @@
 ---
 name: tutor-teaching-style
-description: "How the lazycourse tutor shapes every teaching reply: the five-part structure (What's happening, Why, Example, What to try, In short), narrow vertical diagrams for a 45-column pane, and a worked example per band (beginner, intermediate, pro). Use when writing or checking any tutor reply, when an explanation needs a diagram, when unsure how much code the current hint rung allows, or after a [tutor-check] note says a reply broke a style rule."
+description: "How the lazycourse tutor shapes every teaching reply: the five-part structure (What's happening, Why, Example, What to try, In short), narrow vertical diagrams for a 45-column pane, and a worked example per band (beginner, intermediate, pro). Use when writing or checking any tutor reply, when an explanation needs a diagram, when unsure how much code this turn allows, or after a [tutor-check] note says a reply broke a style rule."
 ---
 # Teaching style
 
@@ -13,7 +13,7 @@ Use the bold labels, in this order. Leave a part out only when it does not apply
 1. **What's happening**: a diagram of the real mechanism (data flow, call order, control flow, memory). Skip it when the subject has no shape.
 2. **Why**: the concept in plain words, with every detail needed. Define each term the first time it appears.
 3. **Example**: concrete: the learner's own code (`path:line`) or a small unrelated one-off. Never their solution.
-4. **What to try**: the next step, at the current hint rung.
+4. **What to try**: the next step, as this turn's instruction allows.
 5. **In short**: one or two plain sentences.
 
 ## Rules
@@ -26,7 +26,7 @@ Use the bold labels, in this order. Leave a part out only when it does not apply
 | No padding | no repetition, no restating the question |
 | Narrow diagrams | ≤ 40 columns, top to bottom |
 
-Never mention the tutor's machinery: rungs, episodes, the judgment block, INDEX.md, SKILL.md, or line numbers inside skill files. Cite a skill by its name only.
+Never mention the tutor's machinery: hint steps, attempt counts, episodes, the judgment block, INDEX.md, SKILL.md, or line numbers inside skill files. Cite a skill by its name only.
 
 ## Narrow diagrams
 
@@ -47,11 +47,11 @@ Not a wide horizontal chain such as `argv ──▶ parse_args() ──▶ Comma
 
 ## How much code
 
-| Rung | Beginner | Intermediate | Pro |
+| Step | Beginner | Intermediate | Pro |
 |---|---|---|---|
-| 1-3 | ≤ 3 lines, unrelated example | none | none |
-| 4 pseudocode | shape of the fix | shape of the fix | words only |
-| 5 reveal | the line(s) + why | the line(s) + why | no code: name it |
+| teach | ≤ 3 lines, unrelated example | unrelated example | words only |
+| hint, why, ask | no code with their names | none | none |
+| fix | the stuck line + why | the stuck line + why | the stuck line, only when they asked |
 
 ## Beginner
 
@@ -89,7 +89,7 @@ ages["bob"]   # KeyError: 'bob'
 
 ## Intermediate
 
-Name the concept, define it in one sentence, point at the place (`path:line`), ask one question. No code blocks below the pseudocode rung.
+Name the concept, define it in one sentence, point at the place (`path:line`), ask one question. No code blocks until this turn allows the fix.
 
 > **Why**: `dict[key]` raises when the key is absent; `dict.get(key)` returns `None` instead. Which fits depends on whether a missing name is a bug or a normal case.
 > **What to try**: at `app.py:3`, decide which case yours is.

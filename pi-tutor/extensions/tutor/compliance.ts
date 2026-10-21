@@ -2,6 +2,7 @@ import { stripIntake } from "./onboard.js";
 import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import type { TurnStep } from "./ladder.js";
+import { turnInstruction } from "./turns.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -160,7 +161,8 @@ export function replyReminder(step: TurnStep | null, recipe = false): string {
   const hold = recipe
     ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
     : step !== null && step !== "fix" ? " Do not state the fix, in code or in words." : "";
-  return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}`;
+  const turn = step !== null ? ` This turn: ${turnInstruction(step)}` : "";
+  return `[tutor-reply] Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters, and end with the \`\`\`tutor-judgment block.${hold}${turn}`;
 }
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */

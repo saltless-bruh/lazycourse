@@ -513,7 +513,7 @@ export default function (pi: ExtensionAPI): void {
     if (editorPack) cards.push(renderEditorCard(editorPack));
     if (cards.length) event.systemPromptOptions.sections["tutor_lang"] = cards.join("\n\n");
     const parts: string[] = [];
-    if (episode && role.ladder) parts.push(formatEpisodeContext(episode));
+    if (episode && role.ladder) parts.push(formatEpisodeContext(episode, run.step ?? "teach"));
     if (exam && role.ladder) parts.push(formatExamContext(exam, Date.now()));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));

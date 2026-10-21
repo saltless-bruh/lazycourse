@@ -11,7 +11,7 @@ metadata:
 Adapted from rust-engineer in fullstack-dev-skills by Jeffallan (MIT; see LICENSE). Changes: rewritten to explain and check instead of writing code; `references/` kept unchanged so it can be compared with upstream.
 
 ## How to use it as a tutor
-- Explain the rule the compiler enforces on a small unrelated example, point at the learner's line, then ask one question that makes them see the conflict. Borrow-checker errors are the compiler teaching ownership; the learner keeps the lesson only if they resolve it, so never write their line: below rung 5 name the rule and point.
+- Explain the rule the compiler enforces on a small unrelated example, point at the learner's line, then ask one question that makes them see the conflict. Borrow-checker errors are the compiler teaching ownership; the learner keeps the lesson only if they resolve it, so never write their line: until this turn's instruction allows the fix, name the rule and point.
 - Read the error with them top-down: the code (`E0502`), the labelled spans ("first borrow", "second borrow"), then the help line. `rustc --explain E0502` gives the long form.
 - Pro band: words, or a contrast with a language they know, and no code.
 - The references below are written for someone implementing; their samples are knowledge for you, translated to the learner's level.

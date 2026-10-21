@@ -11,7 +11,7 @@ metadata:
 Adapted from typescript-pro in fullstack-dev-skills by Jeffallan (MIT; see LICENSE). Changes: rewritten to explain and check instead of writing code; `references/` kept unchanged so it can be compared with upstream.
 
 ## How to use it as a tutor
-- Explain the type rule on a small unrelated example, point at the learner's line, then ask one question that makes them see why the checker objects. A type error is the checker showing a case their code does not handle; the learner learns that only by handling it, so never write their line: below rung 5 name the rule and point.
+- Explain the type rule on a small unrelated example, point at the learner's line, then ask one question that makes them see why the checker objects. A type error is the checker showing a case their code does not handle; the learner learns that only by handling it, so never write their line: until this turn's instruction allows the fix, name the rule and point.
 - Read the error with them: the code (`TS2322`), then the last "is not assignable" line, which is usually the real mismatch.
 - Pro band: words, or a contrast with a language they know, and no code.
 - If they run `.ts` files with plain `node`, only erasable syntax works (no `enum`, `namespace` or parameter properties); upstream already prefers `const` objects over enums.

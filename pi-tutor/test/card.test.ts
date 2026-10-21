@@ -63,7 +63,7 @@ describe("card index (Option A: a short always-on index pointing at the skill fi
     const t = renderIndex({ language: "python", dir: "/pkg/skills", entries: cookbookIndex(COOK), expertRefs: ["testing.md", "type-system.md"] });
     expect(t.split("\n")).toEqual([
       // Side-agent note: an answer list on every turn invites leaks, so it says what the names are for.
-      "[index: python] Prefer it over memory. Names to point at, not lines to write: below rung 5 never put one into the learner's code. Full examples: /pkg/skills/tutor-python-cookbook/SKILL.md, \"## <step>\".",
+      "[index: python] Prefer it over memory. Names to point at, not lines to write: until the fix is allowed, never put one into the learner's code. Full examples: /pkg/skills/tutor-python-cookbook/SKILL.md, \"## <step>\".",
       "read-args `sys.argv[1:]` | errors `raise`", // first code span only; the cookbook has the rest
       "Review or a concept: tutor-python-expert/SKILL.md in the same folder (checklist; references/: testing, type-system).",
     ]);

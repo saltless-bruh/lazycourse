@@ -1,5 +1,6 @@
 import type { EditorSnapshot } from "./nvim.js";
-import { describeTrigger, type Episode } from "./ladder.js";
+import { describeTrigger, type Episode, type TurnStep } from "./ladder.js";
+import { turnInstruction } from "./turns.js";
 
 // Renders the per-turn editor context the model receives as a hidden custom message (spec §4).
 export const MAX_SNAPSHOT_LINES = 400;
@@ -24,11 +25,12 @@ export function formatEditorContext(s: EditorSnapshot): string {
   return out.join("\n");
 }
 
-/** The episode header the model reads (spec 2026-10-21 §5): what it is stuck on and the failed attempts. */
-export function formatEpisodeContext(ep: Episode): string {
+/** The episode header the model reads (spec 2026-10-21 §5–6): what it is stuck on, the failed attempts, this turn's job. */
+export function formatEpisodeContext(ep: Episode, step: TurnStep): string {
   const out = [
     `[episode] stuck on: ${describeTrigger(ep.trigger)}`,
     `failed attempts on this spot: ${ep.attempts}, ${ep.turns} turn(s) so far`,
+    `this turn: ${turnInstruction(step)}`,
   ];
   if (ep.concept_tags.length) out.push(`concepts: ${ep.concept_tags.join(", ")}`);
   if (ep.trigger.kind === "run") {

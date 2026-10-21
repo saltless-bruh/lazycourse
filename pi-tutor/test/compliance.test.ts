@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
+import { turnInstruction } from "../extensions/tutor/turns.js";
 
 const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ judgment, concept_tags: ["t"], task_done_ids: [], episode_closed: false, step_done });
 const fence = (tag: string, lines: string[]) => "```" + tag + "\n" + lines.join("\n") + "\n```";
@@ -218,6 +219,10 @@ describe("replyReminder", () => {
     expect(replyReminder("why")).toMatch(/do not state the fix/i);
     expect(replyReminder("fix")).not.toMatch(/do not state the fix/i);
     for (const s of [null, "hint", "fix"] as const) expect(replyReminder(s)).not.toMatch(/rung/);
+  });
+  it("ends with this turn's instruction when there is a step (spec 2026-10-21 §6)", () => {
+    expect(replyReminder("why").endsWith(`This turn: ${turnInstruction("why")}`)).toBe(true);
+    expect(replyReminder(null)).not.toContain("This turn:");
   });
 });
 

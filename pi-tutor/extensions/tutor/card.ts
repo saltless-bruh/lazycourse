@@ -53,7 +53,7 @@ export function renderIndex(o: { language: string; dir: string; entries: IndexEn
   const lines: string[] = [];
   if (o.entries.length) {
     // Side-agent note: an answer list on every turn invites leaks, so it says what the names are for.
-    lines.push(`[index: ${o.language}] Prefer it over memory. Names to point at, not lines to write: below rung 5 never put one into the learner's code. Full examples: ${o.dir}/tutor-${o.language}-cookbook/SKILL.md, "## <step>".`);
+    lines.push(`[index: ${o.language}] Prefer it over memory. Names to point at, not lines to write: until the fix is allowed, never put one into the learner's code. Full examples: ${o.dir}/tutor-${o.language}-cookbook/SKILL.md, "## <step>".`);
     // First code span only, and no read-trace (it only points at tutor-stack-traces): fits 250 tokens.
     lines.push(o.entries.filter((e) => e.step !== "read-trace").map((e) => `${e.step} ${/`[^`]+`/.exec(e.idiom)?.[0] ?? e.idiom}`).join(" | "));
   }

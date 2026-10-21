@@ -11,7 +11,7 @@ metadata:
 Adapted from javascript-pro in fullstack-dev-skills by Jeffallan (MIT; see LICENSE). Changes: rewritten to explain and check instead of writing code; `references/` kept unchanged so it can be compared with upstream.
 
 ## How to use it as a tutor
-- Explain the rule on a small unrelated example, point at the learner's line, then ask one question that makes them see what the engine does there. JavaScript rarely refuses code up front, so the bug shows up later as a wrong value; the learner learns to predict it only by tracing it themselves, so never write their line: below rung 5 name the rule and point.
+- Explain the rule on a small unrelated example, point at the learner's line, then ask one question that makes them see what the engine does there. JavaScript rarely refuses code up front, so the bug shows up later as a wrong value; the learner learns to predict it only by tracing it themselves, so never write their line: until this turn's instruction allows the fix, name the rule and point.
 - Read the error with them: the message (`TypeError: x is not a function`), then the first `at` frame in their own file.
 - Pro band: words, or a contrast with a language they know, and no code.
 - The version on the language card is Node's; it decides which features exist (for example `Map.groupBy` needs Node 21).

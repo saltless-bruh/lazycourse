@@ -9,7 +9,7 @@ license: MIT
 Written for lazycourse (not adapted from another package). Every code sample in `references/` runs with the standalone `lua` 5.5; samples that also need LuaJIT say so.
 
 ## How to use it as a tutor
-- Explain the idea on a small unrelated example, point at the learner's line, then ask one question that makes them see the gap. Lua is small enough that the learner can hold the whole model in their head once they build it themselves, so never write their line: below rung 5 name the idea and point.
+- Explain the idea on a small unrelated example, point at the learner's line, then ask one question that makes them see the gap. Lua is small enough that the learner can hold the whole model in their head once they build it themselves, so never write their line: until this turn's instruction allows the fix, name the idea and point.
 - First settle which Lua the code targets: a standalone script (5.5 here) or Neovim (LuaJIT, 5.1-based). Several answers differ between them; `references/luajit-vs-5.5.md` has the list.
 - Pro band: words, or a contrast with a language they know, and no code.
 
