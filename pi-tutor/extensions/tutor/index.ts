@@ -20,6 +20,7 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
+import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
@@ -1344,6 +1345,15 @@ export default function (pi: ExtensionAPI): void {
     } catch { return null; }
   }
 
+  /** Spec 2026-10-22 §5.1: the installed Go as go.mod names it (`go 1.27`); null when absent. */
+  async function goVersionFor(language: string): Promise<string | null> {
+    if (language !== "go") return null;
+    try {
+      const r = await pi.exec("go", ["version"], { timeout: 5000 });
+      return r.code === 0 ? goVersionOf(r.stdout) : null;
+    } catch { return null; }
+  }
+
   /** `/tutor-start check`: run the level task in the sandbox; passing or not only sets the level (Q13). */
   async function onboardCheck(ctx: ExtensionContext): Promise<void> {
     const o = onboarding ?? loadOnboarding();
@@ -1407,7 +1417,7 @@ export default function (pi: ExtensionAPI): void {
         const spec = await completeJson(rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
           scaffoldPrompt({ language: proj.language, level: job.level, band: meta.band, project: { ...job.project, size: "small" }, about: job.about, rounds: job.rounds }),
           (v) => checkScaffold(v, job.rounds));
-        writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language) });
+        writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language), goVersion: await goVersionFor(proj.language) });
         if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
         if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
         written = true;

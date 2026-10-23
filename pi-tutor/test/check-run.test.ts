@@ -37,6 +37,12 @@ describe("projectRun", () => {
     expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n" }), "rust")).toEqual({ runCmd: "cargo run", entry: null });
     expect(projectRun(project({}), "python")).toEqual({ runCmd: null, entry: null });
   });
+  it("an entry: line wins; else the file in run:; else the language's default file when it exists (spec 2026-10-22 §5.1)", () => {
+    expect(projectRun(project({ "README.md": "---\nrun: go run ./src\nentry: src/lib/app.go\n---\n" }), "go").entry).toBe("src/lib/app.go");
+    expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n", "src/main.rs": "fn main() {}\n" }), "rust")).toEqual({ runCmd: "cargo run", entry: "src/main.rs" });
+    expect(projectRun(project({ "README.md": "---\nrun: go run ./src\n---\n", "src/main.go": "package main\n" }), "go").entry).toBe("src/main.go");
+    expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n" }), "rust").entry).toBeNull();
+  });
 });
 
 describe("runChecks without a sandbox (spec §11a)", () => {

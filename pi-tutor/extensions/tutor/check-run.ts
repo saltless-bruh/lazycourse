@@ -2,7 +2,7 @@
 // sandbox, over a throwaway overlay of the project folder: the learner's other modules and data files are
 // there, and nothing a check writes reaches the real folder. One process per check, so an endless loop in
 // one check cannot hide the others.
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { LANGS } from "./knowledge/versions.js";
 import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
@@ -26,21 +26,28 @@ const SOURCE_EXT: Record<string, RegExp> = {
   python: /\.py$/, lua: /\.lua$/, javascript: /\.(m?js|cjs)$/, typescript: /\.(ts|mts)$/, go: /\.go$/, rust: /\.rs$/,
 };
 
+const DEFAULT_ENTRY: Record<string, string> = { rust: "src/main.rs", go: "src/main.go" };
+
 /** The project's `run:` command (README front matter) and the entry file named in it. */
 export function projectRun(root: string, language: string): { runCmd: string | null; entry: string | null } {
   let text = "";
   try { text = readFileSync(`${root}/README.md`, "utf8"); } catch { return { runCmd: null, entry: null }; }
   const lines = text.split("\n");
   if (lines[0] !== "---") return { runCmd: null, entry: null };
-  let runCmd: string | null = null;
+  let runCmd: string | null = null, named: string | null = null;
   for (const l of lines.slice(1)) {
     if (l === "---") break;
     const m = /^run:\s*(.+?)\s*$/.exec(l);
     if (m) runCmd = m[1];
+    const e = /^entry:\s*(.+?)\s*$/.exec(l);
+    if (e) named = e[1];
   }
+  if (named) return { runCmd, entry: named };
   const ext = SOURCE_EXT[language];
-  const entry = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
-  return { runCmd, entry };
+  const inRun = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
+  // Spec 2026-10-22 §5.1: older Rust/Go projects (`cargo run`, `go run ./src`) start in the language's usual file.
+  const fallback = DEFAULT_ENTRY[language];
+  return { runCmd, entry: inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null) };
 }
 
 const PY_HARNESS = `
