@@ -1,13 +1,14 @@
 // The check job (spec 2026-10-21 §7): per milestone, the model writes checks, and in a separate request that
 // never sees them or the tasks' "done when", a reference solution. The checks run against the reference in the
 // sandbox: agree → trusted, disagree → unverified. The reference is stored in the profile, never in the project.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseChecks, VALUE_LANGUAGES, type Check, type TickHow } from "./checks.js";
 import { runChecks, type CheckResult } from "./check-run.js";
 import { systemText } from "./prompts.js";
 import { taskIds } from "./scaffold.js";
+import { manifestFor } from "./manifest.js";
 import type { Complete } from "./llm.js";
 import type { RunExec } from "./exam/layout.js";
 import type { SandboxHost } from "./exam/sandbox.js";
@@ -101,6 +102,8 @@ export function crossCheck(results: CheckResult[]): Check[] {
 export async function writeMilestoneChecks(d: {
   complete: Complete; exec: RunExec; sandbox: SandboxHost | null;
   language: string; tasksMd: string; milestone: number; entry: string | null; runCmd: string | null;
+  /** The project folder, whose Cargo.toml / go.mod the reference builds with (spec 2026-10-22 §5.3). */
+  root?: string;
 }): Promise<MilestoneChecks> {
   const ids = taskIds(milestoneText(d.tasksMd, d.milestone));
   const ask = checksPrompt({ language: d.language, tasksMd: d.tasksMd, milestone: d.milestone });
@@ -116,6 +119,12 @@ export async function writeMilestoneChecks(d: {
   try {
     mkdirSync(dirname(join(dir, d.entry)), { recursive: true });
     writeFileSync(join(dir, d.entry), reference);
+    const manifest = manifestFor(d.language, "project");
+    if (manifest) {
+      let text = manifest.text;
+      try { if (d.root) text = readFileSync(join(d.root, manifest.rel), "utf8"); } catch { /* none yet: the minimal one */ }
+      writeFileSync(join(dir, manifest.rel), text);
+    }
     const r = await runChecks(d.exec, { language: d.language, root: dir, entry: d.entry, runCmd: d.runCmd, checks: parsed.checks, sandbox: d.sandbox });
     return r.missing ? { checks: parsed.checks, reference, ran: false } : { checks: crossCheck(r.results), reference, ran: true };
   } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -7,6 +7,8 @@ import { LANGS } from "./knowledge/versions.js";
 import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
 import type { Check } from "./checks.js";
+import { runCompiledChecks } from "./check-run-compiled.js";
+import { manifestFor } from "./manifest.js";
 
 /**
  * `outcome` (Rust/Go, spec 2026-10-22 §4): "unfit" — the check cannot call the learner's function as written;
@@ -231,10 +233,16 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
   if ("missing" in sb) return { results: [], missing: sb.missing };
   const limit = i.limitSec ?? CHECK_LIMIT_SEC;
   const results: CheckResult[] = [];
+  // Spec 2026-10-22: Rust/Go function checks build one hidden harness together; their results keep their places.
+  const compiled = (i.language === "rust" || i.language === "go") && i.entry ? i.checks.filter((c) => c.kind === "value") : [];
+  const built = compiled.length ? await runCompiledChecks(sb, { language: i.language as "rust" | "go", root: i.root, entry: i.entry!, checks: compiled, limitSec: limit }) : [];
+  // An older Rust/Go project may have no manifest: the throwaway copy gets a minimal one (the real folder never does).
+  const manifest = manifestFor(i.language, "project");
   for (const check of i.checks) {
+    if (compiled.includes(check)) { results.push(built[compiled.indexOf(check)]); continue; }
     if (check.kind === "io") {
       if (!i.runCmd) { results.push({ check, pass: false, error: "no run command: add `run:` to README.md's front matter" }); continue; }
-      const r = await limitedRun(sb, capped(["sh", "-c", 'printf "%s" "$1" | sh -c "$2"', "sh", check.stdin ?? "", i.runCmd]), limit);
+      const r = await limitedRun(sb, capped(["sh", "-c", '[ -z "$3" ] || [ -f "$3" ] || printf "%s" "$4" > "$3"; printf "%s" "$1" | sh -c "$2"', "sh", check.stdin ?? "", i.runCmd, manifest?.rel ?? "", manifest?.text ?? ""]), limit);
       if (r.killed) { results.push({ check, pass: false, error: TOO_LONG }); continue; }
       if (flooded(r.stdout)) { results.push({ check, pass: false, error: PRINTED_TOO_MUCH }); continue; }
       const pass = r.stdout.includes(check.contains ?? "");

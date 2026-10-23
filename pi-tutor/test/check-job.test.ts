@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -110,6 +110,32 @@ describe.skipIf(!bwrapReady || spawnSync("python3", ["--version"]).status !== 0)
     expect(m.reference).toContain("def split_amount");
     expect(asked[1]).not.toMatch(/done when/i);
   }, 60_000);
+});
+
+const compiled = (cmd: string, args: string[]) => spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync(cmd, args).status === 0;
+describe("writeMilestoneChecks for Rust and Go (spec 2026-10-22 §5.3)", () => {
+  it.skipIf(!compiled("cargo", ["--version"]))("Review Focus #2: a Rust reference makes good checks trusted and a broken one unverified; the temp folder is gone", async () => {
+    const before = readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length;
+    const replies = [
+      "check P1.T1: split_amount(50.0, 3) == 16.666666666666668\ncheck P1.T1: split_amount(50.0, 3, 1) == 1.0",
+      "```rust\nfn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\n\nfn main() {}\n```",
+    ];
+    const root = mkdtempSync(join(tmpdir(), "rs-proj-"));
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs", runCmd: "cargo run", root });
+    expect(m.ran).toBe(true);
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
+    expect(readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length).toBe(before);
+  }, 180_000);
+  it.skipIf(!compiled("go", ["version"]))("a Go reference with the project's go.mod makes its checks trusted", async () => {
+    const replies = [
+      "check P1.T1: splitAmount(50, 3) == 16.666666666666668",
+      "```go\npackage main\n\nfunc splitAmount(total float64, people int) float64 { return total / float64(people) }\n\nfunc main() {}\n```",
+    ];
+    const root = mkdtempSync(join(tmpdir(), "go-proj-"));
+    writeFileSync(join(root, "go.mod"), "module mine\n\ngo 1.22\n");
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go", runCmd: "go run ./src", root });
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted"]);
+  }, 180_000);
 });
 
 describe("writeMilestoneChecks without a sandbox (spec §11a)", () => {

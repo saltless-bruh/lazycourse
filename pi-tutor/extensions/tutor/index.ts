@@ -1309,7 +1309,7 @@ export default function (pi: ExtensionAPI): void {
         for (const k of todo) {
           const m = await writeMilestoneChecks({
             complete: rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(),
-            language: proj.language, tasksMd, milestone: k, entry, runCmd,
+            language: proj.language, tasksMd, milestone: k, entry, runCmd, root: proj.path,
           });
           if (!profile) return;
           const now = profile;

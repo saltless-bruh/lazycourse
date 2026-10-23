@@ -115,6 +115,17 @@ describe.skipIf(!bwrapReady || !has("python3"))("runChecks: Python in the sandbo
   }, 30_000);
 });
 
+describe.skipIf(!bwrapReady || !has("cargo"))("runChecks: Rust (spec 2026-10-22)", () => {
+  it("Review Focus #5: an older project with no manifest and no entry: line still runs both kinds of check; the real folder gets no Cargo.toml", async () => {
+    const root = project({ "README.md": "---\nrun: cargo run\nlanguage: rust\n---\n", "src/main.rs": "fn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\nfn main() {\n    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();\n    let t: f64 = s.trim().parse().unwrap();\n    println!(\"Each pays: {:.2}\", split_amount(t, 3));\n}\n" });
+    const { runCmd, entry } = projectRun(root, "rust");
+    const checks: Check[] = [{ ...io("52.8\n", "17.60"), task: "P1.T2" }, { ...value("split_amount(50.0, 3)", "16.666666666666668"), task: "P1.T1" }];
+    const r = (await runChecks(realExec, { language: "rust", root, entry, runCmd, checks, sandbox: host() })).results;
+    expect(r.map((x) => x.pass)).toEqual([true, true]);
+    expect(readdirSync(root).sort()).toEqual(["README.md", "src"]);
+  }, 180_000);
+});
+
 describe.skipIf(!bwrapReady || !has("lua", "-v"))("runChecks: Lua in the sandbox", () => {
   it("global functions and a returned module table are both found; a wrong value shows what it gave", async () => {
     const root = project({ "src/main.lua": "function split_amount(t, p) return t * p end\nlocal M = {}\nfunction M.tip(x) return x * 0.2 end\nreturn M\n" });
