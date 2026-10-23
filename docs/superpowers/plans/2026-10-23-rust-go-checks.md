@@ -153,6 +153,25 @@
 - [ ] **Step 4: Run** the tests, then `npm test`, `npm run typecheck`, and the Lua suite. Expected: all pass.
 - [ ] **Step 5: Commit** — `feat: /tutor-done: a check that does not fit, or a compile error elsewhere, is not a try and does not tick`
 
+### Task 7: Near-miss guard (spec §5.5, approved 2026-10-23)
+
+**Files:**
+- Create: `pi-tutor/extensions/tutor/near-miss.ts`
+- Modify: `pi-tutor/extensions/tutor/check-job.ts` (`writeMilestoneChecks`, `MilestoneChecks.weak?: string[]`), `pi-tutor/extensions/tutor/checks.ts` (`renderChecksMd` option `weak`), `pi-tutor/extensions/tutor/index.ts` (`writeChecksMd` passes the stored weak tasks)
+- Test: `pi-tutor/test/near-miss.test.ts`, `pi-tutor/test/check-job.test.ts`, `pi-tutor/test/checks.test.ts`
+
+**Interfaces:**
+- Produces: `roundingWeakTasks(checks: Check[]): string[]`; `slipMutants(source: string, max?: number): string[]` (default 8); `MilestoneChecks.weak?: string[]`; `renderChecksMd(…, { weak?: Set<string> })` adds "(a near miss may pass these checks)" to that task's heading.
+
+- [ ] **Step 1: Failing tests**
+  - `near-miss.test.ts`: `roundingWeakTasks` → `["P1.T1"]` for only `16.0`; `[]` once `16.666666666666668` is added; `[]` for a task whose checks expect strings. `slipMutants("return total / people  # a / b\n")` → `["return total * people  # a / b\n"]` (comment untouched); `"fn f() -> u32"` and `"Vec<u32>"` give none; at most `max` results.
+  - `check-job.test.ts` (Python, real sandbox): checks reply `split_amount(48, 3) == 16.0`, reference `/`, extra reply `split_amount(50, 3) == 16.666666666666668` → both trusted, `weak` empty, the third prompt names rounding. A useless extra reply (`split_amount(30, 3) == 10.0`) → `weak: ["P1.T1"]`. A reference whose slip copy (`*` for `/` is caught; `<=` for `<` on `is_adult(age)` with checks only at 30 and 10) survives → the extra prompt is asked.
+  - `checks.test.ts`: `renderChecksMd` with `weak: new Set(["P1.T1"])` puts the note on `## P1.T1`.
+- [ ] **Step 2: Run** `npx vitest run test/near-miss.test.ts test/check-job.test.ts test/checks.test.ts` — Expected: FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the tests, `npm test`, `npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit** — `feat: a near-miss guard: weak checks get one more, written by the model and confirmed on the reference`
+
 ### Task 6: Live check and docs
 
 **Files:**

@@ -136,7 +136,21 @@ Author's answers after the builder check (2026-10-22):
   marker), or with a writable target directory outside the project; the builder picks, keeping one check's
   endless loop from hiding the others.
 
-## 6. Constraints
+### 5.5 Near-miss guard (author approved 2026-10-23, after the Rust live run)
+The live run showed nemotron ignoring the prompt rule for uneven inputs (`split_amount(48.0, 3)` only), so a
+`floor` near miss ticked. After the cross-check, the checks job probes each task's trusted value checks:
+- **Rounding:** if every numeric expected value of a task's value checks is whole, an answer that rounds or
+  truncates would pass (floor(f(x)) = f(x) exactly when f(x) is whole). No run needed.
+- **One-character slips:** up to 8 copies of the reference, each with one spaced binary operator swapped
+  (`/`↔`*`, `+`↔`-`, `<`↔`<=`, `>`↔`>=`) outside strings and comments; each copy runs the checks in the
+  sandbox. A copy that does not compile or load is skipped. A copy that passes every trusted check of a task
+  makes that task weak.
+- **Response:** for the weak tasks, the model is asked once for one more check each, told in plain words what
+  slipped through. New checks are cross-checked against the reference as usual and appended. A task still
+  weak after that keeps its checks and gets a note in `spec/checks.md`; it never blocks the learner.
+- Applies to every value-check language (Python, Lua, Rust, Go).
+
+
 
 - Everything runs inside the existing bwrap sandbox: `/` read-only, the project as a throwaway overlay,
   no network (hence `--offline`), output capped (`cappedArgv`), `timeout` per run. Rust needs `cargo` and
