@@ -168,3 +168,21 @@ The live run showed nemotron ignoring the prompt rule for uneven inputs (`split_
   the reference folder get a minimal one when missing).
 - Rust build caching across `:TutorDone` runs (a shared `CARGO_TARGET_DIR` like the Go cache) only if a
   run is slow enough to matter; correctness first.
+
+## 8. Live result (2026-10-23, real LazyVim, seeded learn-first project one concept short of milestone 1)
+
+Steps per run: `:TutorDone P1.T1` on a wrong answer (`*`), the same code again, a parse error, a near miss
+(Rust `(total / people as f64).floor()`, Go `float64(int(total) / people)`), then the fix.
+
+| Run | Checks | Wrong | Again | Parse error | Near miss | Fix |
+|---|---|---|---|---|---|---|
+| Rust · nemotron, before §5.5 | 48/3 only | try 1 | try 1 | typo | **ticked** | — |
+| Rust · glm, before §5.5 | 48/3; 50/3 = `16.67` unverified | try 1 | try 1 | typo | **ticked** | — |
+| Rust · nemotron, with §5.5 | 48/3, 50/3 = 16.666666666666668 (after ~2 min) | try 1 | try 1 | typo | caught (try 1, new check) | ticked |
+| Go · nemotron, with §5.5 | 48/3, 50/3 = 16.666666666666668 (after ~2.5 min) | try 1 | try 1 | typo | caught | ticked |
+| Rust · glm, with §5.5 | 48/3, 50/3 = 16.666666666666668 on its own (2 s) | try 1 | try 1 | typo | caught | ticked |
+
+All checks trusted by the reference (it built with the project's manifest in the sandbox); the reference never
+entered the project; `~/.pi/agent/settings.json` unchanged. The two pre-§5.5 runs are why §5.5 exists: the
+prompt rule alone did not hold for either model (nemotron used one evenly dividing input; glm rounded the
+expected value, which made its good check unverified).
