@@ -170,21 +170,28 @@ describe("ticking (spec 2026-10-21 §7: evidence, never the model)", () => {
 
 /** A python project with a trusted check on P2.T2, a real sandbox and real commands (spec 2026-10-21 §7). */
 const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync("python3", ["--version"]).status === 0;
-async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }]) {
+const DONE_LANG = {
+  python: { run: "python3 src/main.py", entry: "src/main.py", manifest: null },
+  rust: { run: "cargo run", entry: "src/main.rs", manifest: ["Cargo.toml", '[package]\nname = "p"\nversion = "0.1.0"\nedition = "2021"\n\n[workspace]\n'] },
+  go: { run: "go run ./src", entry: "src/main.go", manifest: ["go.mod", "module p\n\ngo 1.22\n"] },
+} as const;
+async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }], language: keyof typeof DONE_LANG = "python", milestone: object = {}) {
+  const L = DONE_LANG[language];
   const { Profile } = await import("../extensions/tutor/profile.js");
   const { realpathSync } = await import("node:fs");
   h = await startHeadlessNvim();
   const root = realpathSync(h.root);
   mkdirSync(join(root, "src")); mkdirSync(join(root, "spec"));
-  writeFileSync(join(root, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Split\n");
+  writeFileSync(join(root, "README.md"), `---\nrun: ${L.run}\nlanguage: ${language}\n---\n# Split\n`);
+  if (L.manifest) writeFileSync(join(root, L.manifest[0]), L.manifest[1]);
   writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 split the bill\n  - [ ] P2.T2.S1 divide\n- [ ] P2.T3 print\n");
-  writeFileSync(join(root, "src", "main.py"), code);
+  writeFileSync(join(root, L.entry), code);
   const file = join(mkdtempSync(join(tmpdir(), "done-prof-")), "p.sqlite");
   const seed = Profile.open(file);
-  seed.saveLanguage("python", 10, {}, 1);
-  seed.addProject("python", root, "Split", 1);
+  seed.saveLanguage(language, 10, {}, 1);
+  seed.addProject(language, root, "Split", 1);
   seed.setSetting(`checks:${root}`, JSON.stringify({ milestones: { 1: { ran: true, reference: "def split_amount(t, p):\n    return t / p\n",
-    checks } } }));
+    checks, ...milestone } } }));
   seed.close();
   const saved = process.env.PI_TUTOR_PROFILE;
   process.env.PI_TUTOR_PROFILE = file;
@@ -195,6 +202,40 @@ async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", ki
   nvim = attach({ socket: h.socket });
   return { b, root };
 }
+
+const tool = (cmd: string, args: string[]) => spawnSync(cmd, args).status === 0;
+const valueCheck = (expr: string, expected: string) => [{ task: "P2.T2", kind: "value", expr, expected, milestone: 1, status: "trusted" }];
+describe.skipIf(!bwrapReady)("/tutor-done in Rust and Go (spec 2026-10-22 §4)", () => {
+  it.skipIf(!tool("cargo", ["--version"]))("Rust: a wrong value is a try on the check's spot; the fix ticks", async () => {
+    const { b, root } = await doneProject("fn split_amount(total: f64, people: u32) -> f64 { total * people as f64 }\nfn main() {}\n", valueCheck("split_amount(48.0, 3)", "16.0"), "rust");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "check:P2.T2:split_amount(48.0, 3)" });
+    writeFileSync(join(root, "src", "main.rs"), "fn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\nfn main() {}\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ closeReason: "run_passed" });
+  }, 120_000);
+  it.skipIf(!tool("go", ["version"]))("Go: a check that does not fit is not a try and does not tick", async () => {
+    const { b, root } = await doneProject('package main\n\nfunc parse(s string) (int, error) { return 3, nil }\n\nfunc main() {}\n', valueCheck('parse("3")', "3"), "go");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries)).toEqual([]);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [ ] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/does not accept/);
+  }, 120_000);
+  it.skipIf(!tool("go", ["version"]))("Review Focus #4: a compile error elsewhere is not a try and does not tick", async () => {
+    const { b, root } = await doneProject("package main\n\nfunc splitAmount(total float64, people int) float64 { return total / float64(people) }\n\nfunc later() { x := 1 }\n\nfunc main() {}\n", valueCheck("splitAmount(48, 3)", "16.0"), "go");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries)).toEqual([]);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [ ] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/your project does not compile/);
+  }, 120_000);
+  it.skipIf(!tool("cargo", ["--version"]))("Rust: a parse error is a typo", async () => {
+    const { b } = await doneProject("fn split_amount(total: f64, people: u32) -> f64 {\nfn main() {}\n", valueCheck("split_amount(48.0, 3)", "16.0"), "rust");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(episodes(b.entries)).toEqual([]);
+    expect(b.notes.at(-1)).toMatch(/syntax error/);
+  }, 120_000);
+});
 
 describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
   it("a failing trusted check is a graded try on the check's spot; unchanged code is not; the fix ticks the task and its subtasks", async () => {
@@ -211,6 +252,13 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     expect(tasks()).toBe("- [x] P2.T2 split the bill\n  - [x] P2.T2.S1 divide\n- [ ] P2.T3 print\n");
     expect(episodes(b.entries).at(-1)).toMatchObject({ closeReason: "run_passed" });
     expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done)");
+  }, 30000);
+  it("a task the near-miss guard left weak is marked in spec/checks.md (spec 2026-10-22 §5.5)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
+      [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }, { task: "P2.T3", kind: "io", stdin: "48\n", contains: "16", milestone: 1, status: "trusted" }],
+      "python", { weak: ["P2.T3"] });
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T3 (a near miss may pass these checks)");
   }, 30000);
   it("a syntax error in the file is a typo, not a try", async () => {
     const { b } = await doneProject("def split_amount(total, people)\n    return total / people\n");

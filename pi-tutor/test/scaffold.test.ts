@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,23 +66,23 @@ describe("writeScaffold", () => {
   it("the README front matter carries the language's test command (M8)", () => {
     const dir = mkdtempSync(join(tmpdir(), "pitutor-scaf-"));
     writeScaffold(dir, spec(), meta);
-    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^---\nrun: cargo run\ntest: cargo test\nlanguage: rust\n---\n/);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^---\nrun: cargo run\nentry: src\/main.rs\ntest: cargo test\nlanguage: rust\n---\n/);
     expect(readFileSync(join(dir, "README.md"), "utf8")).toContain("test it with `:TutorRun test`");
   });
   it("a language with no known test command gets no test: line", () => {
     const dir = mkdtempSync(join(tmpdir(), "pitutor-scaf-"));
     writeScaffold(dir, spec({ entry_file: "src/main.c" }), { ...meta, language: "c" });
-    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^---\nrun: cargo run\nlanguage: c\n---\n/);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^---\nrun: cargo run\nentry: src\/main.c\nlanguage: c\n---\n/);
   });
   it("writes the spec §6 layout and nothing outside the folder", () => {
     const dir = join(mkdtempSync(join(tmpdir(), "pitutor-scaffold-")), "rust-todo-cli");
     const written = writeScaffold(dir, spec(), meta);
-    expect(written).toEqual(["README.md", "AGENTS.md", "spec/design.md", "spec/tasks.md", "spec/requirements.md", "src/main.rs"]);
+    expect(written).toEqual(["README.md", "AGENTS.md", "spec/design.md", "spec/tasks.md", "spec/requirements.md", "src/main.rs", "Cargo.toml"]);
     expect(existsSync(join(dir, ".pi"))).toBe(false); // .pi/skills makes Pi ask "trust this folder?" (final review I5)
     expect(readFileSync(join(dir, "spec/tasks.md"), "utf8")).toBe(spec().tasks_md);
-    expect(readFileSync(join(dir, "src/main.rs"), "utf8")).toBe("// Start here: spec/tasks.md, task P1.T1. You write the code; the tutor coaches.\n");
+    expect(readFileSync(join(dir, "src/main.rs"), "utf8")).toBe("// Start here: spec/tasks.md, task P1.T1. You write the code; the tutor coaches.\nfn main() {}\n");
     const readme = readFileSync(join(dir, "README.md"), "utf8");
-    expect(readme.startsWith("---\nrun: cargo run\ntest: cargo test\nlanguage: rust\n---\n# Todo CLI\n")).toBe(true);
+    expect(readme.startsWith("---\nrun: cargo run\nentry: src/main.rs\ntest: cargo test\nlanguage: rust\n---\n# Todo CLI\n")).toBe(true);
     const agents = readFileSync(join(dir, "AGENTS.md"), "utf8");
     expect(agents).toContain("rust");
     expect(agents).toContain("spec/tasks.md");
@@ -100,7 +101,31 @@ describe("writeScaffold", () => {
     expect(isEmptyOrMissing(dir)).toBe(false);
     const empty = mkdtempSync(join(tmpdir(), "pitutor-scaffold-"));
     expect(isEmptyOrMissing(empty)).toBe(true);
-    expect(writeScaffold(empty, spec(), meta)).toHaveLength(6);
+    expect(writeScaffold(empty, spec(), meta)).toHaveLength(7);
+  });
+});
+
+const has = (cmd: string, args: string[]) => spawnSync(cmd, args).status === 0;
+describe("Rust and Go projects build as scaffolded (spec 2026-10-22 §5.1)", () => {
+  it.skipIf(!has("cargo", ["--version"]))("a Rust project builds as scaffolded", () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "pitutor-rs-")), "split-bill");
+    writeScaffold(dir, spec(), { ...meta, title: "Split Bill" });
+    expect(readFileSync(join(dir, "Cargo.toml"), "utf8")).toContain('name = "split-bill"');
+    expect(readFileSync(join(dir, "src/main.rs"), "utf8").endsWith("fn main() {}\n")).toBe(true);
+    expect(spawnSync("cargo", ["build", "--offline", "--quiet"], { cwd: dir }).status).toBe(0);
+  }, 60_000);
+  it.skipIf(!has("go", ["version"]))("a Go project builds as scaffolded", () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "pitutor-go-")), "split-bill");
+    writeScaffold(dir, spec({ entry_file: "src/main.go", run_cmd: "go run ./src" }), { ...meta, language: "go", title: "Split Bill" }, { goVersion: "1.22" });
+    expect(readFileSync(join(dir, "go.mod"), "utf8")).toBe("module split-bill\n\ngo 1.22\n");
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toContain("entry: src/main.go\n");
+    expect(spawnSync("go", ["vet", "./src"], { cwd: dir, env: { ...process.env, GOFLAGS: "-mod=mod" } }).status).toBe(0);
+  }, 60_000);
+  it("an existing manifest is kept byte for byte", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-keep-"));
+    writeFileSync(join(dir, "Cargo.toml"), "[package]\nname = \"mine\"\n");
+    writeScaffold(dir, spec(), meta, { existing: true });
+    expect(readFileSync(join(dir, "Cargo.toml"), "utf8")).toBe("[package]\nname = \"mine\"\n");
   });
 });
 

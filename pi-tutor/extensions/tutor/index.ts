@@ -20,6 +20,7 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
+import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
@@ -1039,6 +1040,10 @@ export default function (pi: ExtensionAPI): void {
       ui?.notify(`your file has a syntax error, so ${id} could not be checked: ${f.error}`, "warning");
       return;
     }
+    // Spec 2026-10-22 §4: a check that cannot call the function as written, or a compile error outside the
+    // checked function, blocks the tick but is no try.
+    if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
+    if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
     const line = c.kind === "value"
       ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${f.got}, expected ${c.expected}`}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
@@ -1308,7 +1313,7 @@ export default function (pi: ExtensionAPI): void {
         for (const k of todo) {
           const m = await writeMilestoneChecks({
             complete: rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(),
-            language: proj.language, tasksMd, milestone: k, entry, runCmd,
+            language: proj.language, tasksMd, milestone: k, entry, runCmd, root: proj.path,
           });
           if (!profile) return;
           const now = profile;
@@ -1332,7 +1337,7 @@ export default function (pi: ExtensionAPI): void {
     const all = Object.values(state.milestones).flatMap((m) => m.checks);
     const untried = Object.values(state.milestones).some((m) => m.checks.length && !m.ran);
     const note = untried ? "Some checks could not be tried against a reference here (no sandbox, or README.md's `run:` names no source file), so they are unverified." : undefined;
-    try { writeInRoot(root, "spec/checks.md", renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks })); } catch { /* spec/ is gone or points outside the project: nothing to show */ }
+    try { writeInRoot(root, "spec/checks.md", renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks, weak: new Set(Object.values(state.milestones).flatMap((m) => m.weak ?? [])) })); } catch { /* spec/ is gone or points outside the project: nothing to show */ }
   }
 
   /** Author 2026-10-21: the installed Lua as lua_ls names it, for a Lua project's .luarc.json; null when absent. */
@@ -1341,6 +1346,15 @@ export default function (pi: ExtensionAPI): void {
     try {
       const r = await pi.exec("lua", ["-v"], { timeout: 5000 });
       return r.code === 0 ? luaRuntime(`${r.stdout}\n${r.stderr}`) : null;
+    } catch { return null; }
+  }
+
+  /** Spec 2026-10-22 §5.1: the installed Go as go.mod names it (`go 1.27`); null when absent. */
+  async function goVersionFor(language: string): Promise<string | null> {
+    if (language !== "go") return null;
+    try {
+      const r = await pi.exec("go", ["version"], { timeout: 5000 });
+      return r.code === 0 ? goVersionOf(r.stdout) : null;
     } catch { return null; }
   }
 
@@ -1407,7 +1421,7 @@ export default function (pi: ExtensionAPI): void {
         const spec = await completeJson(rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), systemText("scaffold"),
           scaffoldPrompt({ language: proj.language, level: job.level, band: meta.band, project: { ...job.project, size: "small" }, about: job.about, rounds: job.rounds }),
           (v) => checkScaffold(v, job.rounds));
-        writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language) });
+        writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language), goVersion: await goVersionFor(proj.language) });
         if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
         if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
         written = true;

@@ -13,8 +13,8 @@ export interface Check {
   status: "trusted" | "unverified";
 }
 
-/** Languages whose functions a check can call directly (phase 2); the rest get typed input → output only. */
-export const VALUE_LANGUAGES = new Set(["python", "lua"]);
+/** Languages whose functions a check can call directly (phase 2; Rust and Go: spec 2026-10-22); the rest get typed input → output only. */
+export const VALUE_LANGUAGES = new Set(["python", "lua", "rust", "go"]);
 
 const VALUE = /^check\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*(.+)$/;
 const IO = /^run\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*stdin\s+"((?:[^"\\]|\\.)*)"\s*(?:->|→)\s*stdout\s+contains\s+"((?:[^"\\]|\\.)*)"\s*$/;
@@ -69,7 +69,7 @@ const show = (s: string) => JSON.stringify(s);
 export type TickHow = "checks" | "self" | "you";
 const HOW: Record<TickHow, string> = { checks: "done", self: "done, self-checked", you: "done, ticked by you" };
 
-export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?: string; how?: Record<string, TickHow> } = {}): string {
+export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?: string; how?: Record<string, TickHow>; weak?: Set<string> } = {}): string {
   const out = [
     "<!-- The tutor rewrites this file from its own record; edits here are not kept. -->",
     "# Checks",
@@ -80,7 +80,7 @@ export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?:
   if (o.note) out.push(o.note, "");
   const tasks = [...new Set(checks.map((c) => c.task))];
   for (const t of tasks) {
-    out.push(`## ${t}${ticked.has(t) ? ` (${HOW[o.how?.[t] ?? "checks"]})` : ""}`);
+    out.push(`## ${t}${ticked.has(t) ? ` (${HOW[o.how?.[t] ?? "checks"]})` : o.weak?.has(t) ? " (a near miss may pass these checks)" : ""}`);
     for (const c of checks.filter((x) => x.task === t)) {
       const body = c.kind === "value" ? `${c.expr} == ${c.expected}` : `type ${show(c.stdin ?? "")} → output contains ${show(c.contains ?? "")}`;
       out.push(`- ${body}${c.status === "unverified" ? " (unverified)" : ""}`);

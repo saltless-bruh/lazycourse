@@ -22,6 +22,10 @@ describe("parseChecks (spec 2026-10-21 §7: strict form)", () => {
     expect(parseChecks('check P2.T1: is_even(4) == (2 == 2)', { language: "python", taskIds: ids, milestone: 2 }).checks[0]).toMatchObject({ expr: "is_even(4)", expected: "(2 == 2)" });
     expect(parseChecks('check P2.T1: greet("a == b") == "hi a == b"', { language: "python", taskIds: ids, milestone: 2 }).checks[0]).toMatchObject({ expr: 'greet("a == b")', expected: '"hi a == b"' });
   });
+  it("Rust and Go get value lines too (spec 2026-10-22 §5.2)", () => {
+    expect(parseChecks("check P2.T2: split_amount(50.0, 3) == 16.67", { language: "rust", taskIds: ids, milestone: 2 }).checks[0]).toMatchObject({ kind: "value", expr: "split_amount(50.0, 3)", expected: "16.67" });
+    expect(parseChecks("check P2.T2: splitAmount(50, 3) == 16.67", { language: "go", taskIds: ids, milestone: 2 }).checks[0]).toMatchObject({ kind: "value", expr: "splitAmount(50, 3)" });
+  });
   it("Review Focus #5: value lines are rejected outside Python and Lua; io lines are kept", () => {
     const r = parseChecks('check P2.T2: tipAmount(40, 0.2) == 8.0\nrun P2.T3: stdin "48\\n" -> stdout contains "16"', { language: "typescript", taskIds: ids, milestone: 2 });
     expect(r.checks.map((c) => c.kind)).toEqual(["io"]);
@@ -70,6 +74,7 @@ describe("renderChecksMd", () => {
   it("labels how a done task was ticked", () => {
     const c: Check = { task: "P2.T2", kind: "value", expr: "f()", expected: "1", milestone: 1, status: "trusted" };
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "you" } })).toContain("## P2.T2 (done, ticked by you)");
+    expect(renderChecksMd([c], new Set(), { weak: new Set(["P2.T2"]) })).toContain("## P2.T2 (a near miss may pass these checks)");
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "self" } })).toContain("## P2.T2 (done, self-checked)");
   });
 });

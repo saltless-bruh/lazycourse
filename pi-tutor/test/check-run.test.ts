@@ -37,6 +37,12 @@ describe("projectRun", () => {
     expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n" }), "rust")).toEqual({ runCmd: "cargo run", entry: null });
     expect(projectRun(project({}), "python")).toEqual({ runCmd: null, entry: null });
   });
+  it("an entry: line wins; else the file in run:; else the language's default file when it exists (spec 2026-10-22 §5.1)", () => {
+    expect(projectRun(project({ "README.md": "---\nrun: go run ./src\nentry: src/lib/app.go\n---\n" }), "go").entry).toBe("src/lib/app.go");
+    expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n", "src/main.rs": "fn main() {}\n" }), "rust")).toEqual({ runCmd: "cargo run", entry: "src/main.rs" });
+    expect(projectRun(project({ "README.md": "---\nrun: go run ./src\n---\n", "src/main.go": "package main\n" }), "go").entry).toBe("src/main.go");
+    expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n" }), "rust").entry).toBeNull();
+  });
 });
 
 describe("runChecks without a sandbox (spec §11a)", () => {
@@ -107,6 +113,17 @@ describe.skipIf(!bwrapReady || !has("python3"))("runChecks: Python in the sandbo
     expect(r[1]).toMatchObject({ pass: false });
     expect(r[1].got).toContain("each: 17.60");
   }, 30_000);
+});
+
+describe.skipIf(!bwrapReady || !has("cargo"))("runChecks: Rust (spec 2026-10-22)", () => {
+  it("Review Focus #5: an older project with no manifest and no entry: line still runs both kinds of check; the real folder gets no Cargo.toml", async () => {
+    const root = project({ "README.md": "---\nrun: cargo run\nlanguage: rust\n---\n", "src/main.rs": "fn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\nfn main() {\n    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();\n    let t: f64 = s.trim().parse().unwrap();\n    println!(\"Each pays: {:.2}\", split_amount(t, 3));\n}\n" });
+    const { runCmd, entry } = projectRun(root, "rust");
+    const checks: Check[] = [{ ...io("52.8\n", "17.60"), task: "P1.T2" }, { ...value("split_amount(50.0, 3)", "16.666666666666668"), task: "P1.T1" }];
+    const r = (await runChecks(realExec, { language: "rust", root, entry, runCmd, checks, sandbox: host() })).results;
+    expect(r.map((x) => x.pass)).toEqual([true, true]);
+    expect(readdirSync(root).sort()).toEqual(["README.md", "src"]);
+  }, 180_000);
 });
 
 describe.skipIf(!bwrapReady || !has("lua", "-v"))("runChecks: Lua in the sandbox", () => {

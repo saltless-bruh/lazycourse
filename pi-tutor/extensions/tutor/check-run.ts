@@ -2,13 +2,19 @@
 // sandbox, over a throwaway overlay of the project folder: the learner's other modules and data files are
 // there, and nothing a check writes reaches the real folder. One process per check, so an endless loop in
 // one check cannot hide the others.
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { LANGS } from "./knowledge/versions.js";
 import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
 import type { Check } from "./checks.js";
+import { runCompiledChecks } from "./check-run-compiled.js";
+import { manifestFor } from "./manifest.js";
 
-export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string }
+/**
+ * `outcome` (Rust/Go, spec 2026-10-22 §4): "unfit" — the check cannot call the learner's function as written;
+ * "elsewhere" — the project does not compile outside the checked function. Neither passes; neither is a try.
+ */
+export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere" }
 
 export const CHECKS_SANDBOX_OFF = "checks run only in the sandbox, and it is off (/tutor-exam sandbox on turns it back on)";
 export const TOO_LONG = "took too long (an endless loop?)";
@@ -26,21 +32,28 @@ const SOURCE_EXT: Record<string, RegExp> = {
   python: /\.py$/, lua: /\.lua$/, javascript: /\.(m?js|cjs)$/, typescript: /\.(ts|mts)$/, go: /\.go$/, rust: /\.rs$/,
 };
 
+const DEFAULT_ENTRY: Record<string, string> = { rust: "src/main.rs", go: "src/main.go" };
+
 /** The project's `run:` command (README front matter) and the entry file named in it. */
 export function projectRun(root: string, language: string): { runCmd: string | null; entry: string | null } {
   let text = "";
   try { text = readFileSync(`${root}/README.md`, "utf8"); } catch { return { runCmd: null, entry: null }; }
   const lines = text.split("\n");
   if (lines[0] !== "---") return { runCmd: null, entry: null };
-  let runCmd: string | null = null;
+  let runCmd: string | null = null, named: string | null = null;
   for (const l of lines.slice(1)) {
     if (l === "---") break;
     const m = /^run:\s*(.+?)\s*$/.exec(l);
     if (m) runCmd = m[1];
+    const e = /^entry:\s*(.+?)\s*$/.exec(l);
+    if (e) named = e[1];
   }
+  if (named) return { runCmd, entry: named };
   const ext = SOURCE_EXT[language];
-  const entry = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
-  return { runCmd, entry };
+  const inRun = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
+  // Spec 2026-10-22 §5.1: older Rust/Go projects (`cargo run`, `go run ./src`) start in the language's usual file.
+  const fallback = DEFAULT_ENTRY[language];
+  return { runCmd, entry: inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null) };
 }
 
 const PY_HARNESS = `
@@ -181,10 +194,10 @@ function luaString(s: string): string {
   return `[${eq}[\n${s}]${eq}]`;
 }
 
-interface Sandboxed { run(argv: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>; limited: boolean }
+export interface Sandboxed { run(argv: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>; limited: boolean }
 
 /** The sandbox for `root`, or the reason nothing may run. */
-async function sandboxFor(exec: RunExec, root: string, language: string, tools: string[], host: SandboxHost): Promise<Sandboxed | { missing: string }> {
+export async function sandboxFor(exec: RunExec, root: string, language: string, tools: string[], host: SandboxHost): Promise<Sandboxed | { missing: string }> {
   let real = root;
   try { real = realpathSync(root); } catch { /* bwrap cannot mount it: the probe reports it */ }
   const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", ...CAP_TOOLS], host), host);
@@ -220,10 +233,16 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
   if ("missing" in sb) return { results: [], missing: sb.missing };
   const limit = i.limitSec ?? CHECK_LIMIT_SEC;
   const results: CheckResult[] = [];
+  // Spec 2026-10-22: Rust/Go function checks build one hidden harness together; their results keep their places.
+  const compiled = (i.language === "rust" || i.language === "go") && i.entry ? i.checks.filter((c) => c.kind === "value") : [];
+  const built = compiled.length ? await runCompiledChecks(sb, { language: i.language as "rust" | "go", root: i.root, entry: i.entry!, checks: compiled, limitSec: limit }) : [];
+  // An older Rust/Go project may have no manifest: the throwaway copy gets a minimal one (the real folder never does).
+  const manifest = manifestFor(i.language, "project");
   for (const check of i.checks) {
+    if (compiled.includes(check)) { results.push(built[compiled.indexOf(check)]); continue; }
     if (check.kind === "io") {
       if (!i.runCmd) { results.push({ check, pass: false, error: "no run command: add `run:` to README.md's front matter" }); continue; }
-      const r = await limitedRun(sb, capped(["sh", "-c", 'printf "%s" "$1" | sh -c "$2"', "sh", check.stdin ?? "", i.runCmd]), limit);
+      const r = await limitedRun(sb, capped(["sh", "-c", '[ -z "$3" ] || [ -f "$3" ] || printf "%s" "$4" > "$3"; printf "%s" "$1" | sh -c "$2"', "sh", check.stdin ?? "", i.runCmd, manifest?.rel ?? "", manifest?.text ?? ""]), limit);
       if (r.killed) { results.push({ check, pass: false, error: TOO_LONG }); continue; }
       if (flooded(r.stdout)) { results.push({ check, pass: false, error: PRINTED_TOO_MUCH }); continue; }
       const pass = r.stdout.includes(check.contains ?? "");

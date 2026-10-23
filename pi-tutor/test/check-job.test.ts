@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -43,12 +43,20 @@ describe("prompts (spec §7 cross-check)", () => {
     expect(p).toContain("P1.T1 Write `split_amount(total, people)`");
     expect(p).not.toContain("P2.T1");
     expect(p).toContain("check <task id>: <expression> == <expected value>");
-    expect(checksPrompt({ language: "go", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
+    expect(checksPrompt({ language: "typescript", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
   });
   it("asks for inputs that tell a near miss apart: 48 / 3 let `//` tick a task in the phase 2 live check", () => {
     const p = systemText("checks");
     expect(p).toMatch(/do not divide evenly/);
     expect(p).toMatch(/a wrong answer that is close/);
+  });
+  it("Rust and Go: the checks prompt shows a value line in that language; the reference must build with the project's manifest (spec 2026-10-22 §5.2, §5.3)", () => {
+    const rs = checksPrompt({ language: "rust", tasksMd: TASKS, milestone: 1 });
+    expect(rs).toContain("check <task id>: <expression> == <expected value>");
+    expect(rs).toContain("split_amount(50.0, 3) == 16.67");
+    expect(checksPrompt({ language: "go", tasksMd: TASKS, milestone: 1 })).toContain("splitAmount(50, 3) == 16.67");
+    expect(referencePrompt({ language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go" })).toMatch(/package main/);
+    expect(referencePrompt({ language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs" })).toMatch(/crate root/);
   });
   it("the reference never sees a done-when or its expected values", () => {
     const p = referencePrompt({ language: "python", tasksMd: TASKS, milestone: 2, entry: "src/main.py" });
@@ -102,6 +110,60 @@ describe.skipIf(!bwrapReady || spawnSync("python3", ["--version"]).status !== 0)
     expect(m.reference).toContain("def split_amount");
     expect(asked[1]).not.toMatch(/done when/i);
   }, 60_000);
+});
+
+const compiled = (cmd: string, args: string[]) => spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync(cmd, args).status === 0;
+describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 2026-10-22 §5.5)", () => {
+  const REF = "```python\ndef split_amount(total, people):\n    return total / people\n```";
+  it("whole-number checks get one more check, asked for by name; once it lands the task is not weak", async () => {
+    const asked: string[] = [];
+    const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(50, 3) == 16.666666666666668"];
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks.map((c) => [c.expected, c.status])).toEqual([["16.0", "trusted"], ["16.666666666666668", "trusted"]]);
+    expect(m.weak ?? []).toEqual([]);
+    expect(asked[2]).toMatch(/P1\.T1/);
+    expect(asked[2]).toMatch(/rounded down/);
+  }, 60_000);
+  it("still weak after the one extra ask: kept, and marked weak", async () => {
+    const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(30, 3) == 10.0"];
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks).toHaveLength(2);
+    expect(m.weak).toEqual(["P1.T1"]);
+  }, 60_000);
+  it("a one-character slip of the reference that passes every check makes the task weak", async () => {
+    const tasks = "## Milestone 1: conditionals\n- [ ] P1.T1 Write `is_adult(age)` returning True from 18 on\n";
+    const asked: string[] = [];
+    const replies = ["check P1.T1: is_adult(30) == True\ncheck P1.T1: is_adult(10) == False", "```python\ndef is_adult(age):\n    return age >= 18\n```", "check P1.T1: is_adult(18) == True"];
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: tasks, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(asked[2]).toMatch(/one character/);
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted", "trusted", "trusted"]);
+    expect(m.weak ?? []).toEqual([]);
+  }, 60_000);
+});
+
+describe("writeMilestoneChecks for Rust and Go (spec 2026-10-22 §5.3)", () => {
+  it.skipIf(!compiled("cargo", ["--version"]))("Review Focus #2: a Rust reference makes good checks trusted and a broken one unverified; the temp folder is gone", async () => {
+    const before = readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length;
+    const replies = [
+      "check P1.T1: split_amount(50.0, 3) == 16.666666666666668\ncheck P1.T1: split_amount(50.0, 3, 1) == 1.0",
+      "```rust\nfn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\n\nfn main() {}\n```",
+    ];
+    const root = mkdtempSync(join(tmpdir(), "rs-proj-"));
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs", runCmd: "cargo run", root });
+    expect(m.ran).toBe(true);
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
+    expect(readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length).toBe(before);
+  }, 180_000);
+  it.skipIf(!compiled("go", ["version"]))("a Go reference with the project's go.mod makes its checks trusted", async () => {
+    const replies = [
+      "check P1.T1: splitAmount(50, 3) == 16.666666666666668",
+      "```go\npackage main\n\nfunc splitAmount(total float64, people int) float64 { return total / float64(people) }\n\nfunc main() {}\n```",
+    ];
+    const root = mkdtempSync(join(tmpdir(), "go-proj-"));
+    writeFileSync(join(root, "go.mod"), "module mine\n\ngo 1.22\n");
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go", runCmd: "go run ./src", root });
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted"]);
+  }, 180_000);
 });
 
 describe("writeMilestoneChecks without a sandbox (spec §11a)", () => {
