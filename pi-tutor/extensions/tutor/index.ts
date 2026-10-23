@@ -1040,6 +1040,10 @@ export default function (pi: ExtensionAPI): void {
       ui?.notify(`your file has a syntax error, so ${id} could not be checked: ${f.error}`, "warning");
       return;
     }
+    // Spec 2026-10-22 §4: a check that cannot call the function as written, or a compile error outside the
+    // checked function, blocks the tick but is no try.
+    if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
+    if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
     const line = c.kind === "value"
       ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${f.got}, expected ${c.expected}`}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
