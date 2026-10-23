@@ -75,8 +75,8 @@ function harness(language: Lang, items: { c: Check; n: number }[], pkg: string, 
   for (const { c, n } of items) {
     lineOf.set(n, firstLine + lines.length);
     lines.push(language === "rust"
-      ? `    #[test] fn c${n}() { let got = ${c.expr}; let want = ${c.expected}; println!("\\x1eTUTOR\\t{:?}\\t{:?}", got, want); }`
-      : `func TestTutorC${n}(t *testing.T) { got := ${c.expr}; want := ${c.expected}; fmt.Printf("\\x1eTUTOR\\t%v\\t%v\\n", got, want) }`);
+      ? `    #[test] fn c${n}() { let got = ${c.expr}; let want = ${c.expected}; println!("\\n\\x1eTUTOR\\t{:?}\\t{:?}", got, want); }`
+      : `func TestTutorC${n}(t *testing.T) { got := ${c.expr}; want := ${c.expected}; fmt.Printf("\\n\\x1eTUTOR\\t%#v\\t%#v\\n", got, want) }`);
   }
   if (language === "rust") lines.push("}");
   return { text: `${lines.join("\n")}\n`, lineOf };
@@ -146,7 +146,8 @@ export async function runCompiledChecks(sb: Sandboxed, i: { language: Lang; root
     const byLine = new Map([...h.lineOf].map(([n, l]) => [l, n]));
     // A parse error on a check's own line is that check's; anywhere else (an unclosed `{` is reported at the end
     // of the file, inside the appended harness) it is the learner's typo.
-    const syntax = diags.find((d) => !(inHarness(d) && byLine.has(d.line)) && isSyntaxError(d.message.replace(/^error(\[E\d+\])?: /, "error: ")));
+    // Final review I1: in Rust only code-less `error:` lines are parse errors (`error[E0618]: expected function` is not).
+    const syntax = diags.find((d) => !(inHarness(d) && byLine.has(d.line)) && (language === "go" || /^error: /.test(d.message)) && isSyntaxError(d.message));
     if (syntax) {
       for (const p of pending) results[p.n - 1] = { check: p.c, pass: false, error: `your file stopped while loading: ${syntax.message} (${syntax.file}:${syntax.line})` };
       break;

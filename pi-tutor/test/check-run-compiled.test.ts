@@ -74,6 +74,15 @@ describe.skipIf(!bwrapReady || !has("cargo", ["--version"]))("Rust checks in the
     const r = await run("rust", rs("fn split_amount(total: f64 {"), [value("split_amount(1.0)", "1.0")]);
     expect(isSyntaxError(r[0].error!.replace(/^your file stopped while loading: /, ""))).toBe(true);
   }, 120_000);
+  it("final review I1: a coded compile error inside the function is a try, not a typo", async () => {
+    const r = await run("rust", rs("fn area(r: f64) -> f64 { 3.0(r * r) }"), [value("area(1.0)", "3.0")]);
+    expect(r[0].outcome).toBeUndefined();
+    expect(r[0].error).toMatch(/^src\/main\.rs:1: expected function/);
+    expect(isSyntaxError(r[0].error!.replace(/^your file stopped while loading: /, ""))).toBe(false);
+  }, 120_000);
+  it("final review M3: a function that prints without a newline still reports its value", async () => {
+    expect((await run("rust", rs('fn two() -> u32 { print!("Amount: "); 2 }'), [value("two()", "2")]))[0].pass).toBe(true);
+  }, 120_000);
   it("the real folder is unchanged", async () => {
     const root = project({ "src/main.rs": "fn two() -> u32 { 2 }\nfn main() {}\n" });
     const before = readFileSync(join(root, "src/main.rs"), "utf8");
@@ -93,6 +102,10 @@ describe.skipIf(!bwrapReady || !has("go", ["version"]))("Go checks in the sandbo
   it("each check gets its own result", async () => {
     const r = await run("go", go("func two() int { return 2 }\nfunc three() int { return 3 }"), [value("two()", "2"), value("three()", "4")]);
     expect(r.map((x) => [x.pass, x.got])).toEqual([[true, "2"], [false, "3"]]);
+  }, 120_000);
+  it("final review I2: strings are compared quoted, so tabs survive and text never equals a number", async () => {
+    const r = await run("go", go('func pair() string { return "a\\tb" }\nfunc label() string { return "16" }'), [value("pair()", '"a\\tb"'), value("label()", "16")]);
+    expect(r.map((x) => x.pass)).toEqual([true, false]);
   }, 120_000);
   it("Review Focus #1: a (value, error) pair does not fit", async () => {
     const r = await run("go", go('func parse(s string) (int, error) { return 3, nil }\nfunc two() int { return 2 }'), [value('parse("3")', "3"), value("two()", "2")]);
