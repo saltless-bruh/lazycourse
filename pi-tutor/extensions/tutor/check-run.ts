@@ -8,7 +8,11 @@ import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBi
 import type { RunExec } from "./exam/layout.js";
 import type { Check } from "./checks.js";
 
-export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string }
+/**
+ * `outcome` (Rust/Go, spec 2026-10-22 §4): "unfit" — the check cannot call the learner's function as written;
+ * "elsewhere" — the project does not compile outside the checked function. Neither passes; neither is a try.
+ */
+export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere" }
 
 export const CHECKS_SANDBOX_OFF = "checks run only in the sandbox, and it is off (/tutor-exam sandbox on turns it back on)";
 export const TOO_LONG = "took too long (an endless loop?)";
@@ -188,10 +192,10 @@ function luaString(s: string): string {
   return `[${eq}[\n${s}]${eq}]`;
 }
 
-interface Sandboxed { run(argv: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>; limited: boolean }
+export interface Sandboxed { run(argv: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>; limited: boolean }
 
 /** The sandbox for `root`, or the reason nothing may run. */
-async function sandboxFor(exec: RunExec, root: string, language: string, tools: string[], host: SandboxHost): Promise<Sandboxed | { missing: string }> {
+export async function sandboxFor(exec: RunExec, root: string, language: string, tools: string[], host: SandboxHost): Promise<Sandboxed | { missing: string }> {
   let real = root;
   try { real = realpathSync(root); } catch { /* bwrap cannot mount it: the probe reports it */ }
   const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", ...CAP_TOOLS], host), host);
