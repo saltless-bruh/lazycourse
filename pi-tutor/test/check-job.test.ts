@@ -113,6 +113,34 @@ describe.skipIf(!bwrapReady || spawnSync("python3", ["--version"]).status !== 0)
 });
 
 const compiled = (cmd: string, args: string[]) => spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync(cmd, args).status === 0;
+describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 2026-10-22 §5.5)", () => {
+  const REF = "```python\ndef split_amount(total, people):\n    return total / people\n```";
+  it("whole-number checks get one more check, asked for by name; once it lands the task is not weak", async () => {
+    const asked: string[] = [];
+    const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(50, 3) == 16.666666666666668"];
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks.map((c) => [c.expected, c.status])).toEqual([["16.0", "trusted"], ["16.666666666666668", "trusted"]]);
+    expect(m.weak ?? []).toEqual([]);
+    expect(asked[2]).toMatch(/P1\.T1/);
+    expect(asked[2]).toMatch(/rounded down/);
+  }, 60_000);
+  it("still weak after the one extra ask: kept, and marked weak", async () => {
+    const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(30, 3) == 10.0"];
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks).toHaveLength(2);
+    expect(m.weak).toEqual(["P1.T1"]);
+  }, 60_000);
+  it("a one-character slip of the reference that passes every check makes the task weak", async () => {
+    const tasks = "## Milestone 1: conditionals\n- [ ] P1.T1 Write `is_adult(age)` returning True from 18 on\n";
+    const asked: string[] = [];
+    const replies = ["check P1.T1: is_adult(30) == True\ncheck P1.T1: is_adult(10) == False", "```python\ndef is_adult(age):\n    return age >= 18\n```", "check P1.T1: is_adult(18) == True"];
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: tasks, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(asked[2]).toMatch(/one character/);
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted", "trusted", "trusted"]);
+    expect(m.weak ?? []).toEqual([]);
+  }, 60_000);
+});
+
 describe("writeMilestoneChecks for Rust and Go (spec 2026-10-22 §5.3)", () => {
   it.skipIf(!compiled("cargo", ["--version"]))("Review Focus #2: a Rust reference makes good checks trusted and a broken one unverified; the temp folder is gone", async () => {
     const before = readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length;

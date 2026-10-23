@@ -175,7 +175,7 @@ const DONE_LANG = {
   rust: { run: "cargo run", entry: "src/main.rs", manifest: ["Cargo.toml", '[package]\nname = "p"\nversion = "0.1.0"\nedition = "2021"\n\n[workspace]\n'] },
   go: { run: "go run ./src", entry: "src/main.go", manifest: ["go.mod", "module p\n\ngo 1.22\n"] },
 } as const;
-async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }], language: keyof typeof DONE_LANG = "python") {
+async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }], language: keyof typeof DONE_LANG = "python", milestone: object = {}) {
   const L = DONE_LANG[language];
   const { Profile } = await import("../extensions/tutor/profile.js");
   const { realpathSync } = await import("node:fs");
@@ -191,7 +191,7 @@ async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", ki
   seed.saveLanguage(language, 10, {}, 1);
   seed.addProject(language, root, "Split", 1);
   seed.setSetting(`checks:${root}`, JSON.stringify({ milestones: { 1: { ran: true, reference: "def split_amount(t, p):\n    return t / p\n",
-    checks } } }));
+    checks, ...milestone } } }));
   seed.close();
   const saved = process.env.PI_TUTOR_PROFILE;
   process.env.PI_TUTOR_PROFILE = file;
@@ -252,6 +252,13 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     expect(tasks()).toBe("- [x] P2.T2 split the bill\n  - [x] P2.T2.S1 divide\n- [ ] P2.T3 print\n");
     expect(episodes(b.entries).at(-1)).toMatchObject({ closeReason: "run_passed" });
     expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done)");
+  }, 30000);
+  it("a task the near-miss guard left weak is marked in spec/checks.md (spec 2026-10-22 §5.5)", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
+      [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }, { task: "P2.T3", kind: "io", stdin: "48\n", contains: "16", milestone: 1, status: "trusted" }],
+      "python", { weak: ["P2.T3"] });
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T3 (a near miss may pass these checks)");
   }, 30000);
   it("a syntax error in the file is a typo, not a try", async () => {
     const { b } = await doneProject("def split_amount(total, people)\n    return total / people\n");

@@ -9,12 +9,14 @@ import { runChecks, type CheckResult } from "./check-run.js";
 import { systemText } from "./prompts.js";
 import { taskIds } from "./scaffold.js";
 import { manifestFor } from "./manifest.js";
+import { roundingWeakTasks, slipMutants } from "./near-miss.js";
 import type { Complete } from "./llm.js";
 import type { RunExec } from "./exam/layout.js";
 import type { SandboxHost } from "./exam/sandbox.js";
 import type { LessonState } from "./lessons.js";
 
-export interface MilestoneChecks { checks: Check[]; reference: string; ran: boolean }
+/** `weak`: tasks whose checks a near miss may still pass after the guard's one extra ask (spec 2026-10-22 §5.5). */
+export interface MilestoneChecks { checks: Check[]; reference: string; ran: boolean; weak?: string[] }
 export interface ChecksState {
   milestones: Record<string, MilestoneChecks>;
   /** How each task was ticked by /tutor-done (spec §7: self-checked and "ticked by you" are labelled). */
@@ -99,6 +101,9 @@ export function crossCheck(results: CheckResult[]): Check[] {
   return results.map((r) => ({ ...r.check, status: r.pass ? "trusted" : "unverified" }));
 }
 
+const ROUNDED = "an answer rounded down to a whole number (floor, //, integer division) passes them; use inputs whose result is not whole";
+const SLIP = "an answer with one character changed (`*` for `/`, `<` for `<=`) passes them; use inputs at the edges";
+
 export async function writeMilestoneChecks(d: {
   complete: Complete; exec: RunExec; sandbox: SandboxHost | null;
   language: string; tasksMd: string; milestone: number; entry: string | null; runCmd: string | null;
@@ -125,7 +130,37 @@ export async function writeMilestoneChecks(d: {
       try { if (d.root) text = readFileSync(join(d.root, manifest.rel), "utf8"); } catch { /* none yet: the minimal one */ }
       writeFileSync(join(dir, manifest.rel), text);
     }
-    const r = await runChecks(d.exec, { language: d.language, root: dir, entry: d.entry, runCmd: d.runCmd, checks: parsed.checks, sandbox: d.sandbox });
-    return r.missing ? { checks: parsed.checks, reference, ran: false } : { checks: crossCheck(r.results), reference, ran: true };
+    const entryPath = join(dir, d.entry);
+    const run = (checks: Check[]) => runChecks(d.exec, { language: d.language, root: dir, entry: d.entry, runCmd: d.runCmd, checks, sandbox: d.sandbox });
+    const r = await run(parsed.checks);
+    if (r.missing) return { checks: parsed.checks, reference, ran: false };
+    let checks = crossCheck(r.results);
+    // Spec §5.5: a near miss that passes every trusted check of a task gets that task one more check, asked once.
+    const probe = async (all: Check[]): Promise<Map<string, string>> => {
+      const weak = new Map(roundingWeakTasks(all).map((t) => [t, ROUNDED]));
+      const trusted = all.filter((c) => c.status === "trusted");
+      for (const mutant of slipMutants(reference)) {
+        writeFileSync(entryPath, mutant);
+        const m = await run(trusted);
+        if (m.missing || m.results.some((x) => x.error || x.outcome)) continue; // did not build or load: not an answer
+        for (const t of new Set(trusted.map((c) => c.task))) {
+          if (!weak.has(t) && m.results.filter((x) => x.check.task === t).every((x) => x.pass)) weak.set(t, SLIP);
+        }
+      }
+      writeFileSync(entryPath, reference);
+      return weak;
+    };
+    let weak = await probe(checks);
+    if (weak.size) {
+      const more = `${ask}\n\nThe checks so far would let a close wrong answer pass:\n${[...weak].map(([t, why]) => `- ${t}: ${why}`).join("\n")}\n` +
+        "Write one more check for each of these tasks that such an answer fails. Write every expected value exactly, with all its decimals (16.666666666666668, never 16.67).";
+      const extra = parseChecks(await d.complete(systemText("checks"), more), { language: d.language, taskIds: [...weak.keys()], milestone: d.milestone });
+      if (extra.checks.length) {
+        const r2 = await run(extra.checks);
+        checks = [...checks, ...(r2.missing ? extra.checks : crossCheck(r2.results))];
+        weak = await probe(checks);
+      }
+    }
+    return { checks, reference, ran: true, ...(weak.size ? { weak: [...weak.keys()] } : {}) };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }

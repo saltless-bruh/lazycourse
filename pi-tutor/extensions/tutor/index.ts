@@ -1337,7 +1337,7 @@ export default function (pi: ExtensionAPI): void {
     const all = Object.values(state.milestones).flatMap((m) => m.checks);
     const untried = Object.values(state.milestones).some((m) => m.checks.length && !m.ran);
     const note = untried ? "Some checks could not be tried against a reference here (no sandbox, or README.md's `run:` names no source file), so they are unverified." : undefined;
-    try { writeInRoot(root, "spec/checks.md", renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks })); } catch { /* spec/ is gone or points outside the project: nothing to show */ }
+    try { writeInRoot(root, "spec/checks.md", renderChecksMd(liveChecks(all, current), tickedIds(tasksMd), { note, how: state.ticks, weak: new Set(Object.values(state.milestones).flatMap((m) => m.weak ?? [])) })); } catch { /* spec/ is gone or points outside the project: nothing to show */ }
   }
 
   /** Author 2026-10-21: the installed Lua as lua_ls names it, for a Lua project's .luarc.json; null when absent. */

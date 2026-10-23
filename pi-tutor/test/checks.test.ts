@@ -74,6 +74,7 @@ describe("renderChecksMd", () => {
   it("labels how a done task was ticked", () => {
     const c: Check = { task: "P2.T2", kind: "value", expr: "f()", expected: "1", milestone: 1, status: "trusted" };
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "you" } })).toContain("## P2.T2 (done, ticked by you)");
+    expect(renderChecksMd([c], new Set(), { weak: new Set(["P2.T2"]) })).toContain("## P2.T2 (a near miss may pass these checks)");
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "self" } })).toContain("## P2.T2 (done, self-checked)");
   });
 });
