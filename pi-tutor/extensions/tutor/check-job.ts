@@ -58,6 +58,13 @@ export function currentMilestone(tasksMd: string, lesson: LessonState | null): n
   return Math.min(count, at.building ? at.round + 1 : at.round);
 }
 
+// Spec 2026-10-22 §5.2: compiled languages need the value written as the language writes it.
+const VALUE_EXAMPLE: Record<string, string> = { rust: "split_amount(50.0, 3) == 16.67", go: "splitAmount(50, 3) == 16.67" };
+const BUILDS_AS: Record<string, string> = {
+  rust: "The file is the crate root (src/main.rs) of the project's Cargo.toml: it must build with `cargo build` and keep `fn main`.",
+  go: "The file is `package main` in the folder `go run` builds: it must build with the project's go.mod and keep `func main`.",
+};
+
 export function checksPrompt(i: { language: string; tasksMd: string; milestone: number }): string {
   const value = VALUE_LANGUAGES.has(i.language);
   return [
@@ -67,6 +74,7 @@ export function checksPrompt(i: { language: string; tasksMd: string; milestone: 
     "",
     "Line forms:",
     ...(value ? ["check <task id>: <expression> == <expected value>"] : []),
+    ...(VALUE_EXAMPLE[i.language] ? [`for example: check P1.T1: ${VALUE_EXAMPLE[i.language]}`] : []),
     'run <task id>: stdin "<typed input>" -> stdout contains "<printed text>"',
     ...(value ? [] : ["", `Write only run lines: ${i.language} functions cannot be called directly here.`]),
   ].join("\n");
@@ -76,7 +84,7 @@ export function checksPrompt(i: { language: string; tasksMd: string; milestone: 
 export function referencePrompt(i: { language: string; tasksMd: string; milestone: number; entry: string }): string {
   const tasks = milestoneText(i.tasksMd, i.milestone, { upTo: true })
     .split("\n").map((l) => l.replace(/[;,.]?\s*done when:.*$/i, "")).join("\n");
-  return [`Language: ${i.language}. File: ${i.entry}.`, `Write the whole file as it is at the end of milestone ${i.milestone}. The tasks so far:`, tasks].join("\n");
+  return [`Language: ${i.language}. File: ${i.entry}.`, ...(BUILDS_AS[i.language] ? [BUILDS_AS[i.language]] : []), `Write the whole file as it is at the end of milestone ${i.milestone}. The tasks so far:`, tasks].join("\n");
 }
 
 /** The largest fenced block of the reply, or the whole reply; always ends with a newline. */

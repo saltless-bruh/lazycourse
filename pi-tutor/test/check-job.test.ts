@@ -43,12 +43,20 @@ describe("prompts (spec §7 cross-check)", () => {
     expect(p).toContain("P1.T1 Write `split_amount(total, people)`");
     expect(p).not.toContain("P2.T1");
     expect(p).toContain("check <task id>: <expression> == <expected value>");
-    expect(checksPrompt({ language: "go", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
+    expect(checksPrompt({ language: "typescript", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
   });
   it("asks for inputs that tell a near miss apart: 48 / 3 let `//` tick a task in the phase 2 live check", () => {
     const p = systemText("checks");
     expect(p).toMatch(/do not divide evenly/);
     expect(p).toMatch(/a wrong answer that is close/);
+  });
+  it("Rust and Go: the checks prompt shows a value line in that language; the reference must build with the project's manifest (spec 2026-10-22 §5.2, §5.3)", () => {
+    const rs = checksPrompt({ language: "rust", tasksMd: TASKS, milestone: 1 });
+    expect(rs).toContain("check <task id>: <expression> == <expected value>");
+    expect(rs).toContain("split_amount(50.0, 3) == 16.67");
+    expect(checksPrompt({ language: "go", tasksMd: TASKS, milestone: 1 })).toContain("splitAmount(50, 3) == 16.67");
+    expect(referencePrompt({ language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go" })).toMatch(/package main/);
+    expect(referencePrompt({ language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs" })).toMatch(/crate root/);
   });
   it("the reference never sees a done-when or its expected values", () => {
     const p = referencePrompt({ language: "python", tasksMd: TASKS, milestone: 2, entry: "src/main.py" });

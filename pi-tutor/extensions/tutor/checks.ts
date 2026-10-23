@@ -13,8 +13,8 @@ export interface Check {
   status: "trusted" | "unverified";
 }
 
-/** Languages whose functions a check can call directly (phase 2); the rest get typed input → output only. */
-export const VALUE_LANGUAGES = new Set(["python", "lua"]);
+/** Languages whose functions a check can call directly (phase 2; Rust and Go: spec 2026-10-22); the rest get typed input → output only. */
+export const VALUE_LANGUAGES = new Set(["python", "lua", "rust", "go"]);
 
 const VALUE = /^check\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*(.+)$/;
 const IO = /^run\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*stdin\s+"((?:[^"\\]|\\.)*)"\s*(?:->|→)\s*stdout\s+contains\s+"((?:[^"\\]|\\.)*)"\s*$/;
