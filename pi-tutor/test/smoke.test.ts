@@ -1593,6 +1593,30 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       const c = await boot({ cwd: dir });
       expect(c.entries.filter((e) => e.type === "tutor_workflow")).toEqual([]);
     });
+    it("the learner's own messages advance the recipe; Examples rows join spec/checks.md (spec 2026-10-26 §5.1)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Write `split_amount(total, people)` returning each share\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file);
+      p.setSetting("onboarding", "");
+      p.setLevel("python", 10);
+      p.setSetting(`checks:${dir}`, JSON.stringify({ milestones: { 1: { ran: true, reference: "def split_amount(total, people):\n    return total / people\n", checks: [] } } }));
+      p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      expect(step()).toBe(1);
+      await turn(b.events, b.ctx, "ok", judged("none"));
+      expect(step()).toBe(1);
+      await turn(b.events, b.ctx, "P1.T1 is the split box", judged("none"));
+      expect(step()).toBe(2);
+      await turn(b.events, b.ctx, "total: float, people: int → float", judged("none"));
+      expect(step()).toBe(3);
+      await turn(b.events, b.ctx, "split_amount(50, 3) → 16.666666666666668\nedge: split_amount(0, 3) → 0.0", judged("none"));
+      expect(step()).toBe(4);
+      await waitFor(() => readFileSync(pjoin(dir, "spec", "checks.md"), "utf8").includes("split_amount(0, 3) == 0.0"));
+      expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("split_amount(50, 3) == 16.666666666666668");
+    });
     it("a beginner's ticked task starts the recipe on the next open task; off stops it for that task only (habits Review Focus #1)", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n- [ ] P1.T3 round\n");

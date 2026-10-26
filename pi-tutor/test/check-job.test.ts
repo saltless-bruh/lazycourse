@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, currentMilestone, writeMilestoneChecks, readChecksState } from "../extensions/tutor/check-job.js";
+import { crossCheckOnReference, checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, currentMilestone, writeMilestoneChecks, readChecksState } from "../extensions/tutor/check-job.js";
 import type { Check } from "../extensions/tutor/checks.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import { realExec } from "./fake-pi.js";
@@ -138,6 +138,18 @@ describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 
     expect(asked[2]).toMatch(/one character/);
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "trusted", "trusted"]);
     expect(m.weak ?? []).toEqual([]);
+  }, 60_000);
+});
+
+describe.skipIf(!compiled("python3", ["--version"]))("crossCheckOnReference (spec 2026-10-26 §5.1: Examples rows)", () => {
+  it("a row the reference agrees with is trusted, a wrong one unverified", async () => {
+    const reference = "def split_amount(total, people):\n    return total / people\n";
+    const rows = [
+      { task: "P1.T1", kind: "value" as const, expr: "split_amount(50, 3)", expected: "16.666666666666668", milestone: 1, status: "unverified" as const },
+      { task: "P1.T1", kind: "value" as const, expr: "split_amount(48, 3)", expected: "15.0", milestone: 1, status: "unverified" as const },
+    ];
+    const r = await crossCheckOnReference({ exec: realExec, sandbox: host(), language: "python", entry: "src/main.py", runCmd: "python3 src/main.py", reference, checks: rows });
+    expect(r.map((c) => c.status)).toEqual(["trusted", "unverified"]);
   }, 60_000);
 });
 

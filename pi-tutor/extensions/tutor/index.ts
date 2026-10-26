@@ -23,7 +23,8 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { crossCheckOnReference, currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -521,6 +522,7 @@ export default function (pi: ExtensionAPI): void {
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
     // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
     const prompt = event.messageType === "user" ? event.prompt : "";
+    if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
@@ -589,6 +591,40 @@ export default function (pi: ExtensionAPI): void {
   });
 
   /** Move the design recipe on one step when `stepDone`; persists it and drops it once finished. */
+  /** Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. */
+  function recipeStep(prompt: string) {
+    const w = workflow;
+    if (!w || !project || !recognize(w.step, prompt, { language: project.language, task: w.task })) return;
+    if (w.step === 3) void addExampleChecks(prompt, w.task);
+    advanceWorkflow(true);
+    paint();
+  }
+
+  /** The learner's Examples rows become checks for the task, cross-checked on the milestone's reference. */
+  async function addExampleChecks(text: string, task: string) {
+    if (!project || !profile) return;
+    const proj = project, p = profile, root = proj.path, key = `checks:${root}`;
+    let tasksMd = "";
+    try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { return; }
+    const k = currentMilestone(tasksMd, lesson);
+    const rows = examplesToChecks(text, task, proj.language, k);
+    if (!rows.length) return;
+    let state: ChecksState = { milestones: {} };
+    profileWrite(() => { state = readChecksState(p.setting(key)); });
+    const { runCmd, entry } = projectRun(root, proj.language);
+    const checked = await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: proj.language, entry, runCmd, reference: state.milestones[k]?.reference ?? "", checks: rows, root });
+    if (!profile) return;
+    const now = profile;
+    let saved: ChecksState = { milestones: {} };
+    profileWrite(() => {
+      saved = readChecksState(now.setting(key));
+      const m = saved.milestones[k] ?? { checks: [], reference: "", ran: false };
+      saved.milestones[k] = { ...m, checks: [...m.checks, ...checked] };
+      now.setSetting(key, JSON.stringify(saved));
+    });
+    writeChecksMd(root, saved, k);
+  }
+
   function advanceWorkflow(stepDone: boolean): Workflow | null {
     if (!workflow) return null;
     const next = advance(workflow, stepDone, Date.now());

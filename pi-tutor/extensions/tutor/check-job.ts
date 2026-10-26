@@ -104,6 +104,24 @@ export function crossCheck(results: CheckResult[]): Check[] {
 const ROUNDED = "an answer rounded down to a whole number (floor, //, integer division) passes them; use inputs whose result is not whole";
 const SLIP = "an answer with one character changed (`*` for `/`, `<` for `<=`) passes them; use inputs at the edges";
 
+/** Spec 2026-10-26 §5.1: extra checks (the learner's Examples rows) cross-checked on the stored reference. */
+export async function crossCheckOnReference(d: { exec: RunExec; sandbox: SandboxHost | null; language: string; entry: string | null; runCmd: string | null; reference: string; checks: Check[]; root?: string }): Promise<Check[]> {
+  if (!d.sandbox || !d.entry || !d.reference || d.checks.length === 0) return d.checks;
+  const dir = mkdtempSync(join(tmpdir(), "lazycourse-ref-"));
+  try {
+    mkdirSync(dirname(join(dir, d.entry)), { recursive: true });
+    writeFileSync(join(dir, d.entry), d.reference);
+    const manifest = manifestFor(d.language, "project");
+    if (manifest) {
+      let text = manifest.text;
+      try { if (d.root) text = readFileSync(join(d.root, manifest.rel), "utf8"); } catch { /* none yet: the minimal one */ }
+      writeFileSync(join(dir, manifest.rel), text);
+    }
+    const r = await runChecks(d.exec, { language: d.language, root: dir, entry: d.entry, runCmd: d.runCmd, checks: d.checks, sandbox: d.sandbox });
+    return r.missing ? d.checks : crossCheck(r.results);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
 export async function writeMilestoneChecks(d: {
   complete: Complete; exec: RunExec; sandbox: SandboxHost | null;
   language: string; tasksMd: string; milestone: number; entry: string | null; runCmd: string | null;
