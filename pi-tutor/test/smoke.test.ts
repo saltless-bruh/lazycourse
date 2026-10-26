@@ -1593,6 +1593,18 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       const c = await boot({ cwd: dir });
       expect(c.entries.filter((e) => e.type === "tutor_workflow")).toEqual([]);
     });
+    it("a right-click question during a recipe is answered as the question, not as the recipe step (phase 1 live check)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.setLevel("python", 10); p.close();
+      const b = await boot({ cwd: dir });
+      expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(true);
+      const ask = await turn(b.events, b.ctx, "[ask-error] src/main.py:2: name 'totl' is not defined | code: return totl / people", judged("none"));
+      expect(JSON.stringify(ask.message?.content ?? "")).not.toMatch(/\[workflow\]/);
+      const plain = await turn(b.events, b.ctx, "what next?", judged("none"));
+      expect(JSON.stringify(plain.message?.content ?? "")).toMatch(/\[workflow\]/);
+    });
     it("the learner's own messages advance the recipe; Examples rows join spec/checks.md (spec 2026-10-26 §5.1)", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Write `split_amount(total, people)` returning each share\n");
@@ -1660,6 +1672,27 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       expect(b.entries.filter((e) => e.type === "tutor_tick").map((e) => e.data)).toEqual([{ ids: ["P1.T1"], how: "self" }, { ids: ["P1.T2"], how: "self" }]);
       await b.commands["tutor-done"].handler("", b.ctx);
       expect(b.notes.at(-1)).toMatch(/every task in spec\/tasks\.md is ticked/);
+    });
+    it("Examples rows saved before the milestone's checks do not stop the checks job; they are kept (phase 1 live check)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", "");
+      p.setSetting(`checks:${dir}`, JSON.stringify({ milestones: { 1: { ran: false, reference: "", checks: [{ task: "P1.T1", kind: "value", expr: "tip(10)", expected: "2.0", milestone: 1, status: "unverified" }] } } }));
+      p.close();
+      const f = fakePi();
+      extension(f.pi as never);
+      const c = fakeCtx([], dir);
+      c.replies.push(CHECKS, REF);
+      const saved = process.env.NVIM; delete process.env.NVIM;
+      await f.events["session_start"]({ type: "session_start", reason: "startup" }, c.ctx);
+      if (saved) process.env.NVIM = saved;
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")) && readFileSync(pjoin(dir, "spec", "checks.md"), "utf8").includes("tip(40)"));
+      const md = readFileSync(pjoin(dir, "spec", "checks.md"), "utf8");
+      expect(md).toContain("tip(40) == 8.0");
+      expect(md).toContain("tip(10) == 2.0");
+      expect((await setting(`checks:${dir}`)).milestones["1"].reference).toContain("return x * 0.2");
     });
     it("an older project with a plan and no checks gets them at session start", async () => {
       mkdir(pjoin(dir, "spec"));

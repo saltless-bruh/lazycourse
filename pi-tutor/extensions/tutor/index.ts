@@ -581,7 +581,8 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode, run.step ?? "teach"));
     if (exam && role.ladder) parts.push(formatExamContext(exam, Date.now()));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
-    if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
+    // Phase 1 live check: a right-click question is about the error, so the recipe step stays out of that turn.
+    if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) parts.push(formatWorkflowContext(workflow, band));
     // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
     const mapStep = workflow !== null && role.ladder && STEPS[workflow.step - 1] === "Map";
     if (lang && pack && role.ladder && indexWanted({ prompt, mapStep })) {
@@ -1368,7 +1369,8 @@ export default function (pi: ExtensionAPI): void {
     const current = currentMilestone(tasksMd, lesson);
     let state: ChecksState = { milestones: {} };
     profileWrite(() => { state = readChecksState(p.setting(key)); });
-    const todo = Array.from({ length: current }, (_, i) => i + 1).filter((k) => !state.milestones[k]);
+    // A record with no reference holds only the learner's Examples rows (phase 1 live check): still to write.
+    const todo = Array.from({ length: current }, (_, i) => i + 1).filter((k) => !state.milestones[k]?.reference);
     if (todo.length === 0) return;
     const { runCmd, entry } = projectRun(proj.path, proj.language);
     const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
@@ -1381,9 +1383,16 @@ export default function (pi: ExtensionAPI): void {
             language: proj.language, tasksMd, milestone: k, entry, runCmd, root: proj.path,
           });
           if (!profile) return;
+          // Examples rows saved before this milestone had a reference are kept, cross-checked on the new one.
+          let earlier: ChecksState = { milestones: {} };
+          const before = profile;
+          profileWrite(() => { earlier = readChecksState(before.setting(key)); });
+          const rows = (earlier.milestones[k]?.checks ?? []).filter((c) => !m.checks.some((x) => x.kind === c.kind && x.expr === c.expr && x.stdin === c.stdin));
+          const kept = rows.length ? await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: proj.language, entry, runCmd, reference: m.reference, checks: rows, root: proj.path }) : [];
+          if (!profile) return;
           const now = profile;
           let saved: ChecksState = { milestones: {} };
-          profileWrite(() => { saved = readChecksState(now.setting(key)); saved.milestones[k] = m; now.setSetting(key, JSON.stringify(saved)); });
+          profileWrite(() => { saved = readChecksState(now.setting(key)); saved.milestones[k] = { ...m, checks: [...m.checks, ...kept] }; now.setSetting(key, JSON.stringify(saved)); });
           writeChecksMd(proj.path, saved, current);
           const trusted = m.checks.filter((c) => c.status === "trusted").length;
           if (generation === mine && m.checks.length) ui?.notify(`checks for milestone ${k}: spec/checks.md (${trusted} trusted, ${m.checks.length - trusted} unverified)`, "info");
