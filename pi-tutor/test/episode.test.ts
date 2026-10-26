@@ -64,45 +64,40 @@ describe("language card through a real Neovim (Review Focus #4)", () => {
 });
 
 describe("stuck episodes through a real Neovim", () => {
-  it("a beginner's new error opens an episode and nudges Pi once; clearing it closes the episode", async () => {
+  it("an error that sits opens no episode and sends no nudge; the learner asks (spec 2026-10-26 §5.2)", async () => {
     const b = await linked();
     await setError("boom");
-    await until(() => b.sent.length > 0);
-    expect(b.sent).toEqual([{ text: '[tutor] stuck signal: error "boom" at a.py:1', opts: { deliverAs: "followUp" } }]);
-    expect(b.widgets["tutor"]?.[1]).toBe('stuck: error "boom" at a.py:1');
-    await setError("boom"); // same error again: no second episode, no second nudge
+    await new Promise((r) => setTimeout(r, 600));
+    expect(b.sent).toEqual([]);
+    expect(episodes(b.entries)).toEqual([]);
+  }, 20000);
+  it("a right-click question is answered as a question and records how long the error was on screen", async () => {
+    const b = await linked();
+    await setError("boom");
     await new Promise((r) => setTimeout(r, 300));
-    expect(b.sent).toHaveLength(1);
-    await nvim!.lua(`vim.diagnostic.reset(vim.api.nvim_create_namespace("t"), 0)`);
-    await until(() => b.widgets["tutor"]?.[1] === "episode closed (cleared)");
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error", msg: "boom" }, closeReason: "cleared" });
-    expect(b.sent).toHaveLength(1);
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[ask-error] a.py:1: boom | code: x =", systemPromptOptions: opts }, b.ctx);
+    const ask = b.entries.filter((e) => e.type === "tutor_ask_error").at(-1)?.data as { path: string; line: number; msg: string; shownMs: number | null };
+    expect(ask).toMatchObject({ path: "a.py", line: 1, msg: "boom" });
+    expect(ask.shownMs).toBeGreaterThanOrEqual(200);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "chat" } });
   }, 20000);
 
   it("opens the episode silently while Pi is mid-reply", async () => {
     const b = await linked(true);
-    await setError("bang");
-    await until(() => b.widgets["tutor"]?.[1] === 'stuck: error "bang" at a.py:1');
+    await runPayload(1, "Traceback\nKeyError: 'x'");
+    await until(() => b.widgets["tutor"]?.[1]?.startsWith("stuck: run failed") === true);
     expect(b.sent).toEqual([]);
   }, 20000);
 
-  it("an editor error supersedes an open chat episode and still nudges (final review I1)", async () => {
+  it("an editor error leaves an open chat episode alone (spec 2026-10-26 §5.2)", async () => {
     const b = await linked();
     await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "what does :w do?", systemPromptOptions: { sections: {} } }, b.ctx);
     expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "chat" } });
     await setError("boom");
-    await until(() => b.sent.length > 0);
-    expect(b.widgets["tutor"]?.[1]).toBe('stuck: error "boom" at a.py:1');
-    expect(episodes(b.entries).find((e) => e.closeReason === "superseded")).toMatchObject({ trigger: { kind: "chat" } });
-  }, 20000);
-
-  it("a second error within 2 minutes opens its episode but sends no second nudge (final review I2)", async () => {
-    const b = await linked();
-    await setError("boom");
-    await until(() => b.sent.length > 0);
-    await setError("bang");
-    await until(() => b.widgets["tutor"]?.[1] === 'stuck: error "bang" at a.py:1', 10000);
-    expect(b.sent).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(episodes(b.entries).find((e) => e.closeReason === "superseded")).toBeUndefined();
+    expect(b.sent).toEqual([]);
   }, 20000);
 
   it("a restored error episode closes when its error is gone (final review I1)", async () => {
@@ -338,7 +333,7 @@ describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
   it("an error marked in the editor no longer makes a runtime error a typo run (author 2026-10-21)", async () => {
     const b = await linked();
     await setError("boom");
-    await until(() => b.sent.length === 1); // the error episode's own nudge
+    await new Promise((r) => setTimeout(r, 300));
     await runPayload(1, "NameError: name 'totl' is not defined");
     await until(() => (episodes(b.entries).at(-1) as { attempts?: number; trigger: { kind: string } }).trigger.kind === "run");
     expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "NameError: name 'totl' is not defined" });
@@ -357,11 +352,11 @@ describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
 });
 
 describe("architect role and stuck signals (M6a minor)", () => {
-  it("an editor error opens an episode silently while the architect is active", async () => {
+  it("a failed run opens an episode silently while the architect is active", async () => {
     const b = await linked();
     await b.commands["tutor-architect"].handler("", b.ctx);
-    await setError("boom");
-    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
+    await runPayload(1, "Traceback\nKeyError: 'x'");
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run"));
     await new Promise((r) => setTimeout(r, 300));
     expect(b.sent).toEqual([]);
   }, 20000);
@@ -470,20 +465,20 @@ describe("M6c: episodes against a real Neovim", () => {
     const b = await linked(); // beginner: error threshold 0
     const opts = { sections: {} as Record<string, string> };
     await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: REASONED, systemPromptOptions: opts }, b.ctx); // chat episode
-    await setError("boom"); // replaces it mid-reply
-    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
+    await runPayload(1, "Traceback\nNameError: boom"); // a failed run replaces it mid-reply (errors no longer open episodes)
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("correct") }, b.ctx);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, attempts: 0, turns: 0 });
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "run" }, turns: 0 });
   }, 20000);
   it("a run that started without an episode does not judge one opened mid-reply (M6c M6)", async () => {
     const b = await linked(); // beginner: error threshold 0
     const opts = { sections: {} as Record<string, string> };
     await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[tutor] a proactive nudge", systemPromptOptions: opts }, b.ctx); // no episode
     expect(episodes(b.entries)).toHaveLength(0);
-    await setError("boom"); // an editor episode opens mid-reply
-    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "error"));
+    await runPayload(1, "Traceback\nNameError: boom"); // a run episode opens mid-reply
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run"));
     await b.events["turn_end"]({ type: "turn_end", message: judged("wrong") }, b.ctx);
-    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error" }, attempts: 0, turns: 0 });
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "run" }, turns: 0 });
   }, 20000);
   it("display-only filetypes are not languages for /tutor-docs and memory (M5 #38, M6b #57)", async () => {
     const b = await linked();

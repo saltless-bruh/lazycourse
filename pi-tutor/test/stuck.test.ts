@@ -190,3 +190,12 @@ describe("attempt spots (spec 2026-10-21 §5)", () => {
       expect(isSyntaxError(t), t).toBe(false);
   });
 });
+
+describe("error nudges off (spec 2026-10-26 §5.2: the learner asks)", () => {
+  it("an error that sits opens no episode; idle still does; the error's start is still known", () => {
+    const d = new StuckDetector(() => ({ errorMs: 0, idleMs: 1000 }), () => true, { errorNudges: false });
+    expect(d.observe(diag("/p/a.py", 1), 0)).toEqual([]);
+    expect(d.tick(5_000).filter((e) => e.type === "open" && e.trigger.kind === "error")).toEqual([]);
+    expect(d.errorSince("/p/a.py")).toBe(0);
+  });
+});

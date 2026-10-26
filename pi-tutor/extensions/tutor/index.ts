@@ -218,7 +218,8 @@ export default function (pi: ExtensionAPI): void {
   let exam: ExamState | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
-  const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
+  // Spec 2026-10-26 §5.2: an error that sits never nudges; the learner asks with the right-click entry.
+  const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode), { errorNudges: false });
   // Spec 2026-10-13 §7.1: the model's two memory tools, scoped to this session's project.
   /** The language to use outside a recorded project: the buffer's filetype, if it is a pack language (M5 #38). */
   const editorLanguage = () => languageOfFiletype(state.language);
@@ -523,6 +524,12 @@ export default function (pi: ExtensionAPI): void {
     // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
     const prompt = event.messageType === "user" ? event.prompt : "";
     if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
+    const asked = /^\[ask-error\] (.+?):(\d+): (.*?) \| code: /.exec(prompt);
+    if (asked) {
+      const base = project?.path ?? session?.cwd;
+      const since = base ? detector.errorSince(join(base, asked[1])) : null;
+      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs: since === null ? null : Date.now() - since });
+    }
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
