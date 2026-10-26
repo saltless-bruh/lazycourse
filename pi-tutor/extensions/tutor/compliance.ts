@@ -277,7 +277,8 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");
   if (limits.question && !plain.includes("?")) issues.add("no-question");
   if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
-  if (o.step !== "fix" && o.referenceLines?.length && proseFixLeak(raw, { referenceLines: o.referenceLines, sourceLines: o.sourceLines, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
+  // A reply already held for showing the code needs no second reason; prose-fix is for fixes given in words alone.
+  if (o.step !== "fix" && !issues.has("own-code") && o.referenceLines?.length && proseFixLeak(raw, { referenceLines: o.referenceLines, sourceLines: o.sourceLines, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
   return [...issues];
 }
 
