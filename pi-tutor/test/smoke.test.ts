@@ -1577,6 +1577,44 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
       expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
     });
+    it("a beginner opening a project in building gets the recipe on its first open task; an intermediate does not", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [x] P1.T1 tip\n- [ ] P1.T2 print\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file);
+      p.setSetting("onboarding", "");
+      p.setLevel("python", 10);
+      p.close();
+      const b = await boot({ cwd: dir });
+      expect(b.entries.filter((e) => e.type === "tutor_workflow").map((e) => (e.data as { task: string }).task)).toEqual(["P1.T2"]);
+      const q = Profile.open(file);
+      q.setLevel("python", 50);
+      q.close();
+      const c = await boot({ cwd: dir });
+      expect(c.entries.filter((e) => e.type === "tutor_workflow")).toEqual([]);
+    });
+    it("a beginner's ticked task starts the recipe on the next open task; off stops it for that task only (habits Review Focus #1)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n- [ ] P1.T3 round\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file);
+      p.setSetting("onboarding", "");
+      p.close();
+      const b = await boot({ cwd: dir });
+      await b.commands["tutor-level"].handler("10", b.ctx);
+      const recipes = () => b.entries.filter((e) => e.type === "tutor_workflow").map((e) => e.data as { task: string; done?: number });
+      await b.commands["tutor-done"].handler("P1.T1 anyway", b.ctx);
+      expect(recipes().at(-1)).toMatchObject({ task: "P1.T2" });
+      expect(recipes().at(-1)?.done).toBeUndefined();
+      await b.commands["tutor-plan"].handler("off", b.ctx);
+      expect(recipes().at(-1)).toMatchObject({ task: "P1.T2" });
+      expect(recipes().at(-1)?.done).toBeDefined();
+      await b.commands["tutor-done"].handler("P1.T2 anyway", b.ctx);
+      expect(recipes().at(-1)).toMatchObject({ task: "P1.T3" });
+      expect(b.entries.filter((e) => e.type === "tutor_episode")).toEqual([]);
+      expect(b.widgets["tutor"]?.[0]).toContain("lvl 10");
+    });
     it("/tutor-done with no sandbox ticks as self-checked; a task with no checks too; a deleted spec/checks.md is rewritten (Review Focus #4)", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");

@@ -18,7 +18,7 @@ import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.j
 import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
-import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
+import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
@@ -452,6 +452,9 @@ export default function (pi: ExtensionAPI): void {
       profileWrite(() => { const raw = p.setting(key); if (raw) { try { saved = restoreExam([{ type: "custom", customType: "tutor_exam", data: JSON.parse(raw) }]); } catch { saved = undefined; } } });
     }
     exam = saved !== undefined ? saved : restoreExam(ctx.sessionManager.getBranch());
+    recipeOff = new Set(ctx.sessionManager.getBranch().flatMap((e) => (e.type === "custom" && e.customType === "tutor_workflow_off" ? [(e.data as { task: string }).task] : [])));
+    const lessonNow = lesson as LessonState | null; // set inside profileWrite above; TS narrows it to null
+    if (!lessonNow || lessonNow.building) autoRecipe(ctx);
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       // Pane review #5: an old link's disconnect can land after /new or /resume connected a new one;
@@ -772,13 +775,15 @@ export default function (pi: ExtensionAPI): void {
       if (id === "off") {
         if (!workflow) { ctx.ui.notify("no design recipe in progress", "info"); return; }
         const task = workflow.task;
+        recipeOff.add(task);
+        pi.appendEntry("tutor_workflow_off", { task });
         pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() });
         workflow = null;
         paint();
         ctx.ui.notify(`design recipe for ${task} stopped`, "info");
         return;
       }
-      if (id === "next") {
+      if (id === "next" || id === "skip") {
         if (!workflow) { ctx.ui.notify("no design recipe in progress; start one with /tutor-plan <task id>", "info"); return; }
         const moved = advanceWorkflow(true);
         paint();
@@ -797,15 +802,30 @@ export default function (pi: ExtensionAPI): void {
       const line = findTask(tasks, id);
       if (!line) { ctx.ui.notify(`${id} is not in spec/tasks.md`, "warning"); return; }
       setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
-      workflow = startWorkflow(id, Date.now());
-      pi.appendEntry("tutor_workflow", workflow);
-      paint();
-      const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
-      // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-      if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
-      else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
+      beginRecipe(ctx, id, line);
     },
   });
+
+  function beginRecipe(ctx: ExtensionContext, id: string, line: string) {
+    workflow = startWorkflow(id, Date.now());
+    pi.appendEntry("tutor_workflow", workflow);
+    paint();
+    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
+    // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
+    if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+    else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
+  }
+
+  /** Spec 2026-10-26 §5.1: a beginner's next open task starts the recipe by itself (skip/off per task). */
+  let recipeOff = new Set<string>();
+  function autoRecipe(ctx: ExtensionContext | null) {
+    if (!ctx || !project || exam) return;
+    let tasks: string;
+    try { tasks = readFileSync(join(project.path, "spec", "tasks.md"), "utf8"); } catch { return; }
+    const id = recipeAutoStart({ band: bandFor(level()), workflow, task: openTaskIds(tasks)[0] ?? null, offFor: recipeOff });
+    const line = id ? findTask(tasks, id) : null;
+    if (id && line) beginRecipe(ctx, id, line);
+  }
 
   pi.registerCommand("tutor-exam", {
     description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons; sandbox on|off",
@@ -1071,6 +1091,8 @@ export default function (pi: ExtensionAPI): void {
     if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
+    if (workflow?.task === id) { pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() }); workflow = null; }
+    autoRecipe(session);
     try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
     paint();
   }
