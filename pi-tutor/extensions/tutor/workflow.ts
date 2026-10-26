@@ -13,7 +13,8 @@ const ARTIFACT = [
 ];
 
 const MODE: Record<Band, string> = {
-  beginner: "Beginner: half-fill this step's artifact as a model and let the learner complete it; at Map, show an unrelated mini example per construct.",
+  // Spec 2026-10-26 §5.1: the habit counts only the learner's own artifact, so the model never fills it in.
+  beginner: "Beginner: show this step on an unrelated example, then ask the learner to write their own; never fill in their artifact. At Map, show an unrelated mini example per construct.",
   intermediate: "Intermediate: ask one question about this step and check the learner's answer.",
   pro: "Pro: name the step only, then review what the learner produces.",
 };
@@ -22,6 +23,11 @@ export interface Workflow { task: string; step: number; started: number; done?: 
 
 /** Task ids from spec/tasks.md: P1, P1.T2, P1.T2.S3. */
 export const TASK_ID = /^P\d+(?:\.T\d+(?:\.S\d+)?)?$/;
+
+/** Spec 2026-10-26 §5.1: the task a beginner's recipe starts on by itself, or null (other bands, one running, turned off). */
+export function recipeAutoStart(i: { band: Band; workflow: Workflow | null; task: string | null; offFor: Set<string> }): string | null {
+  return i.band === "beginner" && !i.workflow && i.task && !i.offFor.has(i.task) ? i.task : null;
+}
 
 export function startWorkflow(task: string, now: number): Workflow {
   return { task, step: 1, started: now };

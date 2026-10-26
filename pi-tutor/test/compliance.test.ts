@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
+import { proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -8,6 +8,40 @@ const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ ju
 const fence = (tag: string, lines: string[]) => "```" + tag + "\n" + lines.join("\n") + "\n```";
 const JUDGED = "\n" + fence("tutor-judgment", ['{"judgment":"none"}']); // a fence opens on its own line
 const ok = { band: "intermediate" as const, step: "why" as TurnStep | null, judged: true, noCode: false };
+
+describe("prose fix leaks (spec 2026-10-26 §5.3)", () => {
+  const ref = ["    return total / people"], src = ["    return total * people"];
+  it("before the fix step, telling the learner the exact change in words is a leak", () => {
+    expect(proseFixLeak("Use `/` instead of `*` so each person gets a share.", { referenceLines: ref, sourceLines: src, words: true })).toBe(true);
+    expect(proseFixLeak("True division is needed here.", { referenceLines: ref, sourceLines: src, words: true })).toBe(true);
+    expect(proseFixLeak("Think about what splitting a bill means for the size of each share.", { referenceLines: ref, sourceLines: src, words: true })).toBe(false);
+  });
+  it("at the why step words are allowed, the exact symbol is not", () => {
+    expect(proseFixLeak("It needs division, not multiplication.", { referenceLines: ref, sourceLines: src, words: false })).toBe(false);
+    expect(proseFixLeak("Change `*` to `/`.", { referenceLines: ref, sourceLines: src, words: false })).toBe(true);
+  });
+  it("checkTurn flags it before the fix step only, and only with a spot to compare", () => {
+    const o = { names: new Set<string>(), sourceLines: src, referenceLines: ref, proseScope: { referenceLines: ref, sourceLines: src } };
+    expect(checkTurn("Use `/` instead of `*`. What do you think?", { ...o, step: "hint" })).toContain("prose-fix");
+    expect(checkTurn("Use `/` instead of `*`.", { ...o, step: "fix" })).not.toContain("prose-fix");
+    expect(checkTurn("Use `/` instead of `*`. What do you think?", { ...o, proseScope: undefined, step: "hint" })).not.toContain("prose-fix");
+  });
+  it("final review C1: ordinary teaching about other constructs is never a prose fix", () => {
+    const reference = "def split_amount(total, people):\n    return total / people\n\nt = float(input('Total: '))\nprint(split_amount(t, 3))\n".split("\n");
+    const learner = "def split_amount(total, people):\n    return total * people\n".split("\n");
+    const scope = { referenceLines: functionLines(reference, "split_amount"), sourceLines: functionLines(learner, "split_amount") };
+    for (const ok of ["You can use print to see what a variable holds.", "Try adding a print call before the return.", "In Python you use input() to read what someone types.", "Reading needs input, turning text to a number needs float."]) {
+      expect(proseFixLeak(ok, { ...scope, words: true }), ok).toBe(false);
+    }
+    expect(proseFixLeak("Use `/` instead of `*`.", { ...scope, words: true })).toBe(true);
+  });
+  it("functionLines: a function's own lines, in Python, Rust and Go", () => {
+    expect(functionLines(["def a():", "    return 1", "", "def b(x):", "    y = x", "    return y", "print(b(1))"], "b")).toEqual(["def b(x):", "    y = x", "    return y"]);
+    expect(functionLines(["fn b(x: u32) -> u32 {", "    x / 2", "}", "fn main() {}"], "b")).toEqual(["fn b(x: u32) -> u32 {", "    x / 2", "}"]);
+    expect(functionLines(["func b(x int) int {", "\treturn x / 2", "}"], "b")).toEqual(["func b(x int) int {", "\treturn x / 2", "}"]);
+    expect(functionLines(["x = 1"], "b")).toEqual([]);
+  });
+});
 
 describe("hasReasoning", () => {
   it("a bare question or a [tutor] nudge is not reasoning", () => {

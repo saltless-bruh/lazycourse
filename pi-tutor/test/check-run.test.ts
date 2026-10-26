@@ -106,6 +106,11 @@ describe.skipIf(!bwrapReady || !has("python3"))("runChecks: Python in the sandbo
     expect(r.map((x) => x.error)).toEqual([PRINTED_TOO_MUCH, PRINTED_TOO_MUCH]);
     expect(seen.max).toBeLessThan(200_000);
   }, 30_000);
+  it("reports the value's type; a @dataclass file with postponed annotations loads (spec 2026-10-26 §5.3)", async () => {
+    const root = project({ "src/main.py": "from __future__ import annotations\nfrom dataclasses import dataclass\n\n@dataclass\nclass Bill:\n    total: float\n\ndef count(s):\n    return len(s.split())\n\ndef half(x):\n    return x / 2\n\ndef bill_total(t):\n    return Bill(t).total\n" });
+    const r = (await py(root, [value("count('a b')", "2"), value("half(4)", "2.0"), value("bill_total(3.0)", "3.0")])).results;
+    expect(r.map((x) => [x.pass, x.valueType])).toEqual([[true, "int"], [true, "float"], [true, "float"]]);
+  }, 30_000);
   it("typed input → output: the run command with stdin fed", async () => {
     const root = project({ "src/main.py": "total = float(input('total: '))\nprint(f'each: {total / 3:.2f}')\n" });
     const r = (await py(root, [io("52.8\n", "17.60"), io("52.8\n", "99")])).results;

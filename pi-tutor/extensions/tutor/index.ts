@@ -10,7 +10,7 @@ import { bandFor, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
+import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
 import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "./turns.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
@@ -18,12 +18,14 @@ import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.j
 import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
-import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
+import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
-import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
+import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { recognize, examplesToChecks } from "./recipe-steps.js";
+import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -175,7 +177,7 @@ export default function (pi: ExtensionAPI): void {
   /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
   /** `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role. */
   /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[] } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -217,7 +219,8 @@ export default function (pi: ExtensionAPI): void {
   let exam: ExamState | null = null;
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
-  const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode));
+  // Spec 2026-10-26 §5.2: an error that sits never nudges; the learner asks with the right-click entry.
+  const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode), { errorNudges: false });
   // Spec 2026-10-13 §7.1: the model's two memory tools, scoped to this session's project.
   /** The language to use outside a recorded project: the buffer's filetype, if it is a pack language (M5 #38). */
   const editorLanguage = () => languageOfFiletype(state.language);
@@ -452,6 +455,9 @@ export default function (pi: ExtensionAPI): void {
       profileWrite(() => { const raw = p.setting(key); if (raw) { try { saved = restoreExam([{ type: "custom", customType: "tutor_exam", data: JSON.parse(raw) }]); } catch { saved = undefined; } } });
     }
     exam = saved !== undefined ? saved : restoreExam(ctx.sessionManager.getBranch());
+    recipeOff = new Set(ctx.sessionManager.getBranch().flatMap((e) => (e.type === "custom" && e.customType === "tutor_workflow_off" ? [(e.data as { task: string }).task] : [])));
+    const lessonNow = lesson as LessonState | null; // set inside profileWrite above; TS narrows it to null
+    if (!lessonNow || lessonNow.building) autoRecipe(ctx);
     if (episode) detector.adopt(episode.trigger, Date.now());
     if (!link) {
       // Pane review #5: an old link's disconnect can land after /new or /resume connected a new one;
@@ -518,6 +524,13 @@ export default function (pi: ExtensionAPI): void {
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
     // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
     const prompt = event.messageType === "user" ? event.prompt : "";
+    if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
+    const asked = /^\[ask-error\] (.+?):(\d+): (.*?) \| code: /.exec(prompt);
+    if (asked) {
+      const base = project?.path ?? session?.cwd;
+      const since = base ? detector.errorSince(join(base, asked[1])) : null;
+      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs: since === null ? null : Date.now() - since });
+    }
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
@@ -553,6 +566,9 @@ export default function (pi: ExtensionAPI): void {
         profileWrite(() => { state = readChecksState(p.setting(key)); });
         const k = Object.keys(state.milestones).map(Number).filter((n) => n <= now).sort((a, b) => b - a)[0];
         run.referenceLines = k ? state.milestones[k].reference.split(/\r?\n/) : [];
+        // Final review C1: a fix in words is judged on a failed check only, inside the function it calls.
+        const fn = episode?.spot?.startsWith("check:") ? calledName(episode.spot.split(":").slice(2).join(":")) : null;
+        run.proseScope = fn ? { referenceLines: functionLines(run.referenceLines, fn), sourceLines: functionLines(sources.flatMap((t) => t.split(/\r?\n/)), fn) } : undefined;
       }
     }
     // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
@@ -569,7 +585,8 @@ export default function (pi: ExtensionAPI): void {
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode, run.step ?? "teach"));
     if (exam && role.ladder) parts.push(formatExamContext(exam, Date.now()));
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
-    if (workflow && role.ladder) parts.push(formatWorkflowContext(workflow, band));
+    // Phase 1 live check: a right-click question is about the error, so the recipe step stays out of that turn.
+    if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) parts.push(formatWorkflowContext(workflow, band));
     // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
     const mapStep = workflow !== null && role.ladder && STEPS[workflow.step - 1] === "Map";
     if (lang && pack && role.ladder && indexWanted({ prompt, mapStep })) {
@@ -586,12 +603,46 @@ export default function (pi: ExtensionAPI): void {
   });
 
   /** Move the design recipe on one step when `stepDone`; persists it and drops it once finished. */
+  /** Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. */
+  function recipeStep(prompt: string) {
+    const w = workflow;
+    if (!w || !project || !recognize(w.step, prompt, { language: project.language, task: w.task })) return;
+    if (w.step === 3) void addExampleChecks(prompt, w.task);
+    advanceWorkflow(true);
+    paint();
+  }
+
+  /** The learner's Examples rows become checks for the task, cross-checked on the milestone's reference. */
+  async function addExampleChecks(text: string, task: string) {
+    if (!project || !profile) return;
+    const proj = project, p = profile, root = proj.path, key = `checks:${root}`;
+    let tasksMd = "";
+    try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { return; }
+    const k = currentMilestone(tasksMd, lesson);
+    const rows = examplesToChecks(text, task, proj.language, k);
+    if (!rows.length) return;
+    let state: ChecksState = { milestones: {} };
+    profileWrite(() => { state = readChecksState(p.setting(key)); });
+    const { runCmd, entry } = projectRun(root, proj.language);
+    const checked = await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: proj.language, entry, runCmd, reference: state.milestones[k]?.reference ?? "", checks: rows, root });
+    if (!profile) return;
+    const now = profile;
+    let saved: ChecksState = { milestones: {} };
+    profileWrite(() => {
+      saved = readChecksState(now.setting(key));
+      const m = saved.milestones[k] ?? { checks: [], reference: "", ran: false };
+      saved.milestones[k] = { ...m, checks: [...m.checks, ...checked] };
+      now.setSetting(key, JSON.stringify(saved));
+    });
+    writeChecksMd(root, saved, k);
+  }
+
   function advanceWorkflow(stepDone: boolean): Workflow | null {
     if (!workflow) return null;
     const next = advance(workflow, stepDone, Date.now());
     if (next === workflow) return workflow;
     pi.appendEntry("tutor_workflow", next);
-    if (next.done !== undefined) ui?.notify(`design recipe for ${next.task} finished`, "info");
+    if (next.done !== undefined) { ui?.notify(`design recipe for ${next.task} finished`, "info"); rememberRecipe("done", next.task); }
     workflow = next.done === undefined ? next : null;
     return next;
   }
@@ -678,7 +729,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines });
+      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
       if (issues.length) {
         // The session keeps what was rejected (never shown) so a live audit can tell a leak from a too-strict check.
         pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000) });
@@ -772,13 +823,16 @@ export default function (pi: ExtensionAPI): void {
       if (id === "off") {
         if (!workflow) { ctx.ui.notify("no design recipe in progress", "info"); return; }
         const task = workflow.task;
+        recipeOff.add(task);
+        rememberRecipe("off", task);
+        pi.appendEntry("tutor_workflow_off", { task });
         pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() });
         workflow = null;
         paint();
         ctx.ui.notify(`design recipe for ${task} stopped`, "info");
         return;
       }
-      if (id === "next") {
+      if (id === "next" || id === "skip") {
         if (!workflow) { ctx.ui.notify("no design recipe in progress; start one with /tutor-plan <task id>", "info"); return; }
         const moved = advanceWorkflow(true);
         paint();
@@ -797,15 +851,54 @@ export default function (pi: ExtensionAPI): void {
       const line = findTask(tasks, id);
       if (!line) { ctx.ui.notify(`${id} is not in spec/tasks.md`, "warning"); return; }
       setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
-      workflow = startWorkflow(id, Date.now());
-      pi.appendEntry("tutor_workflow", workflow);
-      paint();
-      const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
-      // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-      if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
-      else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
+      beginRecipe(ctx, id, line);
     },
   });
+
+  function beginRecipe(ctx: ExtensionContext, id: string, line: string) {
+    workflow = startWorkflow(id, Date.now());
+    pi.appendEntry("tutor_workflow", workflow);
+    paint();
+    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
+    // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
+    if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+    else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
+  }
+
+  /** Spec 2026-10-26 §5.1: a beginner's next open task starts the recipe by itself (skip/off per task). */
+  let recipeOff = new Set<string>();
+  /** Final review I1a: per project, the tasks whose recipe was turned off or finished (profile `recipe:<root>`). */
+  function recipeMemory(): { off: string[]; done: string[] } {
+    let m = { off: [] as string[], done: [] as string[] };
+    if (project && profile) { const p = profile, key = `recipe:${project.path}`; profileWrite(() => { try { m = { off: [], done: [], ...JSON.parse(p.setting(key) ?? "{}") }; } catch { /* a broken record is empty */ } }); }
+    return m;
+  }
+  function rememberRecipe(kind: "off" | "done", task: string) {
+    if (!project || !profile) return;
+    const p = profile, key = `recipe:${project.path}`, m = recipeMemory();
+    if (!m[kind].includes(task)) m[kind].push(task);
+    profileWrite(() => p.setSetting(key, JSON.stringify(m)));
+  }
+  /** The milestone a task belongs to (1 for a plan without milestone headings). */
+  function milestoneOf(tasksMd: string, id: string): number {
+    for (let k = 1; k <= milestoneCount(tasksMd); k++) if (findTask(milestoneText(tasksMd, k), id)) return k;
+    return 1;
+  }
+  function autoRecipe(ctx: ExtensionContext | null) {
+    if (!ctx || !project || exam) return;
+    const ls = lesson as LessonState | null;
+    if (ls && !ls.building) return; // a lesson round is not a task
+    let tasks: string;
+    try { tasks = readFileSync(join(project.path, "spec", "tasks.md"), "utf8"); } catch { return; }
+    const next = openTaskIds(tasks)[0] ?? null;
+    // Final review I1c: in a learn-first project, never past the milestone being built.
+    if (ls && next && milestoneOf(tasks, next) > currentMilestone(tasks, ls)) return;
+    // Final review I1a: tasks turned off or finished in any session (kept in the profile) never restart.
+    const kept = recipeMemory();
+    const id = recipeAutoStart({ band: bandFor(level()), workflow, task: next, offFor: new Set([...recipeOff, ...kept.off, ...kept.done]) });
+    const line = id ? findTask(tasks, id) : null;
+    if (id && line) beginRecipe(ctx, id, line);
+  }
 
   pi.registerCommand("tutor-exam", {
     description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons; sandbox on|off",
@@ -1033,6 +1126,12 @@ export default function (pi: ExtensionAPI): void {
     }),
   });
 
+  /** Short decimals, unless the short forms would look equal for a value that failed (final review M5). */
+  const gaveExpected = (got: string, want: string) => {
+    const g = shortNumber(got), w = shortNumber(want);
+    return g === w ? `gave ${got}, expected ${want}` : `gave ${g}, expected ${w}`;
+  };
+
   /** A failed trusted check (spec §7): a graded try on its spot, unless the file does not even load (a typo). */
   function failedCheck(id: string, f: CheckResult) {
     const c = f.check;
@@ -1045,7 +1144,7 @@ export default function (pi: ExtensionAPI): void {
     if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
     if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
     const line = c.kind === "value"
-      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${f.got}, expected ${c.expected}`}`
+      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : gaveExpected(f.got ?? "", c.expected ?? "")}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
     ui?.notify(`${id} not yet: ${line.replace(/^check \S+: /, "")}`, "warning");
     failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `check:${id}:${c.expr ?? c.stdin}`);
@@ -1071,6 +1170,8 @@ export default function (pi: ExtensionAPI): void {
     if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
+    if (workflow?.task === id) { pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() }); workflow = null; }
+    autoRecipe(session);
     try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
     paint();
   }
@@ -1303,7 +1404,8 @@ export default function (pi: ExtensionAPI): void {
     const current = currentMilestone(tasksMd, lesson);
     let state: ChecksState = { milestones: {} };
     profileWrite(() => { state = readChecksState(p.setting(key)); });
-    const todo = Array.from({ length: current }, (_, i) => i + 1).filter((k) => !state.milestones[k]);
+    // A record with no reference holds only the learner's Examples rows (phase 1 live check): still to write.
+    const todo = Array.from({ length: current }, (_, i) => i + 1).filter((k) => !state.milestones[k]?.reference);
     if (todo.length === 0) return;
     const { runCmd, entry } = projectRun(proj.path, proj.language);
     const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
@@ -1316,9 +1418,16 @@ export default function (pi: ExtensionAPI): void {
             language: proj.language, tasksMd, milestone: k, entry, runCmd, root: proj.path,
           });
           if (!profile) return;
+          // Examples rows saved before this milestone had a reference are kept, cross-checked on the new one.
+          let earlier: ChecksState = { milestones: {} };
+          const before = profile;
+          profileWrite(() => { earlier = readChecksState(before.setting(key)); });
+          const rows = (earlier.milestones[k]?.checks ?? []).filter((c) => !m.checks.some((x) => x.kind === c.kind && x.expr === c.expr && x.stdin === c.stdin));
+          const kept = rows.length ? await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: proj.language, entry, runCmd, reference: m.reference, checks: rows, root: proj.path }) : [];
+          if (!profile) return;
           const now = profile;
           let saved: ChecksState = { milestones: {} };
-          profileWrite(() => { saved = readChecksState(now.setting(key)); saved.milestones[k] = m; now.setSetting(key, JSON.stringify(saved)); });
+          profileWrite(() => { saved = readChecksState(now.setting(key)); saved.milestones[k] = { ...m, checks: [...m.checks, ...kept] }; now.setSetting(key, JSON.stringify(saved)); });
           writeChecksMd(proj.path, saved, current);
           const trusted = m.checks.filter((c) => c.status === "trusted").length;
           if (generation === mine && m.checks.length) ui?.notify(`checks for milestone ${k}: spec/checks.md (${trusted} trusted, ${m.checks.length - trusted} unverified)`, "info");
@@ -1387,6 +1496,7 @@ export default function (pi: ExtensionAPI): void {
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => p.setSetting(key, l ? JSON.stringify(l) : "")); }
     paint();
     if (session) ensureChecks(session); // a round that reached its milestone gets that milestone's checks
+    if (l?.building) autoRecipe(session); // final review I1b: building a milestone starts its first task's recipe
   }
   /** The hidden lesson section: the rules, the vendored lesson text, the exercise, and a step back after two fails (Q17). */
   function lessonSection(l: LessonState, lang: string): string {
@@ -1435,6 +1545,7 @@ export default function (pi: ExtensionAPI): void {
       }
       if (generation === mine) paint();
       if (written && generation === mine) ensureChecks(frozen);
+      if (written && generation === mine) autoRecipe(session); // final review I1b: a new plan's first task
     })();
   }
 

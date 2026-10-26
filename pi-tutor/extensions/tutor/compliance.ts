@@ -94,6 +94,7 @@ const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
   "no-summary": () => "a long reply had no **In short** line",
   "own-code": () => "it showed the learner's own code (their names) before this turn allows the fix; teach on an unrelated example or point at the place",
+  "prose-fix": () => "it told the learner the exact change in words before this turn allows the fix; point at the place or ask what they meant instead",
   "too-long": () => "it was longer than this turn allows",
   "no-question": () => "this turn must ask a question, and it asked none",
   "machinery": () => "it talked about the tutor's machinery or about \"the learner\"; talk to them directly about the code",
@@ -186,7 +187,55 @@ export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS):
 
 // ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
 
-export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery";
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix";
+
+// Spec 2026-10-26 §5.3: nemotron named the fix in words ("use / instead of *", "true division is needed").
+const INSTRUCTION = /\b(use|using|change|replace|switch|should be|instead of|try|needs?|need to|is needed|requires?|must be)\b/i;
+const OP_WORDS: Record<string, RegExp> = {
+  "/": /\b(true )?divi(de|sion|ding)\b/i, "//": /\b(floor|integer) divi(de|sion)\b|\bfloor\b/i, "*": /\bmultipl(y|ication|ying)\b/i,
+  "+": /\badd(ing|ition)?\b/i, "-": /\bsubtract(ing|ion)?\b/i, "%": /\b(remainder|modulo)\b/i,
+  "<=": /\bless than or equal\b/i, ">=": /\bgreater than or equal\b/i,
+};
+const tokensOf = (lines: string[]) => new Set(lines.join("\n").match(/\/\/|<=|>=|==|!=|[-+*/%<>]|\.?[A-Za-z_]\w*(?=\()/g) ?? []);
+
+/**
+ * The lines of function `name` (Python by indentation; Rust/Go/JS by braces), or [] when absent.
+ * Final review C1: a prose fix is judged against the checked function only, never the whole program.
+ */
+export function functionLines(lines: string[], name: string): string[] {
+  const head = new RegExp(`^(\\s*)(?:def|fn|func|function)\\s+(?:\\([^)]*\\)\\s*)?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[(<[]`);
+  const i = lines.findIndex((l) => head.test(l));
+  if (i < 0) return [];
+  const indent = head.exec(lines[i])![1].length;
+  const out = [lines[i]];
+  if (lines[i].includes("{")) {
+    let depth = 0;
+    for (let j = i; j < lines.length; j++) {
+      if (j > i) out.push(lines[j]);
+      depth += (lines[j].match(/{/g) ?? []).length - (lines[j].match(/}/g) ?? []).length;
+      if (depth <= 0 && j >= i && lines[j].includes("}")) break;
+    }
+    return out;
+  }
+  for (let j = i + 1; j < lines.length; j++) {
+    const l = lines[j];
+    if (l.trim() !== "" && l.length - l.trimStart().length <= indent) break;
+    out.push(l);
+  }
+  while (out.length > 1 && out[out.length - 1].trim() === "") out.pop();
+  return out;
+}
+
+/** A sentence that instructs the learner and names a token the reference has and their code does not. `words`: also by its plain-word name. */
+export function proseFixLeak(raw: string, o: { referenceLines: string[]; sourceLines: string[]; words: boolean }): boolean {
+  const theirs = tokensOf(o.sourceLines);
+  const fix = [...tokensOf(o.referenceLines)].filter((t) => !theirs.has(t));
+  if (!fix.length) return false;
+  const sentences = hideJudgment(raw).replace(FENCES, "").split(/(?<=[.!?])\s+|\n+/);
+  return sentences.some((s) => INSTRUCTION.test(s) && fix.some((t) =>
+    s.includes(`\`${t}\``) || (/^\.?\w/.test(t) ? new RegExp(`\\b${t.replace(".", "")}\\b`).test(s) : new RegExp(`(^|\\s)${t.replace(/[*+/]/g, "\\$&")}(\\s|$)`).test(s)) ||
+    (o.words && (OP_WORDS[t]?.test(s) ?? false))));
+}
 
 /** Parameter-ish names every example uses; never the learner's own. */
 const COMMON = new Set(["self", "this", "cls", "args", "kwargs", "main"]);
@@ -225,7 +274,7 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 
 /** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
  *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
-export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[] }): TurnIssue[] {
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
@@ -256,6 +305,9 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");
   if (limits.question && !plain.includes("?")) issues.add("no-question");
   if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
+  // A reply already held for showing the code needs no second reason; prose-fix is for fixes given in words alone.
+  // Final review C1: only on a graded try with a checked function, comparing that function's lines on both sides.
+  if (o.step !== "fix" && !issues.has("own-code") && o.proseScope?.referenceLines.length && proseFixLeak(raw, { ...o.proseScope, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
   return [...issues];
 }
 

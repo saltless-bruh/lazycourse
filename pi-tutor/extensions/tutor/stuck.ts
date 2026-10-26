@@ -79,7 +79,14 @@ export class StuckDetector {
   constructor(
     private readonly limits: () => { errorMs: number; idleMs: number },
     private readonly canOpen: () => boolean = () => true,
+    /** Spec 2026-10-26 §5.2: false = an error that sits never nudges; the learner asks (right-click). */
+    private readonly opts: { errorNudges?: boolean } = {},
   ) {}
+
+  /** When the file's current first error appeared, or null. */
+  errorSince(path: string): number | null {
+    return this.errors.get(path)?.since ?? null;
+  }
 
   /** Track an error whose episode was restored from the session, already fired. */
   adopt(t: Trigger, now: number): void {
@@ -140,6 +147,7 @@ export class StuckDetector {
   tick(now: number): StuckEvent[] {
     const { errorMs } = this.limits();
     const out: StuckEvent[] = [];
+    if (this.opts.errorNudges === false) return out;
     for (const [path, w] of this.errors) {
       if (!w.fired && now - w.since >= errorMs && this.canOpen()) {
         w.fired = true;

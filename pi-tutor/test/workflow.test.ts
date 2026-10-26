@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask } from "../extensions/tutor/workflow.js";
+import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, recipeAutoStart } from "../extensions/tutor/workflow.js";
 
 describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
   it("has the six steps in order", () => {
@@ -21,7 +21,7 @@ describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
     const w = { task: "P1.T1", step: 3, started: 1 };
     const b = formatWorkflowContext(w, "beginner");
     expect(b).toMatch(/^\[workflow\] design recipe for P1\.T1: step 3\/6 Examples/);
-    expect(b).toMatch(/half-fill/i);
+    expect(b).toMatch(/unrelated example/i);
     expect(formatWorkflowContext(w, "intermediate")).toMatch(/one question/i);
     expect(formatWorkflowContext(w, "pro")).toMatch(/name the step only/i);
     expect(b).toContain("step_done");
@@ -41,5 +41,22 @@ describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
     expect(findTask(md, "P1.T1")).toBe("- [ ] P1.T1 Parse argv into a Command");
     expect(findTask(md, "P1.T10")).toBe("- [ ] P1.T10 Something else");
     expect(findTask(md, "P1.T2")).toBeNull();
+  });
+});
+
+describe("the recipe is the beginner default (spec 2026-10-26 §5.1)", () => {
+  it("starts on the task for a beginner with no recipe running, unless turned off for that task", () => {
+    const none = new Set<string>();
+    expect(recipeAutoStart({ band: "beginner", workflow: null, task: "P1.T1", offFor: none })).toBe("P1.T1");
+    expect(recipeAutoStart({ band: "intermediate", workflow: null, task: "P1.T1", offFor: none })).toBeNull();
+    expect(recipeAutoStart({ band: "pro", workflow: null, task: "P1.T1", offFor: none })).toBeNull();
+    expect(recipeAutoStart({ band: "beginner", workflow: startWorkflow("P1.T1", 1), task: "P1.T2", offFor: none })).toBeNull();
+    expect(recipeAutoStart({ band: "beginner", workflow: null, task: "P1.T1", offFor: new Set(["P1.T1"]) })).toBeNull();
+    expect(recipeAutoStart({ band: "beginner", workflow: null, task: null, offFor: none })).toBeNull();
+  });
+  it("the beginner mode shows an unrelated example and never half-fills the learner's artifact", () => {
+    const ctx = formatWorkflowContext(startWorkflow("P1.T1", 1), "beginner");
+    expect(ctx).not.toMatch(/half-fill/);
+    expect(ctx).toMatch(/unrelated example/);
   });
 });

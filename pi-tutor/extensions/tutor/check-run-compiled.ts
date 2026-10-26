@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Check } from "./checks.js";
-import { PRINTED_TOO_MUCH, TOO_LONG, type CheckResult, type Sandboxed } from "./check-run.js";
+import { PRINTED_TOO_MUCH, TOO_LONG, type CheckResult, type Sandboxed, type ValueType } from "./check-run.js";
 import { manifestFor } from "./manifest.js";
 import { isSyntaxError } from "./stuck.js";
 
@@ -60,6 +60,12 @@ const shown = (d: Diag) => `${d.file}:${d.line}: ${d.message.replace(/^error(\[E
 const missingName = (d: Diag) =>
   /cannot find function `([\w]+)`/.exec(d.message)?.[1] ?? /^undefined: (?:\w+\.)?(\w+)$/.exec(d.message)?.[1] ?? null;
 
+/** Go names the type (%T); Rust's {:?} always prints a float with a point or an exponent. */
+function valueTypeOf(got: string, goType: string | undefined): ValueType {
+  if (goType) return /^float/.test(goType) ? "float" : /^u?int/.test(goType) ? "int" : "other";
+  return /^-?\d+$/.test(got) ? "int" : /^-?(\d+\.\d*(e[-+]?\d+)?|inf|NaN)$/i.test(got) ? "float" : "other";
+}
+
 function same(got: string, want: string): boolean {
   const a = Number(got), b = Number(want);
   if (got.trim() !== "" && want.trim() !== "" && Number.isFinite(a) && Number.isFinite(b)) return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -76,7 +82,7 @@ function harness(language: Lang, items: { c: Check; n: number }[], pkg: string, 
     lineOf.set(n, firstLine + lines.length);
     lines.push(language === "rust"
       ? `    #[test] fn c${n}() { let got = ${c.expr}; let want = ${c.expected}; println!("\\n\\x1eTUTOR\\t{:?}\\t{:?}", got, want); }`
-      : `func TestTutorC${n}(t *testing.T) { got := ${c.expr}; want := ${c.expected}; fmt.Printf("\\n\\x1eTUTOR\\t%#v\\t%#v\\n", got, want) }`);
+      : `func TestTutorC${n}(t *testing.T) { got := ${c.expr}; want := ${c.expected}; fmt.Printf("\\n\\x1eTUTOR\\t%#v\\t%#v\\t%T\\n", got, want, got) }`);
   }
   if (language === "rust") lines.push("}");
   return { text: `${lines.join("\n")}\n`, lineOf };
@@ -132,8 +138,8 @@ export async function runCompiledChecks(sb: Sandboxed, i: { language: Lang; root
         if (code === undefined) results[p.n - 1] = { check: p.c, pass: false, error: Buffer.byteLength(block) >= PART_CAP - 64 ? PRINTED_TOO_MUCH : TOO_LONG };
         else if (code === "124" || code === "137") results[p.n - 1] = { check: p.c, pass: false, error: TOO_LONG };
         else if (mark) {
-          const [got, want] = mark.slice(MARK.length).split("\t");
-          results[p.n - 1] = { check: p.c, pass: same(got, want), got };
+          const [got, want, goType] = mark.slice(MARK.length).split("\t");
+          results[p.n - 1] = { check: p.c, pass: same(got, want), got, valueType: valueTypeOf(got, goType) };
         } else {
           const panic = /panicked at [^\n]*\n([^\n]+)/.exec(block)?.[1] ?? /^panic: (.+)$/m.exec(block)?.[1];
           results[p.n - 1] = { check: p.c, pass: false, error: panic ? `it stopped with an error: ${panic.trim()}` : `the check could not run: exit ${code}` };

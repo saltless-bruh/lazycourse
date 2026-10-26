@@ -211,3 +211,18 @@ are the core of the author's goal.
 - Which modules count as "unfamiliar" per language and how a fresh step-up problem is generated and
   cross-checked (§6.3).
 - The profile migration's shape (§6.1).
+
+## 14. Live results
+
+**Phase 1 (2026-10-26, real LazyVim, Python, level 10, nemotron).** Run 1: the recipe started on P1.T1 by
+itself; the learner's own messages (task named; `total: float, people: int → float`; two `call → value` rows
+with an `edge` row, typed with Ctrl+J; three numbered steps; two `step → construct` lines) each moved it one
+step, 1/6 → 6/6; `/tutor-plan off` then ticking P1.T1 started it on P1.T2; an error sat 20 s with no nudge;
+the right-click question reached Pi. Two defects, fixed test-first: Examples rows sent before the background
+job created the milestone's record, so the job skipped it and the milestone never got a reference; and a
+right-click question during a recipe was answered as the recipe's Find step. Run 2 (after the fixes): every
+step as above; milestone 1 got its reference and checks and kept the learner's rows (the edge row trusted;
+the `16.666…` row unverified, since the reference rounds to cents for P1.T3); the right-click question was
+answered about the error ("`totl` is not defined … perhaps `total` was intended"); Pi's settings unchanged.
+Seen, not changed (outside phase 1): an idle nudge while the learner was mid-recipe led to three held replies
+and the fallback message.

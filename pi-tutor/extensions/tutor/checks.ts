@@ -66,6 +66,11 @@ export function liveChecks(all: Check[], milestone: number): Check[] {
 
 const show = (s: string) => JSON.stringify(s);
 
+/** Spec 2026-10-26 §5.3: a long decimal shown to 4 places in notices ("16.6667"); comparison is unchanged. */
+export function shortNumber(s: string): string {
+  return /^-?\d+\.\d{5,}$/.test(s.trim()) ? Number(s).toFixed(4) : s;
+}
+
 export type TickHow = "checks" | "self" | "you";
 const HOW: Record<TickHow, string> = { checks: "done", self: "done, self-checked", you: "done, ticked by you" };
 

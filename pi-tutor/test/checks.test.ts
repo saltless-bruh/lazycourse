@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseChecks, liveChecks, renderChecksMd, openTaskIds, tickedIds, type Check } from "../extensions/tutor/checks.js";
+import { parseChecks, liveChecks, renderChecksMd, openTaskIds, tickedIds, shortNumber, type Check } from "../extensions/tutor/checks.js";
 
 const ids = ["P2.T1", "P2.T2", "P2.T3", "P3.T2"];
 
@@ -76,6 +76,15 @@ describe("renderChecksMd", () => {
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "you" } })).toContain("## P2.T2 (done, ticked by you)");
     expect(renderChecksMd([c], new Set(), { weak: new Set(["P2.T2"]) })).toContain("## P2.T2 (a near miss may pass these checks)");
     expect(renderChecksMd([c], new Set(["P2.T2"]), { how: { "P2.T2": "self" } })).toContain("## P2.T2 (done, self-checked)");
+  });
+});
+
+describe("shortNumber (spec 2026-10-26 §5.3)", () => {
+  it("long decimals shown to 4 places, whole floats and text unchanged", () => {
+    expect(shortNumber("16.666666666666668")).toBe("16.6667");
+    expect(shortNumber("16.0")).toBe("16.0");
+    expect(shortNumber("144")).toBe("144");
+    expect(shortNumber("'hi 1.23456789'")).toBe("'hi 1.23456789'");
   });
 });
 

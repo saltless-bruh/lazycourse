@@ -218,6 +218,9 @@ Re-verify every line when bumping versions.
   `vim.bo[b].modified`, `vim.cmd.checktime(b)`, one `nvim_exec_lua` each, bounded at 2 s (verified
   0.12.6, 2026-10-22). `/tutor-done` asks `isModified` before its checks and again right before the
   tick writes spec/tasks.md (pane check 2026-10-22): `checktime` on a modified buffer raises W12.
+- Right-click error help (nvim-tutor, spec 2026-10-26 §5.2): `amenu PopUp.<entry>` / `amenu enable|disable PopUp.<entry>`,
+  the `MenuPopup` autocmd, `vim.fn.menu_info(name, "n").enabled`, `vim.diagnostic.get(0, { lnum })`, and
+  `vim.keymap.set("n", "<leader>te", …)` (verified headless, Neovim 0.12.6, 2026-10-26).
 - Push autocmds live in `extensions/tutor/push.lua.ts` and are installed with `nvim_exec_lua`;
   `vim.g.tutor_chan` holds the extension's channel for `:TutorRun`.
 

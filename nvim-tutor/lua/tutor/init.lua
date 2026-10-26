@@ -141,6 +141,23 @@ local function slash(text)
   return run
 end
 
+local ASK_ENTRY = [[PopUp.Ask\ tutor\ about\ this\ error]]
+
+--- Spec 2026-10-26 §5.2: the error under the cursor, its line and code, typed into Pi as a question.
+--- One line (Pi submits on Enter): `[ask-error] <relpath>:<line>: <message> | code: <line text>`.
+function M.ask_error()
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local d = vim.diagnostic.get(0, { lnum = row - 1 })
+  if #d == 0 then vim.notify("[tutor] no error on this line", vim.log.levels.INFO); return end
+  table.sort(d, function(a, b) return a.severity < b.severity end)
+  local file = vim.api.nvim_buf_get_name(0)
+  local root = vim.fs.normalize(opts.cwd) .. "/"
+  local rel = file:sub(1, #root) == root and file:sub(#root + 1) or vim.fn.fnamemodify(file, ":t")
+  local code = vim.trim(vim.api.nvim_get_current_line())
+  local msg = d[1].message:gsub("%s*\n%s*", " ")
+  slash(string.format("[ask-error] %s:%d: %s | code: %s", rel, row, msg, code))()
+end
+
 --- Re-root the tutor at `dir`: cd there, open `file` in the editor window, restart Pi with cwd = dir.
 ---@return boolean ok
 function M.switch(dir, file)
@@ -211,6 +228,15 @@ function M.setup(user_opts)
   cmd("TutorSubmit", slash("/tutor-submit"), {})
   cmd("TutorProgress", slash("/tutor-progress"), { nargs = "?" })
   cmd("TutorReload", slash("/reload"), {})
+  vim.cmd("amenu " .. ASK_ENTRY .. " <Cmd>lua require('tutor').ask_error()<CR>")
+  vim.api.nvim_create_autocmd("MenuPopup", {
+    group = vim.api.nvim_create_augroup("tutor-ask-error", { clear = true }),
+    callback = function()
+      local has = #vim.diagnostic.get(0, { lnum = vim.api.nvim_win_get_cursor(0)[1] - 1 }) > 0
+      vim.cmd("amenu " .. (has and "enable " or "disable ") .. ASK_ENTRY)
+    end,
+  })
+  vim.keymap.set("n", "<leader>te", M.ask_error, { desc = "Ask tutor about this error" })
 end
 
 return M
