@@ -260,6 +260,20 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(b.notes.at(-1)).toMatch(/gave 16, expected 16\.6667$/);
   }, 30000);
+  it("final review C1: on a failed check, a reply naming the fix in words is held; teaching about print is not", async () => {
+    const { b } = await doneProject("def split_amount(total, people):\n    return total * people\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await turn(b.events, b.ctx, "[tutor] stuck signal: run failed", assistant("Use `/` instead of `*` here. What do you expect?"));
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["prose-fix"] });
+    await turn(b.events, b.ctx, "how do I see a value?", assistant("You can use print to see what a variable holds. What would you print first?"));
+    const last = b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data as { issues?: string[] } | undefined;
+    expect(last?.issues ?? []).not.toContain("prose-fix");
+  }, 30000);
+  it("final review M5: when the short numbers would look equal, the notice shows the full values", async () => {
+    const { b } = await doneProject("def split_amount(total, people):\n    return round(total / people, 5)\n", [{ task: "P2.T2", kind: "value", expr: "split_amount(50, 3)", expected: "16.666666666666668", milestone: 1, status: "trusted" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/gave 16\.66667, expected 16\.666666666666668$/);
+  }, 30000);
   it("a syntax error in the file is a typo, not a try", async () => {
     const { b } = await doneProject("def split_amount(total, people)\n    return total / people\n");
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);

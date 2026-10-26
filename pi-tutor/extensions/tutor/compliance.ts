@@ -198,6 +198,34 @@ const OP_WORDS: Record<string, RegExp> = {
 };
 const tokensOf = (lines: string[]) => new Set(lines.join("\n").match(/\/\/|<=|>=|==|!=|[-+*/%<>]|\.?[A-Za-z_]\w*(?=\()/g) ?? []);
 
+/**
+ * The lines of function `name` (Python by indentation; Rust/Go/JS by braces), or [] when absent.
+ * Final review C1: a prose fix is judged against the checked function only, never the whole program.
+ */
+export function functionLines(lines: string[], name: string): string[] {
+  const head = new RegExp(`^(\\s*)(?:def|fn|func|function)\\s+(?:\\([^)]*\\)\\s*)?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[(<[]`);
+  const i = lines.findIndex((l) => head.test(l));
+  if (i < 0) return [];
+  const indent = head.exec(lines[i])![1].length;
+  const out = [lines[i]];
+  if (lines[i].includes("{")) {
+    let depth = 0;
+    for (let j = i; j < lines.length; j++) {
+      if (j > i) out.push(lines[j]);
+      depth += (lines[j].match(/{/g) ?? []).length - (lines[j].match(/}/g) ?? []).length;
+      if (depth <= 0 && j >= i && lines[j].includes("}")) break;
+    }
+    return out;
+  }
+  for (let j = i + 1; j < lines.length; j++) {
+    const l = lines[j];
+    if (l.trim() !== "" && l.length - l.trimStart().length <= indent) break;
+    out.push(l);
+  }
+  while (out.length > 1 && out[out.length - 1].trim() === "") out.pop();
+  return out;
+}
+
 /** A sentence that instructs the learner and names a token the reference has and their code does not. `words`: also by its plain-word name. */
 export function proseFixLeak(raw: string, o: { referenceLines: string[]; sourceLines: string[]; words: boolean }): boolean {
   const theirs = tokensOf(o.sourceLines);
@@ -246,7 +274,7 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 
 /** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
  *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
-export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[] }): TurnIssue[] {
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
@@ -278,7 +306,8 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   if (limits.question && !plain.includes("?")) issues.add("no-question");
   if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
   // A reply already held for showing the code needs no second reason; prose-fix is for fixes given in words alone.
-  if (o.step !== "fix" && !issues.has("own-code") && o.referenceLines?.length && proseFixLeak(raw, { referenceLines: o.referenceLines, sourceLines: o.sourceLines, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
+  // Final review C1: only on a graded try with a checked function, comparing that function's lines on both sides.
+  if (o.step !== "fix" && !issues.has("own-code") && o.proseScope?.referenceLines.length && proseFixLeak(raw, { ...o.proseScope, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
   return [...issues];
 }
 

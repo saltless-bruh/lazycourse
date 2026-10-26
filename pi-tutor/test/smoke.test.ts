@@ -1577,6 +1577,48 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
       expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
     });
+    const recipeTasks = (b: { entries: { type: string; data: unknown }[] }) => b.entries.filter((e) => e.type === "tutor_workflow" && (e.data as { done?: number }).done === undefined).map((e) => (e.data as { task: string }).task);
+    it("final review I1a: a recipe turned off is not started again in a new Pi session", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      expect(recipeTasks(b)).toEqual(["P1.T1"]);
+      await b.commands["tutor-plan"].handler("off", b.ctx);
+      const c = await boot({ cwd: dir });
+      expect(recipeTasks(c)).toEqual([]);
+    });
+    it("final review I1a: a finished recipe is not started again in a new Pi session", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      for (let i = 0; i < 6; i++) await b.commands["tutor-plan"].handler("skip", b.ctx);
+      expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ task: "P1.T1", done: expect.any(Number) });
+      const c = await boot({ cwd: dir });
+      expect(recipeTasks(c)).toEqual([]);
+    });
+    it("final review I1b: a new build-now plan starts the recipe on its first task", async () => {
+      const b = await boot({ cwd: dir });
+      b.replies.push(SPEC([]), CHECKS, REF);
+      await exchange(b, note({ path: "build" }));
+      await waitFor(() => recipeTasks(b).length > 0);
+      expect(recipeTasks(b)).toEqual(["P1.T1"]);
+    });
+    it("final review I1b+c: a lesson round reaching building starts the recipe; ticking never jumps to the next milestone", async () => {
+      const b = await boot({ cwd: dir });
+      b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
+      await exchange(b, note({ path: "learn" }));
+      await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
+      b.replies.push(CHECKS.split("\n")[0], REF);
+      for (let i = 0; i < 3; i++) await b.commands["tutor-lesson"].handler("skip", b.ctx);
+      await waitFor(() => recipeTasks(b).length > 0);
+      expect(recipeTasks(b)).toEqual(["P1.T1"]);
+      await b.commands["tutor-done"].handler("P1.T1 anyway", b.ctx);
+      expect(recipeTasks(b)).toEqual(["P1.T1"]);
+    });
     it("a beginner opening a project in building gets the recipe on its first open task; an intermediate does not", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [x] P1.T1 tip\n- [ ] P1.T2 print\n");
@@ -1778,7 +1820,8 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     const b = await boot({ cwd: dir });
     b.replies.push(SPEC([]));
     await exchange(b, note({ path: "build" }));
-    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] project: .*Tip Calculator/);
+    // The recipe's kickoff can follow once the (instant, here) plan is written; the project talk is still sent.
+    expect(b.sent.some((m) => /^\[tutor\] project: .*Tip Calculator/.test(m.text))).toBe(true);
   });
   it("a review returns the learner to where they were (final review I1)", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");

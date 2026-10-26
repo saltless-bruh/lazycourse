@@ -10,7 +10,7 @@ import { bandFor, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
+import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
 import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "./turns.js";
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
@@ -23,8 +23,9 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { crossCheckOnReference, currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
+import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
@@ -176,7 +177,7 @@ export default function (pi: ExtensionAPI): void {
   /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
   /** `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role. */
   /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[] } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -565,6 +566,9 @@ export default function (pi: ExtensionAPI): void {
         profileWrite(() => { state = readChecksState(p.setting(key)); });
         const k = Object.keys(state.milestones).map(Number).filter((n) => n <= now).sort((a, b) => b - a)[0];
         run.referenceLines = k ? state.milestones[k].reference.split(/\r?\n/) : [];
+        // Final review C1: a fix in words is judged on a failed check only, inside the function it calls.
+        const fn = episode?.spot?.startsWith("check:") ? calledName(episode.spot.split(":").slice(2).join(":")) : null;
+        run.proseScope = fn ? { referenceLines: functionLines(run.referenceLines, fn), sourceLines: functionLines(sources.flatMap((t) => t.split(/\r?\n/)), fn) } : undefined;
       }
     }
     // Spec §5, §5.4: the project's (or, outside one, the editor's) language card, and the editor card.
@@ -638,7 +642,7 @@ export default function (pi: ExtensionAPI): void {
     const next = advance(workflow, stepDone, Date.now());
     if (next === workflow) return workflow;
     pi.appendEntry("tutor_workflow", next);
-    if (next.done !== undefined) ui?.notify(`design recipe for ${next.task} finished`, "info");
+    if (next.done !== undefined) { ui?.notify(`design recipe for ${next.task} finished`, "info"); rememberRecipe("done", next.task); }
     workflow = next.done === undefined ? next : null;
     return next;
   }
@@ -725,7 +729,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines });
+      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
       if (issues.length) {
         // The session keeps what was rejected (never shown) so a live audit can tell a leak from a too-strict check.
         pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000) });
@@ -820,6 +824,7 @@ export default function (pi: ExtensionAPI): void {
         if (!workflow) { ctx.ui.notify("no design recipe in progress", "info"); return; }
         const task = workflow.task;
         recipeOff.add(task);
+        rememberRecipe("off", task);
         pi.appendEntry("tutor_workflow_off", { task });
         pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() });
         workflow = null;
@@ -862,11 +867,35 @@ export default function (pi: ExtensionAPI): void {
 
   /** Spec 2026-10-26 §5.1: a beginner's next open task starts the recipe by itself (skip/off per task). */
   let recipeOff = new Set<string>();
+  /** Final review I1a: per project, the tasks whose recipe was turned off or finished (profile `recipe:<root>`). */
+  function recipeMemory(): { off: string[]; done: string[] } {
+    let m = { off: [] as string[], done: [] as string[] };
+    if (project && profile) { const p = profile, key = `recipe:${project.path}`; profileWrite(() => { try { m = { off: [], done: [], ...JSON.parse(p.setting(key) ?? "{}") }; } catch { /* a broken record is empty */ } }); }
+    return m;
+  }
+  function rememberRecipe(kind: "off" | "done", task: string) {
+    if (!project || !profile) return;
+    const p = profile, key = `recipe:${project.path}`, m = recipeMemory();
+    if (!m[kind].includes(task)) m[kind].push(task);
+    profileWrite(() => p.setSetting(key, JSON.stringify(m)));
+  }
+  /** The milestone a task belongs to (1 for a plan without milestone headings). */
+  function milestoneOf(tasksMd: string, id: string): number {
+    for (let k = 1; k <= milestoneCount(tasksMd); k++) if (findTask(milestoneText(tasksMd, k), id)) return k;
+    return 1;
+  }
   function autoRecipe(ctx: ExtensionContext | null) {
     if (!ctx || !project || exam) return;
+    const ls = lesson as LessonState | null;
+    if (ls && !ls.building) return; // a lesson round is not a task
     let tasks: string;
     try { tasks = readFileSync(join(project.path, "spec", "tasks.md"), "utf8"); } catch { return; }
-    const id = recipeAutoStart({ band: bandFor(level()), workflow, task: openTaskIds(tasks)[0] ?? null, offFor: recipeOff });
+    const next = openTaskIds(tasks)[0] ?? null;
+    // Final review I1c: in a learn-first project, never past the milestone being built.
+    if (ls && next && milestoneOf(tasks, next) > currentMilestone(tasks, ls)) return;
+    // Final review I1a: tasks turned off or finished in any session (kept in the profile) never restart.
+    const kept = recipeMemory();
+    const id = recipeAutoStart({ band: bandFor(level()), workflow, task: next, offFor: new Set([...recipeOff, ...kept.off, ...kept.done]) });
     const line = id ? findTask(tasks, id) : null;
     if (id && line) beginRecipe(ctx, id, line);
   }
@@ -1097,6 +1126,12 @@ export default function (pi: ExtensionAPI): void {
     }),
   });
 
+  /** Short decimals, unless the short forms would look equal for a value that failed (final review M5). */
+  const gaveExpected = (got: string, want: string) => {
+    const g = shortNumber(got), w = shortNumber(want);
+    return g === w ? `gave ${got}, expected ${want}` : `gave ${g}, expected ${w}`;
+  };
+
   /** A failed trusted check (spec §7): a graded try on its spot, unless the file does not even load (a typo). */
   function failedCheck(id: string, f: CheckResult) {
     const c = f.check;
@@ -1109,7 +1144,7 @@ export default function (pi: ExtensionAPI): void {
     if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
     if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
     const line = c.kind === "value"
-      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${shortNumber(f.got ?? "")}, expected ${shortNumber(c.expected ?? "")}`}`
+      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : gaveExpected(f.got ?? "", c.expected ?? "")}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
     ui?.notify(`${id} not yet: ${line.replace(/^check \S+: /, "")}`, "warning");
     failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `check:${id}:${c.expr ?? c.stdin}`);
@@ -1461,6 +1496,7 @@ export default function (pi: ExtensionAPI): void {
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => p.setSetting(key, l ? JSON.stringify(l) : "")); }
     paint();
     if (session) ensureChecks(session); // a round that reached its milestone gets that milestone's checks
+    if (l?.building) autoRecipe(session); // final review I1b: building a milestone starts its first task's recipe
   }
   /** The hidden lesson section: the rules, the vendored lesson text, the exercise, and a step back after two fails (Q17). */
   function lessonSection(l: LessonState, lang: string): string {
@@ -1509,6 +1545,7 @@ export default function (pi: ExtensionAPI): void {
       }
       if (generation === mine) paint();
       if (written && generation === mine) ensureChecks(frozen);
+      if (written && generation === mine) autoRecipe(session); // final review I1b: a new plan's first task
     })();
   }
 

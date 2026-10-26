@@ -10,14 +10,21 @@ const SHAPE: Record<string, RegExp> = {
   rust: /\bfn\s+\w+\s*\([^)]*:[^)]*\)\s*->\s*\S/,
   go: /\bfunc\s+\w+\s*\([^)]*\w\s+\w[^)]*\)\s*\S/,
 };
-// Any language: `name: type, … → type` (Python hints, the recipe's own notation).
-const TYPED_ARROW = /\w\s*:\s*[\w[\]., |]+(?:,\s*\w+\s*:\s*[\w[\]., |]+)*\s*(?:→|->)\s*\w/;
+// A type: `float`, `list[str]`, `dict[str, int]`, `int | None` (final review I2: the arrow must end in one).
+const TYPE = String.raw`[A-Za-z_][\w.]*(?:\[[^\]]*\])?(?:\s*\|\s*[A-Za-z_][\w.]*(?:\[[^\]]*\])?)*`;
+const PARAMS = String.raw`\w+\s*:\s*${TYPE}(?:\s*,\s*\w+\s*:\s*${TYPE})*`;
+const ARROW_TO_TYPE = String.raw`\s*(?:→|->)\s*${TYPE}\s*:?\s*$`;
+// Any language: `name: type, … → type`, `f(name: type, …) → type`, Python's `def f(name: type) -> type:`.
+const TYPED_SHAPES = [
+  new RegExp(`^${PARAMS}${ARROW_TO_TYPE}`),
+  new RegExp(String.raw`^(?:def\s+)?\w+\s*\(\s*${PARAMS}\s*\)${ARROW_TO_TYPE}`),
+];
 
 export function recognize(step: number, learnerText: string, o: { language: string; task: string }): boolean {
   const ls = lines(learnerText);
   switch (step) {
     case 1: return new RegExp(`(^|[^\\w.])${o.task.replace(/\./g, "\\.")}(?![\\w.]*\\d)`).test(learnerText);
-    case 2: return (SHAPE[o.language]?.test(learnerText) ?? false) || TYPED_ARROW.test(learnerText);
+    case 2: return (SHAPE[o.language]?.test(learnerText) ?? false) || ls.some((l) => TYPED_SHAPES.some((re) => re.test(l)));
     case 3: {
       const rows = ls.filter((l) => CALL_ROW.test(l) || (ARROW.test(` ${l} `) && /\d|["']/.test(l)));
       return rows.length >= 2 && rows.some((l) => /\bedge\b/i.test(l));

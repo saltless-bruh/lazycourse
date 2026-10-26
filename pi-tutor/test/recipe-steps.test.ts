@@ -13,6 +13,13 @@ describe("recognize: code decides when a recipe step's artifact is there (spec 2
     expect(recognize(2, "func splitAmount(total float64, people int) float64", { language: "go", task: "P1.T1" })).toBe(true);
     expect(recognize(2, "it takes the total and the people", py)).toBe(false);
   });
+  it("final review I2: Python's own signature forms count; arrow chat does not", () => {
+    expect(recognize(2, "def split_bill(total: float, people: int) -> float:", py)).toBe(true);
+    expect(recognize(2, "split_bill(total: float, people: int) → float", py)).toBe(true);
+    expect(recognize(2, "words: list[str] → dict[str, int]", py)).toBe(true);
+    expect(recognize(2, "idea: read the file -> count words", py)).toBe(false);
+    expect(recognize(2, "Error: x -> y happens when I run it", py)).toBe(false);
+  });
   it("Examples: two or more input → output rows, one of them an edge case", () => {
     expect(recognize(3, "split_amount(48, 3) → 16.0\nsplit_amount(50, 3) → 16.67\nedge: split_amount(0, 3) → 0.0", py)).toBe(true);
     expect(recognize(3, "split_amount(48, 3) → 16.0\nsplit_amount(50, 3) → 16.67", py)).toBe(false);
