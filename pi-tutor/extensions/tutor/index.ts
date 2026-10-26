@@ -21,7 +21,7 @@ import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
-import { liveChecks, renderChecksMd, tickedIds, openTaskIds, type TickHow } from "./checks.js";
+import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { crossCheckOnReference, currentMilestone, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
@@ -1108,7 +1108,7 @@ export default function (pi: ExtensionAPI): void {
     if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
     if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
     const line = c.kind === "value"
-      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${f.got}, expected ${c.expected}`}`
+      ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : `gave ${shortNumber(f.got ?? "")}, expected ${shortNumber(c.expected ?? "")}`}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
     ui?.notify(`${id} not yet: ${line.replace(/^check \S+: /, "")}`, "warning");
     failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `check:${id}:${c.expr ?? c.stdin}`);

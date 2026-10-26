@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
+import { proseFixLeak, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -8,6 +8,24 @@ const j = (judgment: Judgment["judgment"], step_done = false): Judgment => ({ ju
 const fence = (tag: string, lines: string[]) => "```" + tag + "\n" + lines.join("\n") + "\n```";
 const JUDGED = "\n" + fence("tutor-judgment", ['{"judgment":"none"}']); // a fence opens on its own line
 const ok = { band: "intermediate" as const, step: "why" as TurnStep | null, judged: true, noCode: false };
+
+describe("prose fix leaks (spec 2026-10-26 §5.3)", () => {
+  const ref = ["    return total / people"], src = ["    return total * people"];
+  it("before the fix step, telling the learner the exact change in words is a leak", () => {
+    expect(proseFixLeak("Use `/` instead of `*` so each person gets a share.", { referenceLines: ref, sourceLines: src, words: true })).toBe(true);
+    expect(proseFixLeak("True division is needed here.", { referenceLines: ref, sourceLines: src, words: true })).toBe(true);
+    expect(proseFixLeak("Think about what splitting a bill means for the size of each share.", { referenceLines: ref, sourceLines: src, words: true })).toBe(false);
+  });
+  it("at the why step words are allowed, the exact symbol is not", () => {
+    expect(proseFixLeak("It needs division, not multiplication.", { referenceLines: ref, sourceLines: src, words: false })).toBe(false);
+    expect(proseFixLeak("Change `*` to `/`.", { referenceLines: ref, sourceLines: src, words: false })).toBe(true);
+  });
+  it("checkTurn flags it before the fix step only", () => {
+    const o = { names: new Set<string>(), sourceLines: src, referenceLines: ref };
+    expect(checkTurn("Use `/` instead of `*`. What do you think?", { ...o, step: "hint" })).toContain("prose-fix");
+    expect(checkTurn("Use `/` instead of `*`.", { ...o, step: "fix" })).not.toContain("prose-fix");
+  });
+});
 
 describe("hasReasoning", () => {
   it("a bare question or a [tutor] nudge is not reasoning", () => {

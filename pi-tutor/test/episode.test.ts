@@ -255,6 +255,11 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T3 (a near miss may pass these checks)");
   }, 30000);
+  it("a failed check's notice shows long decimals short (spec 2026-10-26 §5.3)", async () => {
+    const { b } = await doneProject("def split_amount(total, people):\n    return total // people\n", [{ task: "P2.T2", kind: "value", expr: "split_amount(50, 3)", expected: "16.666666666666668", milestone: 1, status: "trusted" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/gave 16, expected 16\.6667$/);
+  }, 30000);
   it("a syntax error in the file is a typo, not a try", async () => {
     const { b } = await doneProject("def split_amount(total, people)\n    return total / people\n");
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);

@@ -153,9 +153,10 @@ export async function writeMilestoneChecks(d: {
     const r = await run(parsed.checks);
     if (r.missing) return { checks: parsed.checks, reference, ran: false };
     let checks = crossCheck(r.results);
+    const types = new Map(r.results.flatMap((x) => (x.valueType && x.check.expr ? [[x.check.expr, x.valueType] as const] : [])));
     // Spec §5.5: a near miss that passes every trusted check of a task gets that task one more check, asked once.
     const probe = async (all: Check[]): Promise<Map<string, string>> => {
-      const weak = new Map(roundingWeakTasks(all).map((t) => [t, ROUNDED]));
+      const weak = new Map(roundingWeakTasks(all, types).map((t) => [t, ROUNDED]));
       const trusted = all.filter((c) => c.status === "trusted");
       for (const mutant of slipMutants(reference)) {
         writeFileSync(entryPath, mutant);
@@ -176,6 +177,7 @@ export async function writeMilestoneChecks(d: {
       if (extra.checks.length) {
         const r2 = await run(extra.checks);
         checks = [...checks, ...(r2.missing ? extra.checks : crossCheck(r2.results))];
+        for (const x of r2.results) if (x.valueType && x.check.expr) types.set(x.check.expr, x.valueType);
         weak = await probe(checks);
       }
     }

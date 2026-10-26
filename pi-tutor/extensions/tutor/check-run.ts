@@ -14,7 +14,9 @@ import { manifestFor } from "./manifest.js";
  * `outcome` (Rust/Go, spec 2026-10-22 §4): "unfit" — the check cannot call the learner's function as written;
  * "elsewhere" — the project does not compile outside the checked function. Neither passes; neither is a try.
  */
-export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere" }
+/** The kind of value a check's call returned (spec 2026-10-26 §5.3: integer tasks skip the rounding probe). */
+export type ValueType = "int" | "float" | "other";
+export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere"; valueType?: ValueType }
 
 export const CHECKS_SANDBOX_OFF = "checks run only in the sandbox, and it is off (/tutor-exam sandbox on turns it back on)";
 export const TOO_LONG = "took too long (an endless loop?)";
@@ -57,14 +59,18 @@ export function projectRun(root: string, language: string): { runCmd: string | n
 }
 
 const PY_HARNESS = `
-import builtins, json, math, os, sys
+import builtins, json, math, os, sys, types
 MARK = ${JSON.stringify(MARK)}
 entry, expr, expected = sys.argv[1], sys.argv[2], sys.argv[3]
 class _Input(Exception): pass
 def _no_input(*a, **k): raise _Input()
 builtins.input = _no_input
 sys.path.insert(0, os.path.dirname(os.path.abspath(entry)))
-ns = {"__name__": "__tutor_check__", "__file__": os.path.abspath(entry), "__builtins__": builtins}
+# Spec 2026-10-26 §5.3: a registered module, so @dataclass with postponed annotations can look itself up.
+_mod = types.ModuleType("__tutor_check__")
+sys.modules["__tutor_check__"] = _mod
+ns = _mod.__dict__
+ns.update({"__file__": os.path.abspath(entry), "__builtins__": builtins})
 stopped = None
 try:
     with open(entry, encoding="utf-8") as f:
@@ -101,7 +107,8 @@ except _Input:
 except BaseException as e:
     out(error="%s: %s" % (type(e).__name__, e))
 else:
-    out(**{"pass": same(got, want), "got": repr(got)})
+    kind = "other" if isinstance(got, bool) else "int" if isinstance(got, int) else "float" if isinstance(got, float) else "other"
+    out(**{"pass": same(got, want), "got": repr(got), "type": kind})
 `;
 
 const LUA_HARNESS = `
@@ -179,7 +186,12 @@ if not okw then out({ error = "the check's expected value does not work: " .. to
 local f, ferr = loadin("return " .. EXPR, "=check", scope)
 if not f then out({ error = "the check does not parse: " .. tostring(ferr) }) return end
 local ok, got = pcall(f)
-if ok then out({ pass = same(got, want), got = show(got, 0) }) return end
+if ok then
+  local kind = "other"
+  if type(got) == "number" then kind = (math.type and math.type(got) == "integer") and "int" or "float" end
+  out({ pass = same(got, want), got = show(got, 0), type = kind })
+  return
+end
 if got == INPUT then out({ error = "it waited for typed input; a check types nothing" }) return end
 -- A file that did not load explains any failure (final review I1: \`M.tip(10)\` fails on a nil M, not a missing name).
 if stopped then out({ error = missing("") }) return end
@@ -221,8 +233,8 @@ function valueResult(check: Check, r: { stdout: string; stderr: string; code: nu
   if (flooded(r.stdout)) return { check, pass: false, error: PRINTED_TOO_MUCH };
   const line = r.stdout.split("\n").filter((l) => l.startsWith(MARK)).at(-1);
   if (!line) return { check, pass: false, error: `the check could not run: ${tail(r.stderr || r.stdout, 200) || `exit ${r.code}`}` };
-  const o = JSON.parse(line.slice(MARK.length)) as { pass?: boolean; got?: string; error?: string };
-  return o.error !== undefined ? { check, pass: false, error: o.error } : { check, pass: o.pass === true, got: o.got };
+  const o = JSON.parse(line.slice(MARK.length)) as { pass?: boolean; got?: string; error?: string; type?: ValueType };
+  return o.error !== undefined ? { check, pass: false, error: o.error } : { check, pass: o.pass === true, got: o.got, valueType: o.type ?? "other" };
 }
 
 export async function runChecks(exec: RunExec, i: { language: string; root: string; entry: string | null; runCmd: string | null; checks: Check[]; sandbox: SandboxHost | null; limitSec?: number }): Promise<{ results: CheckResult[]; missing?: string }> {

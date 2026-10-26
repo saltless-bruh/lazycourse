@@ -26,3 +26,12 @@ describe("slipMutants", () => {
     expect(slipMutants("a + b + c + d\n", 2)).toHaveLength(2);
   });
 });
+
+describe("roundingWeakTasks with the reference's value types (spec 2026-10-26 §5.3)", () => {
+  it("a task whose function returns integers is never rounding-weak; a float one still is", () => {
+    const checks = [v("P1.T1", "count_words('a b a')", "3"), v("P1.T1", "count_words('x')", "1")];
+    expect(roundingWeakTasks(checks, new Map([["count_words('a b a')", "int"], ["count_words('x')", "int"]]))).toEqual([]);
+    expect(roundingWeakTasks(checks, new Map([["count_words('a b a')", "float"], ["count_words('x')", "float"]]))).toEqual(["P1.T1"]);
+    expect(roundingWeakTasks(checks)).toEqual(["P1.T1"]);
+  });
+});

@@ -94,6 +94,7 @@ const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
   "no-summary": () => "a long reply had no **In short** line",
   "own-code": () => "it showed the learner's own code (their names) before this turn allows the fix; teach on an unrelated example or point at the place",
+  "prose-fix": () => "it told the learner the exact change in words before this turn allows the fix; point at the place or ask what they meant instead",
   "too-long": () => "it was longer than this turn allows",
   "no-question": () => "this turn must ask a question, and it asked none",
   "machinery": () => "it talked about the tutor's machinery or about \"the learner\"; talk to them directly about the code",
@@ -186,7 +187,27 @@ export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS):
 
 // ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
 
-export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery";
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix";
+
+// Spec 2026-10-26 §5.3: nemotron named the fix in words ("use / instead of *", "true division is needed").
+const INSTRUCTION = /\b(use|using|change|replace|switch|should be|instead of|try|needs?|need to|is needed|requires?|must be)\b/i;
+const OP_WORDS: Record<string, RegExp> = {
+  "/": /\b(true )?divi(de|sion|ding)\b/i, "//": /\b(floor|integer) divi(de|sion)\b|\bfloor\b/i, "*": /\bmultipl(y|ication|ying)\b/i,
+  "+": /\badd(ing|ition)?\b/i, "-": /\bsubtract(ing|ion)?\b/i, "%": /\b(remainder|modulo)\b/i,
+  "<=": /\bless than or equal\b/i, ">=": /\bgreater than or equal\b/i,
+};
+const tokensOf = (lines: string[]) => new Set(lines.join("\n").match(/\/\/|<=|>=|==|!=|[-+*/%<>]|\.?[A-Za-z_]\w*(?=\()/g) ?? []);
+
+/** A sentence that instructs the learner and names a token the reference has and their code does not. `words`: also by its plain-word name. */
+export function proseFixLeak(raw: string, o: { referenceLines: string[]; sourceLines: string[]; words: boolean }): boolean {
+  const theirs = tokensOf(o.sourceLines);
+  const fix = [...tokensOf(o.referenceLines)].filter((t) => !theirs.has(t));
+  if (!fix.length) return false;
+  const sentences = hideJudgment(raw).replace(FENCES, "").split(/(?<=[.!?])\s+|\n+/);
+  return sentences.some((s) => INSTRUCTION.test(s) && fix.some((t) =>
+    s.includes(`\`${t}\``) || (/^\.?\w/.test(t) ? new RegExp(`\\b${t.replace(".", "")}\\b`).test(s) : new RegExp(`(^|\\s)${t.replace(/[*+/]/g, "\\$&")}(\\s|$)`).test(s)) ||
+    (o.words && (OP_WORDS[t]?.test(s) ?? false))));
+}
 
 /** Parameter-ish names every example uses; never the learner's own. */
 const COMMON = new Set(["self", "this", "cls", "args", "kwargs", "main"]);
@@ -256,6 +277,7 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");
   if (limits.question && !plain.includes("?")) issues.add("no-question");
   if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
+  if (o.step !== "fix" && o.referenceLines?.length && proseFixLeak(raw, { referenceLines: o.referenceLines, sourceLines: o.sourceLines, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
   return [...issues];
 }
 

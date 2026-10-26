@@ -107,6 +107,10 @@ describe.skipIf(!bwrapReady || !has("go", ["version"]))("Go checks in the sandbo
     const r = await run("go", go('func pair() string { return "a\\tb" }\nfunc label() string { return "16" }'), [value("pair()", '"a\\tb"'), value("label()", "16")]);
     expect(r.map((x) => x.pass)).toEqual([true, false]);
   }, 120_000);
+  it("reports the value's type, so a whole float is still a float (spec 2026-10-26 §5.3)", async () => {
+    const r = await run("go", go("func half(x float64) float64 { return x / 2 }\nfunc count() int { return 2 }"), [value("half(4)", "2"), value("count()", "2")]);
+    expect(r.map((x) => [x.pass, x.valueType])).toEqual([[true, "float"], [true, "int"]]);
+  }, 120_000);
   it("Review Focus #1: a (value, error) pair does not fit", async () => {
     const r = await run("go", go('func parse(s string) (int, error) { return 3, nil }\nfunc two() int { return 2 }'), [value('parse("3")', "3"), value("two()", "2")]);
     expect(r[0]).toMatchObject({ pass: false, outcome: "unfit" });
