@@ -16,8 +16,12 @@ describe("levelInBand (spec 2026-10-26 §4)", () => {
     expect(levelInBand({ level: 20, band: "beginner", solid: 4, total: 8, fixStepStreak: 0 })).toBeNull();
   });
   it("a fix-step streak of 2 or more lowers it 3, never below the band's floor", () => {
-    expect(levelInBand({ level: 20, band: "beginner", solid: 0, total: 8, fixStepStreak: 2 })).toEqual({ level: 17, reason: "the last tasks needed the handed line" });
-    expect(levelInBand({ level: 35, band: "intermediate", solid: 0, total: 2, fixStepStreak: 3 })?.level).toBe(34);
+    expect(levelInBand({ level: 20, band: "beginner", solid: 0, total: 8, fixStepStreak: 2, handedNow: true })).toEqual({ level: 17, reason: "the last tasks needed the handed line" });
+    expect(levelInBand({ level: 35, band: "intermediate", solid: 0, total: 2, fixStepStreak: 3, handedNow: true })?.level).toBe(34);
+  });
+  it("final review I3: the streak lowers the level only on a tick that itself had the handed line", () => {
+    expect(levelInBand({ level: 20, band: "beginner", solid: 0, total: 8, fixStepStreak: 2, handedNow: false })).toBeNull();
+    expect(levelInBand({ level: 20, band: "beginner", solid: 0, total: 8, fixStepStreak: 2, handedNow: true })?.level).toBe(17);
   });
   it("a step down is suggested after 3 tasks in a row reached the fix step", () => {
     expect(stepDownSuggested(3)).toBe(true);

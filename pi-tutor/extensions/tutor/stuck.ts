@@ -88,6 +88,11 @@ export class StuckDetector {
     return this.errors.get(path)?.since ?? null;
   }
 
+  /** The errors open now, one key per file and message (final review I6: one reads-errors miss per error). */
+  errorKeys(): string[] {
+    return [...this.errors].map(([path, w]) => `${path}|${w.msg}`);
+  }
+
   /** Whether any file currently has an error (habits: a chat question with an error open). */
   anyError(): boolean {
     return this.errors.size > 0;

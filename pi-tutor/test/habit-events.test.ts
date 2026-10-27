@@ -46,3 +46,10 @@ describe("habit detectors (spec 2026-10-26 §3): good, miss, or nothing", () => 
     expect(looksUpEvent(false)).toBeNull();
   });
 });
+
+describe("final review I2: right direction compares only the same checks", () => {
+  it("a different set of checks resets the comparison", () => {
+    expect(directionEvent({ passed: 0, total: 1, crashed: false, key: "a" }, { passed: 2, total: 4, crashed: false, key: "a|b|c|d" })).toBeNull();
+    expect(directionEvent({ passed: 0, total: 2, crashed: false, key: "a|b" }, { passed: 1, total: 2, crashed: false, key: "a|b" })).toBe(true);
+  });
+});

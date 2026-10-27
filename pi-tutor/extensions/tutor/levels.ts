@@ -27,9 +27,10 @@ const REASON: Record<HabitId, string> = {
   "complex": "you solved a complex problem yourself", "optimizes": "you improved working code",
 };
 
-export function levelInBand(i: { level: number; band: Band; solid: number; total: number; fixStepStreak: number; newest?: HabitId }): { level: number; reason: string } | null {
+/** `handedNow`: this tick itself needed the handed line (final review I3: only then does the streak lower the level). */
+export function levelInBand(i: { level: number; band: Band; solid: number; total: number; fixStepStreak: number; newest?: HabitId; handedNow?: boolean }): { level: number; reason: string } | null {
   const [floor, top] = BANDS[i.band];
-  if (i.fixStepStreak >= 2) {
+  if (i.handedNow && i.fixStepStreak >= 2) {
     const down = Math.max(floor, i.level - 3);
     return down < i.level ? { level: down, reason: "the last tasks needed the handed line" } : null;
   }

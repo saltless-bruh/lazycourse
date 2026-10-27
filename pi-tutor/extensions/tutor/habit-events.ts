@@ -1,10 +1,12 @@
 // Habit detectors (spec 2026-10-26 §3): each turns something code saw into good (true), a miss (false) or
 // nothing (null). Pure; index.ts adds the language, project, time and evidence when it records one.
 
-export interface TryOutcome { passed: number; total: number; crashed: boolean }
+/** `key`: the set of checks the try ran; tries are compared only on the same set (final review I2). */
+export interface TryOutcome { passed: number; total: number; crashed: boolean; key?: string }
 
 /** Right direction: the next graded try on a spot passes more checks, or stops crashing. */
 export function directionEvent(prev: TryOutcome, next: TryOutcome): boolean | null {
+  if (prev.key !== undefined && next.key !== undefined && prev.key !== next.key) return null;
   if (prev.crashed !== next.crashed) return prev.crashed;
   if (next.passed !== prev.passed) return next.passed > prev.passed;
   return null;
