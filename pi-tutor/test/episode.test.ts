@@ -215,6 +215,62 @@ async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", ki
 
 const tool = (cmd: string, args: string[]) => spawnSync(cmd, args).status === 0;
 const valueCheck = (expr: string, expected: string) => [{ task: "P2.T2", kind: "value", expr, expected, milestone: 1, status: "trusted" }];
+describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 §3, habits Task 7)", () => {
+  const habits = async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    try { return p.habitEvents().map((e) => [e.habit, e.ok]); } finally { p.close(); }
+  };
+  const two = [
+    { task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" },
+    { task: "P2.T2", kind: "value", expr: "split_amount(50, 3)", expected: "16.666666666666668", milestone: 1, status: "trusted" },
+  ];
+  const code = (op: string) => `def split_amount(total, people):\n    return total ${op} people\n`;
+  it("tries that get closer, a fix before the fix step, and small edits between runs are recorded", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // 0 of 2
+    writeFileSync(join(root, "src", "main.py"), code("//"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // 1 of 2: closer
+    writeFileSync(join(root, "src", "main.py"), code("/"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // ticked
+    const h = await habits();
+    expect(h.filter(([k]) => k === "right-direction")).toEqual([["right-direction", true], ["right-direction", true]]);
+    expect(h).toContainEqual(["own-fixes", true]);
+    expect(h.filter(([k]) => k === "small-runs")).toEqual([["small-runs", true], ["small-runs", true]]);
+  }, 60000);
+  it("a question during a stuck try counts by what the next try does", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await turn(b.events, b.ctx, "how do I share a total between people?", judged("none"));
+    writeFileSync(join(root, "src", "main.py"), code("//"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(await habits()).toContainEqual(["right-question", true]);
+  }, 60000);
+  it("a right-click ask on a fresh error is a reads-errors miss; a chat question with an error open is too", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await nvim!.command(`edit ${join(root, "src", "main.py")}`);
+    await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 1, col = 0, severity = 1, message = "boom" }})`);
+    await new Promise((r) => setTimeout(r, 300));
+    await turn(b.events, b.ctx, "[ask-error] src/main.py:2: boom | code: return total / people", judged("none"));
+    await turn(b.events, b.ctx, "why is it red?", judged("none"));
+    expect((await habits()).filter(([k]) => k === "reads-errors")).toEqual([["reads-errors", false], ["reads-errors", false]]);
+  }, 60000);
+  it("own recipe steps before Build, then passing checks, record steps-first and ideas-to-code", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    const say = (t: string) => turn(b.events, b.ctx, t, judged("none"));
+    await say("P2.T2 is the split box");
+    await say("total: float, people: int → float");
+    await say("split_amount(48, 3) → 16.0\nedge: split_amount(0, 3) → 0.0");
+    await say("1. take the total\n2. divide it by the number of people\n3. give the share back");
+    await say("divide the total by people → /\ngive the share back → return");
+    writeFileSync(join(root, "src", "main.py"), code("/"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    const h = await habits();
+    expect(h).toContainEqual(["steps-first", true]);
+    expect(h).toContainEqual(["ideas-to-code", true]);
+  }, 60000);
+});
+
 describe.skipIf(!bwrapReady)("/tutor-done in Rust and Go (spec 2026-10-22 §4)", () => {
   it.skipIf(!tool("cargo", ["--version"]))("Rust: a wrong value is a try on the check's spot; the fix ticks", async () => {
     const { b, root } = await doneProject("fn split_amount(total: f64, people: u32) -> f64 { total * people as f64 }\nfn main() {}\n", valueCheck("split_amount(48.0, 3)", "16.0"), "rust");

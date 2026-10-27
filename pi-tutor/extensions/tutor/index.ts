@@ -25,6 +25,8 @@ import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type T
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
+import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
+import type { HabitId } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
@@ -531,7 +533,19 @@ export default function (pi: ExtensionAPI): void {
     if (asked) {
       const base = project?.path ?? session?.cwd;
       const since = base ? detector.errorSince(join(base, asked[1])) : null;
-      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs: since === null ? null : Date.now() - since });
+      const shownMs = since === null ? null : Date.now() - since;
+      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs });
+      recordHabit("reads-errors", readsErrorEvent({ shownMs }, false), `ask:${asked[1]}:${asked[2]}`);
+    } else if (prompt && !prompt.startsWith(TUTOR_PREFIX)) {
+      recordHabit("reads-errors", readsErrorEvent(null, detector.anyError()), "chat");
+      // Right question: judged by the next graded try on the task this question was asked during.
+      const task = episode?.spot?.startsWith("check:") ? episode.spot.split(":")[1] : null;
+      if (task) {
+        const said = prompt.trim().toLowerCase(), before = askedBefore.get(task) ?? [];
+        if (before.includes(said)) recordHabit("right-question", questionEvent(null, true), `question:${task}`);
+        else pendingQuestion = task;
+        askedBefore.set(task, [...before, said]);
+      }
     }
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
@@ -610,6 +624,7 @@ export default function (pi: ExtensionAPI): void {
     const w = workflow;
     if (!w || !project || !recognize(w.step, prompt, { language: project.language, task: w.task })) return;
     if (w.step === 3) void addExampleChecks(prompt, w.task);
+    ownSteps.set(w.task, (ownSteps.get(w.task) ?? new Set<number>()).add(w.step));
     advanceWorkflow(true);
     paint();
   }
@@ -643,6 +658,11 @@ export default function (pi: ExtensionAPI): void {
     if (!workflow) return null;
     const next = advance(workflow, stepDone, Date.now());
     if (next === workflow) return workflow;
+    // Habits: reaching Build, how many of Shape / Examples / Steps were the learner's own.
+    if (next.step === STEPS.length && workflow.step === STEPS.length - 1) {
+      const own = ownSteps.get(next.task) ?? new Set<number>();
+      recordHabit("steps-first", stepsFirstEvent([2, 3, 4].filter((s) => own.has(s)).length), `recipe:${next.task}`);
+    }
     pi.appendEntry("tutor_workflow", next);
     if (next.done !== undefined) { ui?.notify(`design recipe for ${next.task} finished`, "info"); rememberRecipe("done", next.task); }
     workflow = next.done === undefined ? next : null;
@@ -869,6 +889,25 @@ export default function (pi: ExtensionAPI): void {
 
   /** Spec 2026-10-26 §5.1: a beginner's next open task starts the recipe by itself (skip/off per task). */
   let recipeOff = new Set<string>();
+
+  // Habits Task 7: what the detectors remember between events, and the one place events are recorded.
+  const lastTry = new Map<string, TryOutcome>();      // task id → its last graded outcome
+  const lastRunText = new Map<string, string>();      // file → its text at the last run
+  const ownSteps = new Map<string, Set<number>>();    // task → recipe steps recognised in the learner's text
+  const askedBefore = new Map<string, string[]>();    // task → the learner's questions on it
+  let pendingQuestion: string | null = null;           // the task a question was just asked about
+  function recordHabit(habit: HabitId, ok: boolean | null, evidence: string) {
+    if (ok === null || !project || !profile) return;
+    const p = profile, e = { habit, ok, language: project.language, project: project.path, at: Date.now(), evidence };
+    profileWrite(() => p.addHabitEvent(e));
+  }
+  function runSized(path: string, evidence: string) {
+    let text: string;
+    try { text = readFileSync(path, "utf8"); } catch { return; }
+    const prev = lastRunText.get(path);
+    if (prev !== undefined) recordHabit("small-runs", smallRunEvent(changedLines(prev, text)), evidence);
+    lastRunText.set(path, text);
+  }
   /** Final review I1a: per project, the tasks whose recipe was turned off or finished (profile `recipe:<root>`). */
   function recipeMemory(): { off: string[]; done: string[] } {
     let m = { off: [] as string[], done: [] as string[] };
@@ -1116,6 +1155,15 @@ export default function (pi: ExtensionAPI): void {
       ctx.ui.notify(`running ${checks.length} check(s) for ${id}…`, "info");
       const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: proj.language, root, entry, runCmd, checks, sandbox: sandboxHost() });
       if (r.missing) return tick("self", `self-checked: ${r.missing}`);
+      // Habits: did this try get closer than the last one, did a question help, how much changed since the last run.
+      const trusted = r.results.filter((x) => x.check.status === "trusted");
+      const outcome: TryOutcome = { passed: trusted.filter((x) => x.pass).length, total: trusted.length, crashed: trusted.some((x) => !x.pass && !!x.error && !x.outcome) };
+      const prev = lastTry.get(id);
+      const closer = prev ? directionEvent(prev, outcome) : null;
+      recordHabit("right-direction", closer, `check:${id}`);
+      if (pendingQuestion === id) { recordHabit("right-question", questionEvent({ closer: closer === true }, false), `question:${id}`); pendingQuestion = null; }
+      lastTry.set(id, outcome);
+      if (entry) runSized(join(root, entry), `check:${id}`);
       const failed = r.results.filter((x) => !x.pass && x.check.status === "trusted");
       const shaky = r.results.filter((x) => !x.pass && x.check.status === "unverified");
       if (failed.length === 0) {
@@ -1169,6 +1217,8 @@ export default function (pi: ExtensionAPI): void {
     if (profile) { const p = profile; profileWrite(() => { state = readChecksState(p.setting(key)); state.ticks = { ...state.ticks, [id]: how }; p.setSetting(key, JSON.stringify(state)); }); }
     writeChecksMd(root, state, currentMilestone(r.text, lesson));
     // Only passing checks solve it; a self-checked or `anyway` tick gives the episode up (final review I2).
+    if (how === "checks" && episode?.spot?.startsWith(`check:${id}:`)) recordHabit("own-fixes", ownFixEvent(stepFor(episode, { exam: false }) === "fix" ? "fix-step" : "checks"), episode.id);
+    recordHabit("ideas-to-code", ideasToCodeEvent(ownSteps.get(id)?.has(4) ?? false, how === "checks"), `tick:${id}`);
     if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");

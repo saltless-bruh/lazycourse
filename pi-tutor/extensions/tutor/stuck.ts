@@ -88,6 +88,11 @@ export class StuckDetector {
     return this.errors.get(path)?.since ?? null;
   }
 
+  /** Whether any file currently has an error (habits: a chat question with an error open). */
+  anyError(): boolean {
+    return this.errors.size > 0;
+  }
+
   /** Track an error whose episode was restored from the session, already fired. */
   adopt(t: Trigger, now: number): void {
     if (t.kind === "error") this.errors.set(t.path, { line: t.line, msg: t.msg, since: now, fired: true });
