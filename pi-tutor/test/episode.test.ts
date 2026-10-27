@@ -64,6 +64,21 @@ describe("language card through a real Neovim (Review Focus #4)", () => {
 });
 
 describe("stuck episodes through a real Neovim", () => {
+  it("an idle stretch during a recipe opens no episode; without a recipe it does (habits Task 6a)", async () => {
+    const b = await linked();
+    mkdirSync(join(h!.root, "spec"), { recursive: true });
+    writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 split the bill\n");
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    const idle = (ms: number) => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "idle", buf: 1, path: join(h!.root, "a.py"), line: 1, since_ms: ms }]);
+    await idle(10_000_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(episodes(b.entries)).toEqual([]);
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    await idle(1_000);
+    await idle(10_000_000);
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "idle"));
+  }, 20000);
+
   it("an error that sits opens no episode and sends no nudge; the learner asks (spec 2026-10-26 §5.2)", async () => {
     const b = await linked();
     await setError("boom");
@@ -200,6 +215,150 @@ async function doneProject(code: string, checks: object[] = [{ task: "P2.T2", ki
 
 const tool = (cmd: string, args: string[]) => spawnSync(cmd, args).status === 0;
 const valueCheck = (expr: string, expected: string) => [{ task: "P2.T2", kind: "value", expr, expected, milestone: 1, status: "trusted" }];
+describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 §3, habits Task 7)", () => {
+  const habits = async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    try { return p.habitEvents().map((e) => [e.habit, e.ok]); } finally { p.close(); }
+  };
+  const two = [
+    { task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" },
+    { task: "P2.T2", kind: "value", expr: "split_amount(50, 3)", expected: "16.666666666666668", milestone: 1, status: "trusted" },
+  ];
+  const code = (op: string) => `def split_amount(total, people):\n    return total ${op} people\n`;
+  it("tries that get closer, a fix before the fix step, and small edits between runs are recorded", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // 0 of 2
+    writeFileSync(join(root, "src", "main.py"), code("//"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // 1 of 2: closer
+    writeFileSync(join(root, "src", "main.py"), code("/"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // ticked
+    const h = await habits();
+    expect(h.filter(([k]) => k === "right-direction")).toEqual([["right-direction", true], ["right-direction", true]]);
+    expect(h).toContainEqual(["own-fixes", true]);
+    expect(h.filter(([k]) => k === "small-runs")).toEqual([["small-runs", true], ["small-runs", true]]);
+  }, 60000);
+  it("a question during a stuck try counts by what the next try does", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await turn(b.events, b.ctx, "how do I share a total between people?", judged("none"));
+    writeFileSync(join(root, "src", "main.py"), code("//"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(await habits()).toContainEqual(["right-question", true]);
+  }, 60000);
+  it("habits solid in this language raise the level inside its band on a tick, with the reason; /tutor-progress shows them (Task 8)", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of ["small-runs", "right-direction", "steps-first", "right-question"] as const)
+      for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/other", at: at++, evidence: `seed-${at}` });
+    p.close();
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.some((n) => /^level 10 → 19: your questions moved you forward$/.test(n))).toBe(true);
+    expect(b.widgets["tutor"]?.[0]).toContain("lvl 19");
+    await b.commands["tutor-progress"].handler("", b.ctx);
+    const shown = JSON.stringify(b.messages.at(-1));
+    expect(shown).toContain("Habits (beginner)");
+    expect(shown).toMatch(/asks the right question: solid/);
+  }, 60000);
+  it("final review I1: a run that is no try (a syntax error) moves no habit", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    writeFileSync(join(root, "src", "main.py"), "def split_amount(total, people)\n    return total * people\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    writeFileSync(join(root, "src", "main.py"), code("*"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect((await habits()).filter(([k]) => k === "right-direction")).toEqual([]);
+  }, 60000);
+  it("final review I4: a level set by hand is not overridden by habits already there", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of ["small-runs", "right-direction", "steps-first"] as const)
+      for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/other", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-level"].handler("8", b.ctx);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.widgets["tutor"]?.[0]).toContain("lvl 8");
+  }, 60000);
+  it("final review I5: a :TutorRun run counts toward small runs", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    const run = () => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["python3", "src/main.py"], code: 0, stdout: "", stderr: "" }]);
+    const runsSeen = () => b.entries.filter((e) => e.type === "tutor_signal" && (e.data as { kind: string }).kind === "run_output").length;
+    await run();
+    await until(() => runsSeen() === 1); // the first run is the baseline: edit only after the tutor has seen it
+    writeFileSync(join(root, "src", "main.py"), code("/"));
+    await run();
+    await until(() => runsSeen() === 2);
+    for (let i = 0; i < 100 && !(await habits()).some(([k]) => k === "small-runs"); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(await habits()).toContainEqual(["small-runs", true]);
+  }, 60000);
+  it("final review I6: one reads-errors miss per error, none for recipe replies", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await nvim!.command(`edit ${join(root, "src", "main.py")}`);
+    await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 1, col = 0, severity = 1, message = "boom" }})`);
+    await new Promise((r) => setTimeout(r, 300));
+    await turn(b.events, b.ctx, "P2.T2 is the split box", judged("none")); // a recipe reply (the recipe auto-started)
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    await turn(b.events, b.ctx, "why is it red?", judged("none"));
+    await turn(b.events, b.ctx, "still red, why?", judged("none"));
+    expect((await habits()).filter(([k]) => k === "reads-errors")).toEqual([["reads-errors", false]]);
+  }, 60000);
+  it("final review I7: recipe steps survive a Pi restart", async () => {
+    const { b } = await doneProject(code("*"), two);
+    const say = (x: typeof b, t: string) => turn(x.events, x.ctx, t, judged("none"));
+    await say(b, "P2.T2 is the split box");
+    await say(b, "total: float, people: int → float");
+    await say(b, "split_amount(48, 3) → 16.0\nedge: split_amount(0, 3) → 0.0");
+    const { realpathSync } = await import("node:fs");
+    const c = await boot({ nvim: h!.socket, cwd: realpathSync(h!.root) });
+    (c.pi as { exec: unknown }).exec = realExec;
+    await c.commands["tutor-plan"].handler("P2.T2", c.ctx);
+    for (let i = 0; i < 5; i++) await c.commands["tutor-plan"].handler("skip", c.ctx); // Find → Build
+    expect(await habits()).toContainEqual(["steps-first", true]);
+    await c.events["session_shutdown"]({ type: "session_shutdown" }, c.ctx);
+  }, 60000);
+  it("final review I8: a task ticked without a check run records no ideas-to-code miss", async () => {
+    const { b } = await doneProject(code("/"), []);
+    for (const t of ["P2.T2 is the split box", "total: float, people: int → float", "split_amount(48, 3) → 16.0\nedge: split_amount(0, 3) → 0.0", "1. take the total\n2. divide it by the people\n3. give it back"]) await turn(b.events, b.ctx, t, judged("none"));
+    await b.commands["tutor-done"].handler("P2.T2 anyway", b.ctx);
+    expect((await habits()).filter(([k]) => k === "ideas-to-code")).toEqual([]);
+  }, 60000);
+  it("final review M2+M3: a non-question is not a question; with no earlier try a question records nothing", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await turn(b.events, b.ctx, "ok", judged("none"));
+    await turn(b.events, b.ctx, "ok", judged("none"));
+    expect((await habits()).filter(([k]) => k === "right-question")).toEqual([]);
+  }, 60000);
+  it("a right-click ask on a fresh error is a reads-errors miss; a chat question with an error open is too", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await nvim!.command(`edit ${join(root, "src", "main.py")}`);
+    await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 1, col = 0, severity = 1, message = "boom" }})`);
+    await new Promise((r) => setTimeout(r, 300));
+    await turn(b.events, b.ctx, "[ask-error] src/main.py:2: boom | code: return total / people", judged("none"));
+    await b.commands["tutor-plan"].handler("off", b.ctx); // recipe replies are not chat questions (final review I6)
+    await turn(b.events, b.ctx, "why is it red?", judged("none"));
+    expect((await habits()).filter(([k]) => k === "reads-errors")).toEqual([["reads-errors", false], ["reads-errors", false]]);
+  }, 60000);
+  it("own recipe steps before Build, then passing checks, record steps-first and ideas-to-code", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    const say = (t: string) => turn(b.events, b.ctx, t, judged("none"));
+    await say("P2.T2 is the split box");
+    await say("total: float, people: int → float");
+    await say("split_amount(48, 3) → 16.0\nedge: split_amount(0, 3) → 0.0");
+    await say("1. take the total\n2. divide it by the number of people\n3. give the share back");
+    await say("divide the total by people → /\ngive the share back → return");
+    writeFileSync(join(root, "src", "main.py"), code("/"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    const h = await habits();
+    expect(h).toContainEqual(["steps-first", true]);
+    expect(h).toContainEqual(["ideas-to-code", true]);
+  }, 60000);
+});
+
 describe.skipIf(!bwrapReady)("/tutor-done in Rust and Go (spec 2026-10-22 §4)", () => {
   it.skipIf(!tool("cargo", ["--version"]))("Rust: a wrong value is a try on the check's spot; the fix ticks", async () => {
     const { b, root } = await doneProject("fn split_amount(total: f64, people: u32) -> f64 { total * people as f64 }\nfn main() {}\n", valueCheck("split_amount(48.0, 3)", "16.0"), "rust");

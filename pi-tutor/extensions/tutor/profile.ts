@@ -1,3 +1,4 @@
+import type { HabitEvent, HabitId } from "./habits.js";
 import { emptyCard, nextCard, ratingFor, seedCard, type CardState } from "./review.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -33,6 +34,9 @@ export const MIGRATIONS: string[] = [
      score INTEGER NOT NULL, minutes REAL NOT NULL, late INTEGER NOT NULL, concepts TEXT NOT NULL, created INTEGER NOT NULL);`,
   // v5 (spec 2026-10-19 §7b): one FSRS card per concept; `due` is epoch ms for the "what to review" query.
   `CREATE TABLE cards (language TEXT NOT NULL, tag TEXT NOT NULL, card TEXT NOT NULL, due INTEGER NOT NULL, PRIMARY KEY (language, tag));`,
+  // v6 (spec 2026-10-26 §6.1): every habit event, with the evidence that produced it.
+  `CREATE TABLE habit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, habit TEXT NOT NULL, ok INTEGER NOT NULL, language TEXT NOT NULL,
+     project TEXT NOT NULL, at INTEGER NOT NULL, evidence TEXT NOT NULL);`,
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -248,6 +252,18 @@ export class Profile {
   recordFeedback(f: Omit<FeedbackRow, "created">, now: number): void {
     this.db.prepare("INSERT INTO feedback (kind, language, project, rung, created) VALUES (?, ?, ?, ?, ?)")
       .run(f.kind, f.language, f.project, f.rung, now);
+  }
+
+  /** Spec 2026-10-26 §6.1: one habit event (evidence names the episode, check or command behind it). */
+  addHabitEvent(e: HabitEvent): void {
+    this.db.prepare("INSERT INTO habit_events (habit, ok, language, project, at, evidence) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(e.habit, e.ok ? 1 : 0, e.language, e.project, e.at, e.evidence);
+  }
+
+  /** Habit events, oldest first; all habits, or one. */
+  habitEvents(habit?: HabitId): HabitEvent[] {
+    const rows = (habit ? this.db.prepare("SELECT * FROM habit_events WHERE habit = ? ORDER BY at, id").all(habit) : this.db.prepare("SELECT * FROM habit_events ORDER BY at, id").all()) as Row[];
+    return rows.map((r) => ({ habit: String(r.habit) as HabitId, ok: Number(r.ok) === 1, language: String(r.language), project: String(r.project), at: Number(r.at), evidence: String(r.evidence) }));
   }
 
   /** The learner's feedback for a language, oldest first (spec 2026-10-13 §7 #7). */

@@ -226,3 +226,11 @@ the `16.666…` row unverified, since the reference rounds to cents for P1.T3); 
 answered about the error ("`totl` is not defined … perhaps `total` was intended"); Pi's settings unchanged.
 Seen, not changed (outside phase 1): an idle nudge while the learner was mid-recipe led to three held replies
 and the fallback message.
+
+**Phase 2 (2026-10-27, real LazyVim, Python, level 10, nemotron).** Two tasks with real checks in the sandbox,
+three earlier habits seeded solid. P1.T1: `*` (try 1, "gave 150, expected 16.6667"), `//` (try 2, closer:
+right-direction good), `/` (ticked: own-fixes good). The tick settled the level: "level 10 → 14: you ran small
+pieces often" (3 of 7 counted habits solid → 14). P1.T2: wrong, then fixed (own-fixes good again). Recorded this
+run: right-direction ×3 good, small-runs ×3 good, own-fixes ×2 good; `/tutor-progress` showed fixes own bugs and
+goes the right direction "showing", runs small pieces "solid", looks things up "shown in the step-up". Pi's
+settings unchanged.

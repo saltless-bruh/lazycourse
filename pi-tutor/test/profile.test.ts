@@ -112,7 +112,7 @@ describe("busy profile (final review I4)", () => {
 
 describe("profile v3+: settings", () => {
   it("is schema v3 and keeps a setting across reopen", () => {
-    expect(SCHEMA_VERSION).toBe(5);
+    expect(SCHEMA_VERSION).toBe(6);
     const path = join(mkdtempSync(join(tmpdir(), "prof-")), "p.sqlite");
     const a = Profile.open(path);
     expect(a.setting("thinking")).toBeNull();
@@ -275,7 +275,7 @@ describe("profile v5: FSRS cards (spec 2026-10-19 §7b)", () => {
     db.prepare("INSERT INTO concepts (language, tag, ease, episodes) VALUES ('python', 'loops', 0.3, 2)").run();
     db.close();
     const p = Profile.open(path);
-    expect(p.version).toBe(5);
+    expect(p.version).toBe(SCHEMA_VERSION); // opens at the latest version; v6 (habits) followed v5
     expect(p.concepts("python")).toMatchObject([{ tag: "loops", ease: 0.3 }]);
     p.close();
   });
@@ -317,6 +317,27 @@ describe("final review: ease from before v5 (minor 7 → Important)", () => {
     p.recordEpisode({ language: "python", project: null, concept_tags: [], rungs_used: 1, turns: 1, opened: 1, closed: 1 }, null);
     (p as unknown as { db: { prepare(s: string): { run(...a: unknown[]): void } } }).db.prepare("INSERT INTO concepts (language, tag, ease, episodes) VALUES ('python', 'loops', 0.9, 3), ('python', 'dicts', 0.3, 2)").run();
     expect(p.knownConcepts("python", Date.now())).toEqual(["loops"]);
+    p.close();
+  });
+});
+
+describe("profile v6: the habit event log (spec 2026-10-26 §6.1)", () => {
+  it("a v5 file migrates to v6 keeping its levels; habit events round-trip in order", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const path = join(mkdtempSync(join(tmpdir(), "prof-v5-")), "p.sqlite");
+    const db = new DatabaseSync(path);
+    db.exec("CREATE TABLE schema_version (v INTEGER NOT NULL)");
+    for (const m of MIGRATIONS.slice(0, 5)) db.exec(m);
+    db.prepare("INSERT INTO schema_version (v) VALUES (5)").run();
+    db.prepare("INSERT INTO languages (name, level, interview_json, created) VALUES ('python', 22, '{}', 1)").run();
+    db.close();
+    const p = Profile.open(path);
+    expect(p.version).toBe(6);
+    expect(p.language("python")?.level).toBe(22);
+    p.addHabitEvent({ habit: "own-fixes", ok: true, language: "python", project: "/p/a", at: 5, evidence: "ep-1" });
+    p.addHabitEvent({ habit: "reads-errors", ok: false, language: "python", project: "/p/a", at: 6, evidence: "ask-1" });
+    expect(p.habitEvents("own-fixes")).toEqual([{ habit: "own-fixes", ok: true, language: "python", project: "/p/a", at: 5, evidence: "ep-1" }]);
+    expect(p.habitEvents().map((e) => e.habit)).toEqual(["own-fixes", "reads-errors"]);
     p.close();
   });
 });

@@ -89,6 +89,14 @@
 
 ## Phase 2 — the habit profile (branch `habits-p2`)
 
+### Task 6a: Idle nudges pause while a recipe runs (author approved 2026-10-27, from the phase 1 live check)
+
+**Files:** Modify `pi-tutor/extensions/tutor/index.ts`; Test `pi-tutor/test/episode.test.ts`.
+
+**Interfaces:** the idle stuck trigger opens no episode while `workflow` is set (a recipe in progress); runs, checks and churn are unchanged.
+
+- [ ] **Steps 1–5:** test "an idle stretch during a recipe opens no episode; without a recipe it does" (real Neovim, level 10), FAIL, implement, PASS, commit `feat: idle nudges pause while a design recipe runs`.
+
 ### Task 6: Habit rules and storage
 
 **Files:** Create `pi-tutor/extensions/tutor/habits.ts`; Modify `profile.ts` (migration v6); Test `pi-tutor/test/habits.test.ts`, `pi-tutor/test/profile.test.ts`.

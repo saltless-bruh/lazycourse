@@ -25,6 +25,9 @@ import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type T
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
+import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
+import type { HabitId } from "./habits.js";
+import { levelInBand, stepDownSuggested, bandProgress, habitReport } from "./levels.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
@@ -388,6 +391,8 @@ export default function (pi: ExtensionAPI): void {
 
   function onStuck(events: StuckEvent[]) {
     for (const e of events) {
+      // Habits Task 6a (author 2026-10-27): a pause while working through a recipe is thinking, not being stuck.
+      if (e.type === "open" && e.trigger.kind === "idle" && workflow) continue;
       if (e.type === "open") openEp(e.trigger, true);
       else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); }
       else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");
@@ -401,7 +406,13 @@ export default function (pi: ExtensionAPI): void {
         break;
       case "idle": signal = `idle ${Math.round(p.since_ms / 1000)}s`; break;
       case "churn": signal = `churning lines ${p.region[0]}-${p.region[1]}`; break;
-      case "run_output": signal = p.code === 0 ? "run passed" : `run failed (exit ${p.code})`; break;
+      case "run_output": {
+        signal = p.code === 0 ? "run passed" : `run failed (exit ${p.code})`;
+        // Final review I5: a :TutorRun run is a run too, for small runs.
+        const entry = project ? projectRun(project.path, project.language).entry : null;
+        if (project && entry) runSized(join(project.path, entry), "run");
+        break;
+      }
     }
     pi.appendEntry("tutor_signal", p);
     onStuck(detector.observe(p, Date.now()));
@@ -529,7 +540,24 @@ export default function (pi: ExtensionAPI): void {
     if (asked) {
       const base = project?.path ?? session?.cwd;
       const since = base ? detector.errorSince(join(base, asked[1])) : null;
-      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs: since === null ? null : Date.now() - since });
+      const shownMs = since === null ? null : Date.now() - since;
+      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs });
+      recordHabit("reads-errors", readsErrorEvent({ shownMs }, false), `ask:${asked[1]}:${asked[2]}`);
+    } else if (prompt && !prompt.startsWith(TUTOR_PREFIX)) {
+      // Final review I6: one miss per open error, never for recipe replies, exams or roles without the ladder.
+      const fresh = detector.errorKeys().filter((k) => !missedErrors.has(k));
+      if (fresh.length && !workflow && !exam && roleNamed(activeRole).ladder) {
+        recordHabit("reads-errors", readsErrorEvent(null, true), "chat");
+        for (const k of fresh) missedErrors.add(k);
+      }
+      // Right question: judged by the next graded try on the task this question was asked during (M2: a question has a "?").
+      const task = episode?.spot?.startsWith("check:") && prompt.includes("?") ? episode.spot.split(":")[1] : null;
+      if (task) {
+        const said = prompt.trim().toLowerCase(), before = askedBefore.get(task) ?? [];
+        if (before.includes(said)) recordHabit("right-question", questionEvent(null, true), `question:${task}`);
+        else pendingQuestion = task;
+        askedBefore.set(task, [...before, said]);
+      }
     }
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
@@ -608,6 +636,7 @@ export default function (pi: ExtensionAPI): void {
     const w = workflow;
     if (!w || !project || !recognize(w.step, prompt, { language: project.language, task: w.task })) return;
     if (w.step === 3) void addExampleChecks(prompt, w.task);
+    rememberOwnStep(w.task, w.step);
     advanceWorkflow(true);
     paint();
   }
@@ -641,6 +670,11 @@ export default function (pi: ExtensionAPI): void {
     if (!workflow) return null;
     const next = advance(workflow, stepDone, Date.now());
     if (next === workflow) return workflow;
+    // Habits: reaching Build, how many of Shape / Examples / Steps were the learner's own.
+    if (next.step === STEPS.length && workflow.step === STEPS.length - 1) {
+      const own = ownStepsOf(next.task);
+      recordHabit("steps-first", stepsFirstEvent([2, 3, 4].filter((s) => own.has(s)).length), `recipe:${next.task}`);
+    }
     pi.appendEntry("tutor_workflow", next);
     if (next.done !== undefined) { ui?.notify(`design recipe for ${next.task} finished`, "info"); rememberRecipe("done", next.task); }
     workflow = next.done === undefined ? next : null;
@@ -867,9 +901,51 @@ export default function (pi: ExtensionAPI): void {
 
   /** Spec 2026-10-26 §5.1: a beginner's next open task starts the recipe by itself (skip/off per task). */
   let recipeOff = new Set<string>();
+
+  // Habits Task 7: what the detectors remember between events, and the one place events are recorded.
+  const lastTry = new Map<string, TryOutcome>();      // task id → its last graded outcome
+  const lastRunText = new Map<string, string>();      // file → its text at the last run
+  const missedErrors = new Set<string>();             // errors a reads-errors miss was already recorded for
+  const askedBefore = new Map<string, string[]>();    // task → the learner's questions on it
+  let pendingQuestion: string | null = null;           // the task a question was just asked about
+  function recordHabit(habit: HabitId, ok: boolean | null, evidence: string) {
+    if (ok === null || !project || !profile) return;
+    const p = profile, e = { habit, ok, language: project.language, project: project.path, at: Date.now(), evidence };
+    profileWrite(() => p.addHabitEvent(e));
+  }
+  let fixStepStreak = 0, tickHanded = false;
+  /** Spec 2026-10-26 §4: after a task, the level moves inside its band by the habits; every move says why. */
+  function settleLevel(handedNow: boolean) {
+    if (!project || !profile) return;
+    const p = profile, lang = project.language, band = bandFor(level());
+    let events: ReturnType<Profile["habitEvents"]> = [];
+    let handSolid: number | null = null;
+    profileWrite(() => { events = p.habitEvents(); const h = p.setting(`level-hand:${lang}`); handSolid = h ? Number(h) : null; });
+    const prog = bandProgress(events, band, lang);
+    let move = levelInBand({ level: level(), band, solid: prog.solid, total: prog.total, fixStepStreak, newest: prog.newest, handedNow });
+    // Final review I4: a level set by hand rises again only once more habits are solid than when it was set.
+    if (move && move.level > level() && handSolid !== null && prog.solid <= handSolid) move = null;
+    if (move) {
+      const old = level();
+      setLevel(move.level);
+      pi.appendEntry("tutor_level", { level: move.level, reason: move.reason });
+      profileWrite(() => p.setLevel(lang, move.level));
+      ui?.notify(`level ${old} → ${move.level}: ${move.reason}`, "info");
+      paint();
+    }
+    if (handedNow && stepDownSuggested(fixStepStreak)) ui?.notify("the last three tasks needed the handed line: /tutor-level can move you down a band if you want", "info");
+  }
+
+  function runSized(path: string, evidence: string) {
+    let text: string;
+    try { text = readFileSync(path, "utf8"); } catch { return; }
+    const prev = lastRunText.get(path);
+    if (prev !== undefined) recordHabit("small-runs", smallRunEvent(changedLines(prev, text)), evidence);
+    lastRunText.set(path, text);
+  }
   /** Final review I1a: per project, the tasks whose recipe was turned off or finished (profile `recipe:<root>`). */
-  function recipeMemory(): { off: string[]; done: string[] } {
-    let m = { off: [] as string[], done: [] as string[] };
+  function recipeMemory(): { off: string[]; done: string[]; own?: Record<string, number[]> } {
+    let m: { off: string[]; done: string[]; own?: Record<string, number[]> } = { off: [], done: [] };
     if (project && profile) { const p = profile, key = `recipe:${project.path}`; profileWrite(() => { try { m = { off: [], done: [], ...JSON.parse(p.setting(key) ?? "{}") }; } catch { /* a broken record is empty */ } }); }
     return m;
   }
@@ -879,6 +955,16 @@ export default function (pi: ExtensionAPI): void {
     if (!m[kind].includes(task)) m[kind].push(task);
     profileWrite(() => p.setSetting(key, JSON.stringify(m)));
   }
+  /** Final review I7: the recipe steps code recognised in the learner's own text, kept per project across restarts. */
+  function rememberOwnStep(task: string, step: number) {
+    if (!project || !profile) return;
+    const p = profile, key = `recipe:${project.path}`, m = recipeMemory();
+    const own = { ...(m.own ?? {}) };
+    own[task] = [...new Set([...(own[task] ?? []), step])];
+    profileWrite(() => p.setSetting(key, JSON.stringify({ ...m, own })));
+  }
+  const ownStepsOf = (task: string) => new Set(recipeMemory().own?.[task] ?? []);
+
   /** The milestone a task belongs to (1 for a plan without milestone headings). */
   function milestoneOf(tasksMd: string, id: string): number {
     for (let k = 1; k <= milestoneCount(tasksMd); k++) if (findTask(milestoneText(tasksMd, k), id)) return k;
@@ -1018,7 +1104,12 @@ export default function (pi: ExtensionAPI): void {
       let body = "";
       profileWrite(() => {
         const langs = arg ? [arg] : project ? [project.language] : editorLang ? [editorLang] : p.languages();
-        body = langs.map((l) => progressReport({ language: l, level: p.language(l)?.level ?? null, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) })).join("\n\n");
+        body = langs.map((l) => {
+          const lvl = p.language(l)?.level ?? null;
+          const base = progressReport({ language: l, level: lvl, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) });
+          // Spec 2026-10-26 §6.1: the band's habits, their state and the latest evidence.
+          return lvl === null ? base : `${base}\n\n${habitReport(p.habitEvents(), bandFor(lvl), l)}`;
+        }).join("\n\n");
       });
       pi.sendMessage({ customType: "tutor_progress", content: body || "no progress yet: /tutor-start begins a project", display: true }, { triggerTurn: false });
     },
@@ -1114,6 +1205,21 @@ export default function (pi: ExtensionAPI): void {
       ctx.ui.notify(`running ${checks.length} check(s) for ${id}…`, "info");
       const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: proj.language, root, entry, runCmd, checks, sandbox: sandboxHost() });
       if (r.missing) return tick("self", `self-checked: ${r.missing}`);
+      // Habits: did this try get closer than the last one, did a question help, how much changed since the last run.
+      const trusted = r.results.filter((x) => x.check.status === "trusted");
+      // Final review I1: a run that is no try (a syntax error, a check that does not fit, an error elsewhere) moves no habit.
+      const noTry = trusted.some((x) => !x.pass && (!!x.outcome || (!!x.error && isSyntaxError(x.error.replace(/^your file stopped while loading: /, "")))));
+      if (!noTry) {
+        const key = trusted.map((x) => `${x.check.kind}:${x.check.expr ?? x.check.stdin}`).sort().join("|");
+        const outcome: TryOutcome = { passed: trusted.filter((x) => x.pass).length, total: trusted.length, crashed: trusted.some((x) => !x.pass && !!x.error), key };
+        const prev = lastTry.get(id);
+        const closer = prev ? directionEvent(prev, outcome) : null;
+        recordHabit("right-direction", closer, `check:${id}`);
+        // Final review M3: a question is judged only against a comparable earlier try; otherwise it waits.
+        if (pendingQuestion === id && closer !== null) { recordHabit("right-question", questionEvent({ closer }, false), `question:${id}`); pendingQuestion = null; }
+        lastTry.set(id, outcome);
+        if (entry) runSized(join(root, entry), `check:${id}`);
+      }
       const failed = r.results.filter((x) => !x.pass && x.check.status === "trusted");
       const shaky = r.results.filter((x) => !x.pass && x.check.status === "unverified");
       if (failed.length === 0) {
@@ -1167,9 +1273,16 @@ export default function (pi: ExtensionAPI): void {
     if (profile) { const p = profile; profileWrite(() => { state = readChecksState(p.setting(key)); state.ticks = { ...state.ticks, [id]: how }; p.setSetting(key, JSON.stringify(state)); }); }
     writeChecksMd(root, state, currentMilestone(r.text, lesson));
     // Only passing checks solve it; a self-checked or `anyway` tick gives the episode up (final review I2).
+    const handed = how === "checks" && episode?.spot?.startsWith(`check:${id}:`) ? stepFor(episode, { exam: false }) === "fix" : null;
+    if (handed !== null && episode) recordHabit("own-fixes", ownFixEvent(handed ? "fix-step" : "checks"), episode.id);
+    if (how === "checks") fixStepStreak = handed ? fixStepStreak + 1 : 0;
+    // Final review I8: without a check run there is nothing to say about the idea.
+    if (how === "checks") recordHabit("ideas-to-code", ideasToCodeEvent(ownStepsOf(id).has(4), true), `tick:${id}`);
+    tickHanded = handed === true;
     if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
+    settleLevel(tickHanded);
     if (workflow?.task === id) { pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() }); workflow = null; }
     autoRecipe(session);
     try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
@@ -1202,7 +1315,13 @@ export default function (pi: ExtensionAPI): void {
       }
       setLevel(n);
       pi.appendEntry("tutor_level", { level: n });
-      if (project && profile) { const p = profile, lang = project.language; profileWrite(() => p.setLevel(lang, n)); }
+      if (project && profile) {
+        const p = profile, lang = project.language;
+        let events: ReturnType<Profile["habitEvents"]> = [];
+        profileWrite(() => { events = p.habitEvents(); });
+        const solidNow = bandProgress(events, bandFor(n), lang).solid;
+        profileWrite(() => { p.setLevel(lang, n); p.setSetting(`level-hand:${lang}`, String(solidNow)); });
+      }
       paint();
       ctx.ui.notify(`tutor level set to ${n} (${bandFor(n)})`, "info");
     },
