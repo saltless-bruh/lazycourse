@@ -388,6 +388,8 @@ export default function (pi: ExtensionAPI): void {
 
   function onStuck(events: StuckEvent[]) {
     for (const e of events) {
+      // Habits Task 6a (author 2026-10-27): a pause while working through a recipe is thinking, not being stuck.
+      if (e.type === "open" && e.trigger.kind === "idle" && workflow) continue;
       if (e.type === "open") openEp(e.trigger, true);
       else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); }
       else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");

@@ -64,6 +64,21 @@ describe("language card through a real Neovim (Review Focus #4)", () => {
 });
 
 describe("stuck episodes through a real Neovim", () => {
+  it("an idle stretch during a recipe opens no episode; without a recipe it does (habits Task 6a)", async () => {
+    const b = await linked();
+    mkdirSync(join(h!.root, "spec"), { recursive: true });
+    writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 split the bill\n");
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    const idle = (ms: number) => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "idle", buf: 1, path: join(h!.root, "a.py"), line: 1, since_ms: ms }]);
+    await idle(10_000_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(episodes(b.entries)).toEqual([]);
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    await idle(1_000);
+    await idle(10_000_000);
+    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "idle"));
+  }, 20000);
+
   it("an error that sits opens no episode and sends no nudge; the learner asks (spec 2026-10-26 §5.2)", async () => {
     const b = await linked();
     await setError("boom");
