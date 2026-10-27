@@ -246,6 +246,22 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(await habits()).toContainEqual(["right-question", true]);
   }, 60000);
+  it("habits solid in this language raise the level inside its band on a tick, with the reason; /tutor-progress shows them (Task 8)", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of ["small-runs", "right-direction", "steps-first", "right-question"] as const)
+      for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/other", at: at++, evidence: `seed-${at}` });
+    p.close();
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.some((n) => /^level 10 → 19: your questions moved you forward$/.test(n))).toBe(true);
+    expect(b.widgets["tutor"]?.[0]).toContain("lvl 19");
+    await b.commands["tutor-progress"].handler("", b.ctx);
+    const shown = JSON.stringify(b.messages.at(-1));
+    expect(shown).toContain("Habits (beginner)");
+    expect(shown).toMatch(/asks the right question: solid/);
+  }, 60000);
   it("a right-click ask on a fresh error is a reads-errors miss; a chat question with an error open is too", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await nvim!.command(`edit ${join(root, "src", "main.py")}`);

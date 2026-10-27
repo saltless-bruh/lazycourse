@@ -27,6 +27,7 @@ import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText,
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
+import { levelInBand, stepDownSuggested, bandProgress, habitReport } from "./levels.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
@@ -901,6 +902,26 @@ export default function (pi: ExtensionAPI): void {
     const p = profile, e = { habit, ok, language: project.language, project: project.path, at: Date.now(), evidence };
     profileWrite(() => p.addHabitEvent(e));
   }
+  let fixStepStreak = 0;
+  /** Spec 2026-10-26 §4: after a task, the level moves inside its band by the habits; every move says why. */
+  function settleLevel() {
+    if (!project || !profile) return;
+    const p = profile, lang = project.language, band = bandFor(level());
+    let events: ReturnType<Profile["habitEvents"]> = [];
+    profileWrite(() => { events = p.habitEvents(); });
+    const prog = bandProgress(events, band, lang);
+    const move = levelInBand({ level: level(), band, solid: prog.solid, total: prog.total, fixStepStreak, newest: prog.newest });
+    if (move) {
+      const old = level();
+      setLevel(move.level);
+      pi.appendEntry("tutor_level", { level: move.level, reason: move.reason });
+      profileWrite(() => p.setLevel(lang, move.level));
+      ui?.notify(`level ${old} → ${move.level}: ${move.reason}`, "info");
+      paint();
+    }
+    if (stepDownSuggested(fixStepStreak)) ui?.notify("the last three tasks needed the handed line: /tutor-level can move you down a band if you want", "info");
+  }
+
   function runSized(path: string, evidence: string) {
     let text: string;
     try { text = readFileSync(path, "utf8"); } catch { return; }
@@ -1059,7 +1080,12 @@ export default function (pi: ExtensionAPI): void {
       let body = "";
       profileWrite(() => {
         const langs = arg ? [arg] : project ? [project.language] : editorLang ? [editorLang] : p.languages();
-        body = langs.map((l) => progressReport({ language: l, level: p.language(l)?.level ?? null, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) })).join("\n\n");
+        body = langs.map((l) => {
+          const lvl = p.language(l)?.level ?? null;
+          const base = progressReport({ language: l, level: lvl, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) });
+          // Spec 2026-10-26 §6.1: the band's habits, their state and the latest evidence.
+          return lvl === null ? base : `${base}\n\n${habitReport(p.habitEvents(), bandFor(lvl), l)}`;
+        }).join("\n\n");
       });
       pi.sendMessage({ customType: "tutor_progress", content: body || "no progress yet: /tutor-start begins a project", display: true }, { triggerTurn: false });
     },
@@ -1217,11 +1243,14 @@ export default function (pi: ExtensionAPI): void {
     if (profile) { const p = profile; profileWrite(() => { state = readChecksState(p.setting(key)); state.ticks = { ...state.ticks, [id]: how }; p.setSetting(key, JSON.stringify(state)); }); }
     writeChecksMd(root, state, currentMilestone(r.text, lesson));
     // Only passing checks solve it; a self-checked or `anyway` tick gives the episode up (final review I2).
-    if (how === "checks" && episode?.spot?.startsWith(`check:${id}:`)) recordHabit("own-fixes", ownFixEvent(stepFor(episode, { exam: false }) === "fix" ? "fix-step" : "checks"), episode.id);
+    const handed = how === "checks" && episode?.spot?.startsWith(`check:${id}:`) ? stepFor(episode, { exam: false }) === "fix" : null;
+    if (handed !== null && episode) recordHabit("own-fixes", ownFixEvent(handed ? "fix-step" : "checks"), episode.id);
+    if (how === "checks") fixStepStreak = handed ? fixStepStreak + 1 : 0;
     recordHabit("ideas-to-code", ideasToCodeEvent(ownSteps.get(id)?.has(4) ?? false, how === "checks"), `tick:${id}`);
     if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
+    settleLevel();
     if (workflow?.task === id) { pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() }); workflow = null; }
     autoRecipe(session);
     try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
