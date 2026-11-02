@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, referencePieces, talkPassed, unfamiliarModule } from "../extensions/tutor/step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, referencePieces, talkPassed, unfamiliarModule, stepUpResult, brokenProgram } from "../extensions/tutor/step-up.js";
 import { GATE_HABITS } from "../extensions/tutor/levels.js";
 
 const DAY = 86_400_000;
@@ -33,6 +33,9 @@ describe("the talking test (spec 2026-10-26 §6.3)", () => {
     const ref = "from collections import Counter\ndef top_words(path, n):\n    with open(path) as f:\n        words = f.read().lower().split()\n    return Counter(words).most_common(n)\n";
     expect(referencePieces(ref, "python")).toEqual(expect.arrayContaining(["open", "split", "lower", "counter", "most_common", "with", "return"]));
   });
+  it("a method passed as a value counts as a piece (key=words.count)", () => {
+    expect(referencePieces("def top(text):\n    words = text.split()\n    return max(words, key=words.count)\n", "python")).toEqual(expect.arrayContaining(["split", "max", "count"]));
+  });
   it("piecesMatch counts named pieces found in the reference; close substitutes count", () => {
     const ref = "from collections import Counter\ndef top_words(path, n):\n    with open(path) as f:\n        words = f.read().split()\n    return Counter(words).most_common(n)\n";
     expect(piecesMatch(["open", "split", "dict", "sorted"], ref, "python")).toEqual({ matched: 4, total: 4 });
@@ -50,5 +53,25 @@ describe("unfamiliarModule", () => {
     expect(unfamiliarModule("python", new Set(["datetime"]))).not.toBe("datetime");
     expect(unfamiliarModule("python", new Set())).toBe("datetime");
     expect(unfamiliarModule("cobol", new Set())).toBeNull();
+  });
+});
+
+describe("the coding test and the result (spec 2026-10-26 §6.3)", () => {
+  const ok = { passed: 4, total: 4 }, three = { passed: 3, total: 4 }, two = { passed: 2, total: 4 };
+  it("passes when each part passes 3 of 4 checks and the talking marks pass", () => {
+    expect(stepUpResult({ solve: ok, fix: three, plan: ok }, { matched: 3, total: 3 })).toEqual({ pass: true, practise: [] });
+  });
+  it("names what to practise when a part or the talk falls short", () => {
+    expect(stepUpResult({ solve: two, fix: ok, plan: ok }, { matched: 3, total: 3 })).toEqual({ pass: false, practise: ["looks things up"] });
+    expect(stepUpResult({ solve: ok, fix: two, plan: two }, { matched: 1, total: 3 })).toEqual({ pass: false, practise: ["fixes own bugs", "turns ideas into code", "breaks a problem into steps first"] });
+  });
+  it("a part with no checks cannot pass", () => {
+    expect(stepUpResult({ solve: { passed: 0, total: 0 }, fix: ok, plan: ok }, { matched: 3, total: 3 }).pass).toBe(false);
+  });
+  it("brokenProgram: the first one-character slip of the reference that fails a check", async () => {
+    const ref = "def tip(total):\n    return total * 0.15\n";
+    const broken = await brokenProgram(ref, async (src) => src.includes("/ 0.15"));
+    expect(broken).toBe("def tip(total):\n    return total / 0.15\n");
+    expect(await brokenProgram(ref, async () => false)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { writeFileSync, mkdtempSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, mkdirSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
@@ -280,6 +280,53 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(b.notes.filter((n) => /\/tutor-step-up/.test(n) && /habits are solid/.test(n))).toHaveLength(1);
     await b.commands["tutor-progress"].handler("", b.ctx);
     expect(JSON.stringify(b.messages.at(-1))).toMatch(/step-up: ready/);
+  }, 60000);
+  it("the step-up's coding test: three parts in stepup/, checked in the sandbox; passing asks before the level moves (Task 12)", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const replies = [
+      JSON.stringify({ talk: "Write `top_word(text)` returning the most frequent word.", solve: "Write `weekday(iso)` returning the weekday name of an ISO date.", fix: "Write `tip(total)` returning 15% of the total." }),
+      "check P1.T1: top_word('a b a') == 'a'\ncheck P1.T1: top_word('x') == 'x'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```",
+      "check P1.T1: weekday('2026-11-02') == 'Monday'", "```python\nimport datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n```",
+      "check P1.T1: tip(40) == 6.0\ncheck P1.T1: tip(100) == 15.0", "```python\ndef tip(total):\n    return total * 0.15\n```",
+    ];
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] });
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
+    await turn(b.events, b.ctx, "I would split into words and keep the one that appears most", judged("none"));
+    await turn(b.events, b.ctx, "1. split the text\n2. count each word\n3. keep the biggest\npieces: split, max, count", judged("none"));
+    await until(() => existsSync(join(root, "stepup", "fix.py")), 30000);
+    expect(readFileSync(join(root, "stepup", "fix.py"), "utf8")).toMatch(/return total \/ 0\.15/);
+    expect(readFileSync(join(root, "stepup", "README.md"), "utf8")).toMatch(/weekday/);
+    writeFileSync(join(root, "stepup", "solve.py"), "import datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n");
+    writeFileSync(join(root, "stepup", "fix.py"), "def tip(total):\n    return total * 0.15\n");
+    writeFileSync(join(root, "stepup", "plan.py"), "def top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n");
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/solve 1\/1 · fix 2\/2 · plan 2\/2/);
+    await b.commands["tutor-step-up"].handler("submit", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 34/);
+    expect(b.widgets["tutor"]?.[0]).not.toContain("lvl 34");
+  }, 120000);
+  it("after a failed step-up, a retake waits for 3 more ticked tasks (Task 12)", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    p.setSetting("stepup-wait:python", "2");
+    let at = 1;
+    for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/after 2 more task\(s\)/);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
   }, 60000);
   it("final review I1: a run that is no try (a syntax error) moves no habit", async () => {
     const { b, root } = await doneProject(code("*"), two);

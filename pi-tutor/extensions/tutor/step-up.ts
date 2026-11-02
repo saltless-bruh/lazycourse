@@ -2,7 +2,8 @@
 // coding test decide it; the learner says yes before the level crosses the band edge.
 import type { Band } from "./policy.js";
 import type { HabitId } from "./habits.js";
-import { GATE_HABITS } from "./levels.js";
+import { GATE_HABITS, HABIT_LABEL } from "./levels.js";
+import { slipMutants } from "./near-miss.js";
 
 const DAY_MS = 86_400_000;
 
@@ -47,8 +48,10 @@ const ALIASES: Record<string, Record<string, string[]>> = {
 export function referencePieces(reference: string, language: string): string[] {
   const own = new Set([...reference.matchAll(/\b(?:def|fn|func|function)\s+([A-Za-z_]\w*)/g)].map((m) => m[1].toLowerCase()));
   const calls = [...reference.matchAll(/([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1].toLowerCase()).filter((n) => !own.has(n));
+  // A method named without a call is a piece too (`max(words, key=words.count)`).
+  const methods = [...reference.matchAll(/\.([A-Za-z_]\w*)\b(?!\s*\()/g)].map((m) => m[1].toLowerCase());
   const words = new Set(reference.toLowerCase().match(/\b[a-z_]+\b/g) ?? []);
-  return [...new Set([...calls, ...(KEYWORDS[language] ?? []).filter((k) => words.has(k))])];
+  return [...new Set([...calls, ...methods, ...(KEYWORDS[language] ?? []).filter((k) => words.has(k))])];
 }
 
 /** How many of the learner's named pieces are in the reference (or a close substitute is). */
@@ -81,4 +84,23 @@ export function unfamiliarModule(language: string, used: Set<string>): string | 
 export function importedModules(sources: string[], language: string): Set<string> {
   const re = language === "python" ? /^\s*(?:import|from)\s+([\w.]+)/gm : language === "go" ? /"([\w/]+)"/g : language === "rust" ? /^\s*use\s+([\w:]+)::/gm : /require\s*\(?\s*["']([\w.]+)["']/g;
   return new Set(sources.flatMap((s) => [...s.matchAll(re)].map((m) => m[1].split(".")[0])));
+}
+
+/** Each coding part passes at 3 of 4 checks (a part with none cannot pass); the talk by talkPassed. */
+export function stepUpResult(parts: { solve: Score; fix: Score; plan: Score }, talk: { matched: number; total: number }): { pass: boolean; practise: string[] } {
+  const ok = (s: Score) => s.total > 0 && s.passed * 4 >= s.total * 3;
+  const practise = [
+    ...(ok(parts.solve) ? [] : [HABIT_LABEL["looks-up"]]),
+    ...(ok(parts.fix) ? [] : [HABIT_LABEL["own-fixes"]]),
+    ...(ok(parts.plan) ? [] : [HABIT_LABEL["ideas-to-code"]]),
+    ...(talkPassed(talk) ? [] : [HABIT_LABEL["steps-first"]]),
+  ];
+  return { pass: practise.length === 0, practise };
+}
+interface Score { passed: number; total: number }
+
+/** The "fix an error" program: the first one-character slip of the reference that its checks catch. */
+export async function brokenProgram(reference: string, failsChecks: (source: string) => Promise<boolean>): Promise<string | null> {
+  for (const m of slipMutants(reference)) if (await failsChecks(m)) return m;
+  return null;
 }
