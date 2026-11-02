@@ -1602,7 +1602,8 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       expect(shown().filter((t) => /pieces:/.test(t))).toHaveLength(2);
       await turn(b.events, b.ctx, "1. split the text into words\n2. count each word\n3. take the most common\npieces: split, dict, sorted", judged("none"));
       const state = JSON.parse((await setting(`stepup:${dir}`)) ? JSON.stringify(await setting(`stepup:${dir}`)) : "{}");
-      expect(state).toMatchObject({ stage: "coding", plan: { pieces: ["split", "dict", "sorted"] }, talk: { matched: 3, total: 3 } });
+      // The coding test is prepared right after the plan (Task 12), so the stage may already be coding-ready.
+      expect(state).toMatchObject({ stage: expect.stringMatching(/^coding/), plan: { pieces: ["split", "dict", "sorted"] }, talk: { matched: 3, total: 3 } });
     });
     it("final review I1a: a recipe turned off is not started again in a new Pi session", async () => {
       mkdir(pjoin(dir, "spec"));
