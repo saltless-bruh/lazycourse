@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, referencePieces, talkPassed, unfamiliarModule, stepUpResult, brokenProgram } from "../extensions/tutor/step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, referencePieces, talkPassed, unfamiliarModule, stepUpResult, brokenProgram, fixMutants } from "../extensions/tutor/step-up.js";
 import { GATE_HABITS } from "../extensions/tutor/levels.js";
 
 const DAY = 86_400_000;
@@ -73,5 +73,20 @@ describe("the coding test and the result (spec 2026-10-26 §6.3)", () => {
     const broken = await brokenProgram(ref, async (src) => src.includes("/ 0.15"));
     expect(broken).toBe("def tip(total):\n    return total / 0.15\n");
     expect(await brokenProgram(ref, async () => false)).toBeNull();
+  });
+});
+
+describe("fixMutants: bugs to plant for the fix part (phase 3 live check)", () => {
+  it("off-by-one numbers and indexes, flipped booleans and equality, and the operator slips", () => {
+    expect(fixMutants("def first(items):\n    return items[0]\n")).toContain("def first(items):\n    return items[1]\n");
+    expect(fixMutants("def f(x):\n    return x == 2\n")).toEqual(expect.arrayContaining(["def f(x):\n    return x != 2\n", "def f(x):\n    return x == 3\n"]));
+    expect(fixMutants("def f():\n    return True\n")).toContain("def f():\n    return False\n");
+    expect(fixMutants("def tip(t):\n    return t * 0.15\n")).toContain("def tip(t):\n    return t / 0.15\n");
+  });
+  it("never inside strings or comments", () => {
+    expect(fixMutants("def f():\n    return 'item 0'  # take 0\n")).toEqual([]);
+  });
+  it("brokenProgram finds a bug for a one-line index solution", async () => {
+    expect(await brokenProgram("def first(items):\n    return items[0]\n", async (src) => src.includes("items[1]"))).toBe("def first(items):\n    return items[1]\n");
   });
 });
