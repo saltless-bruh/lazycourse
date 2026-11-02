@@ -538,31 +538,7 @@ export default function (pi: ExtensionAPI): void {
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
     // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
     const prompt = event.messageType === "user" ? event.prompt : "";
-    if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
-    if (stepUp && prompt && !prompt.startsWith(TUTOR_PREFIX)) stepUpTurn(prompt);
-    const asked = /^\[ask-error\] (.+?):(\d+): (.*?) \| code: /.exec(prompt);
-    if (asked) {
-      const base = project?.path ?? session?.cwd;
-      const since = base ? detector.errorSince(join(base, asked[1])) : null;
-      const shownMs = since === null ? null : Date.now() - since;
-      pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs });
-      recordHabit("reads-errors", readsErrorEvent({ shownMs }, false), `ask:${asked[1]}:${asked[2]}`);
-    } else if (prompt && !prompt.startsWith(TUTOR_PREFIX)) {
-      // Final review I6: one miss per open error, never for recipe replies, exams or roles without the ladder.
-      const fresh = detector.errorKeys().filter((k) => !missedErrors.has(k));
-      if (fresh.length && !workflow && !exam && roleNamed(activeRole).ladder) {
-        recordHabit("reads-errors", readsErrorEvent(null, true), "chat");
-        for (const k of fresh) missedErrors.add(k);
-      }
-      // Right question: judged by the next graded try on the task this question was asked during (M2: a question has a "?").
-      const task = episode?.spot?.startsWith("check:") && prompt.includes("?") ? episode.spot.split(":")[1] : null;
-      if (task) {
-        const said = prompt.trim().toLowerCase(), before = askedBefore.get(task) ?? [];
-        if (before.includes(said)) recordHabit("right-question", questionEvent(null, true), `question:${task}`);
-        else pendingQuestion = task;
-        askedBefore.set(task, [...before, said]);
-      }
-    }
+    learnerMessage(prompt);
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     pendingSteers = 0;
@@ -721,6 +697,39 @@ export default function (pi: ExtensionAPI): void {
   // streams; that reply's turn_end comes first, and the queued text reaches the model later as a
   // user message_start (pi-agent-core agent-loop.js:114-118, 180-186). The run follows the message
   // when it is delivered, using the delivered text (skill and template expansion may change it).
+  /**
+   * Everything that reads a learner's own message: recipe steps, the step-up, the right-click ask and the
+   * chat habits. Called for a fresh prompt and for one typed while the tutor was answering (a steer, which
+   * Pi delivers without a new before_agent_start — phase 3 live check).
+   */
+  function learnerMessage(prompt: string) {
+  if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
+  if (stepUp && prompt && !prompt.startsWith(TUTOR_PREFIX)) stepUpTurn(prompt);
+  const asked = /^\[ask-error\] (.+?):(\d+): (.*?) \| code: /.exec(prompt);
+  if (asked) {
+    const base = project?.path ?? session?.cwd;
+    const since = base ? detector.errorSince(join(base, asked[1])) : null;
+    const shownMs = since === null ? null : Date.now() - since;
+    pi.appendEntry("tutor_ask_error", { path: asked[1], line: Number(asked[2]), msg: asked[3], shownMs });
+    recordHabit("reads-errors", readsErrorEvent({ shownMs }, false), `ask:${asked[1]}:${asked[2]}`);
+  } else if (prompt && !prompt.startsWith(TUTOR_PREFIX)) {
+    // Final review I6: one miss per open error, never for recipe replies, exams or roles without the ladder.
+    const fresh = detector.errorKeys().filter((k) => !missedErrors.has(k));
+    if (fresh.length && !workflow && !exam && roleNamed(activeRole).ladder) {
+      recordHabit("reads-errors", readsErrorEvent(null, true), "chat");
+      for (const k of fresh) missedErrors.add(k);
+    }
+    // Right question: judged by the next graded try on the task this question was asked during (M2: a question has a "?").
+    const task = episode?.spot?.startsWith("check:") && prompt.includes("?") ? episode.spot.split(":")[1] : null;
+    if (task) {
+      const said = prompt.trim().toLowerCase(), before = askedBefore.get(task) ?? [];
+      if (before.includes(said)) recordHabit("right-question", questionEvent(null, true), `question:${task}`);
+      else pendingQuestion = task;
+      askedBefore.set(task, [...before, said]);
+    }
+  }
+  }
+
   pi.on("input", (event) => {
     if (event.streamingBehavior) pendingSteers++;
     return undefined;
@@ -731,6 +740,7 @@ export default function (pi: ExtensionAPI): void {
     pendingSteers--;
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     run = { ...run, prompt: text, judged: false };
+    learnerMessage(text);
   });
 
   // Style guards (golden 2026-10-13: "At rung 1, …", "line 4597 in INDEX.md"). The screen shows the

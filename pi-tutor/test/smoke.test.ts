@@ -1605,6 +1605,22 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       // The coding test is prepared right after the plan (Task 12), so the stage may already be coding-ready.
       expect(state).toMatchObject({ stage: expect.stringMatching(/^coding/), plan: { pieces: ["split", "dict", "sorted"] }, talk: { matched: 3, total: 3 } });
     });
+    it("a learner message typed while the tutor answers (a steer) still reaches the recipe and the step-up (phase 3 live check)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      const user = (text: string) => ({ type: "message_start", message: { role: "user", content: [{ type: "text", text }], timestamp: 1 } });
+      expect(step()).toBe(1);
+      await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "hello", systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["message_start"](user("hello"), b.ctx);
+      await b.events["input"]({ type: "input", text: "P1.T1 is the tip box", source: "interactive", streamingBehavior: "steer" }, b.ctx);
+      await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
+      await b.events["message_start"](user("P1.T1 is the tip box"), b.ctx);
+      expect(step()).toBe(2);
+    });
     it("final review I1a: a recipe turned off is not started again in a new Pi session", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");
