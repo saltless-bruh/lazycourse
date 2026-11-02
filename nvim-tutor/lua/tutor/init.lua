@@ -227,6 +227,7 @@ function M.setup(user_opts)
     complete = function() return vim.list_extend(M.open_tasks(opts.cwd), { "anyway" }) end })
   cmd("TutorSubmit", slash("/tutor-submit"), {})
   cmd("TutorProgress", slash("/tutor-progress"), { nargs = "?" })
+  cmd("TutorStepUp", slash("/tutor-step-up"), {})
   cmd("TutorReload", slash("/reload"), {})
   vim.cmd("amenu " .. ASK_ENTRY .. " <Cmd>lua require('tutor').ask_error()<CR>")
   vim.api.nvim_create_autocmd("MenuPopup", {

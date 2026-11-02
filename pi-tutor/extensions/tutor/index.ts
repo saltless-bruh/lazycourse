@@ -27,7 +27,9 @@ import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText,
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
-import { levelInBand, stepDownSuggested, bandProgress, habitReport } from "./levels.js";
+import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
+import { stepUpOffered, missingForStepUp } from "./step-up.js";
+import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { sourceHash, projectSources } from "./source-hash.js";
@@ -933,6 +935,15 @@ export default function (pi: ExtensionAPI): void {
       ui?.notify(`level ${old} → ${move.level}: ${move.reason}`, "info");
       paint();
     }
+    // Spec 2026-10-26 §6.2: all of the band's habits solid → the step-up is offered, at most once a day.
+    const key = `stepup-offer:${lang}`;
+    let lastOffer: number | null = null;
+    profileWrite(() => { const v = p.setting(key); lastOffer = v ? Number(v) : null; });
+    const now = Date.now(), b = bandFor(level());
+    if (stepUpOffered({ band: b, habitsSolidIn: (h) => solidIn(events.filter((e) => e.habit === h), lang), lastOffer, now })) {
+      profileWrite(() => p.setSetting(key, String(now)));
+      ui?.notify(`your ${b} habits are solid: /tutor-step-up starts the step-up (a talking test and a coding test) whenever you are ready`, "info");
+    }
     if (handedNow && stepDownSuggested(fixStepStreak)) ui?.notify("the last three tasks needed the handed line: /tutor-level can move you down a band if you want", "info");
   }
 
@@ -1108,7 +1119,11 @@ export default function (pi: ExtensionAPI): void {
           const lvl = p.language(l)?.level ?? null;
           const base = progressReport({ language: l, level: lvl, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) });
           // Spec 2026-10-26 §6.1: the band's habits, their state and the latest evidence.
-          return lvl === null ? base : `${base}\n\n${habitReport(p.habitEvents(), bandFor(lvl), l)}`;
+          if (lvl === null) return base;
+          const events = p.habitEvents(), band = bandFor(lvl);
+          const missing = missingForStepUp(band, (h) => solidIn(events.filter((e) => e.habit === h), l));
+          const up = band === "pro" ? "" : missing.length ? `\nstep-up: when ${missing.map((h) => HABIT_LABEL[h]).join(", ")} turn solid` : "\nstep-up: ready (/tutor-step-up)";
+          return `${base}\n\n${habitReport(events, band, l)}${up}`;
         }).join("\n\n");
       });
       pi.sendMessage({ customType: "tutor_progress", content: body || "no progress yet: /tutor-start begins a project", display: true }, { triggerTurn: false });
@@ -1288,6 +1303,20 @@ export default function (pi: ExtensionAPI): void {
     try { await link?.reloadFile(path); } catch { /* the file is written; the buffer reloads on focus */ }
     paint();
   }
+
+  pi.registerCommand("tutor-step-up", {
+    description: "The step-up to the next band: a talking test and a coding test (spec 2026-10-26 §6.3)",
+    handler: async (_args, ctx) => {
+      if (!project || !profile) { ctx.ui.notify("the step-up runs inside a project: /tutor-start makes one", "warning"); return; }
+      const p = profile, lang = project.language, band = bandFor(level());
+      if (band === "pro") { ctx.ui.notify("you are at the top band; there is no step-up above pro", "info"); return; }
+      let events: ReturnType<Profile["habitEvents"]> = [];
+      profileWrite(() => { events = p.habitEvents(); });
+      const missing = missingForStepUp(band, (h) => solidIn(events.filter((e) => e.habit === h), lang));
+      if (missing.length) { ctx.ui.notify(`not yet: these habits are still growing: ${missing.map((h) => HABIT_LABEL[h]).join(", ")} (/tutor-progress shows the evidence)`, "info"); return; }
+      ctx.ui.notify(`your ${band} habits are solid: the step-up is ready`, "info");
+    },
+  });
 
   pi.registerCommand("tutor-fix", {
     description: "Pro: show the fix for the spot you are stuck on (other levels get it after a few tries)",

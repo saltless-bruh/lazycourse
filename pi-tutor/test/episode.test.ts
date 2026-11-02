@@ -262,6 +262,25 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(shown).toContain("Habits (beginner)");
     expect(shown).toMatch(/asks the right question: solid/);
   }, 60000);
+  it("the step-up is offered once a day when every beginner habit is solid; /tutor-step-up says what is missing otherwise (Task 10)", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/^not yet: these habits are still growing: .*fixes own bugs/);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.beginner)
+      for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/other", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.filter((n) => /\/tutor-step-up/.test(n) && /habits are solid/.test(n))).toHaveLength(1);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 split\n- [ ] P2.T3 print\n");
+    await b.commands["tutor-done"].handler("P2.T3 anyway", b.ctx);
+    expect(b.notes.filter((n) => /\/tutor-step-up/.test(n) && /habits are solid/.test(n))).toHaveLength(1);
+    await b.commands["tutor-progress"].handler("", b.ctx);
+    expect(JSON.stringify(b.messages.at(-1))).toMatch(/step-up: ready/);
+  }, 60000);
   it("final review I1: a run that is no try (a syntax error) moves no habit", async () => {
     const { b, root } = await doneProject(code("*"), two);
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
