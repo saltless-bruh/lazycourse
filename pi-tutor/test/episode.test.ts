@@ -304,6 +304,13 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await until(() => existsSync(join(root, "stepup", "fix.py")), 30000);
     expect(readFileSync(join(root, "stepup", "fix.py"), "utf8")).toMatch(/return total \/ 0\.15/);
     expect(readFileSync(join(root, "stepup", "README.md"), "utf8")).toMatch(/weekday/);
+    const { Profile: P2 } = await import("../extensions/tutor/profile.js");
+    const q = P2.open(process.env.PI_TUTOR_PROFILE!);
+    const saved = JSON.parse(q.setting(`stepup:${root}`) ?? "{}") as { solveRef?: string; fixRef?: string };
+    q.close();
+    expect(saved.solveRef).toMatch(/strftime/);
+    expect(saved.fixRef).toMatch(/total \* 0\.15/);
+    expect(readFileSync(join(root, "stepup", "README.md"), "utf8")).not.toMatch(/strftime|0\.15/);
     writeFileSync(join(root, "stepup", "solve.py"), "import datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n");
     writeFileSync(join(root, "stepup", "fix.py"), "def tip(total):\n    return total * 0.15\n");
     writeFileSync(join(root, "stepup", "plan.py"), "def top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n");

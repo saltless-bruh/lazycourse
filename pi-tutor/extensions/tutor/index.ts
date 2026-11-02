@@ -1315,6 +1315,8 @@ export default function (pi: ExtensionAPI): void {
     language: string; band: string; talkTask: string; solveTask: string; fixTask?: string; module: string | null;
     talkRef: string; talkChecks: Check[]; plan?: { steps: string[]; pieces: string[] } | null; talk?: { matched: number; total: number }; started: number;
     solveChecks?: Check[]; fixChecks?: Check[]; fixMissing?: boolean;
+    /** Hidden solutions, kept in the profile like a milestone's reference, never in the project. */
+    solveRef?: string; fixRef?: string;
   }
   let stepUpModel: ExtensionContext | null = null;
   const NEXT_BAND: Record<string, { level: number; name: string }> = { beginner: { level: 34, name: "intermediate" }, intermediate: { level: 67, name: "pro" } };
@@ -1340,7 +1342,7 @@ export default function (pi: ExtensionAPI): void {
       writeInRoot(root, `stepup/solve${ext}`, `${c} ${s.solveTask}\n`);
       writeInRoot(root, `stepup/fix${ext}`, broken ?? `${c} ${s.fixTask ?? ""}\n`);
       writeInRoot(root, `stepup/plan${ext}`, `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
-      saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null });
+      saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference });
       showStepUp(`Step-up, part 2: the coding test is in stepup/ (README.md says what each file is for). No timer: take the time you need. /tutor-step-up check runs the checks; /tutor-step-up submit decides.`);
     } catch (e) {
       ui?.notify(`the coding test could not be prepared: ${e instanceof Error ? e.message : String(e)}; /tutor-step-up check tries again`, "warning");
