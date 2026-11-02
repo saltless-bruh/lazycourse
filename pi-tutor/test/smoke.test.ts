@@ -1578,6 +1578,32 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
     });
     const recipeTasks = (b: { entries: { type: string; data: unknown }[] }) => b.entries.filter((e) => e.type === "tutor_workflow" && (e.data as { done?: number }).done === undefined).map((e) => (e.data as { task: string }).task);
+    it("the step-up's talking test: a problem, free talk, then a plan with one re-ask at most (habits Task 11, Review Focus #4)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nentry: src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+      const p = Profile.open(file); p.setSetting("onboarding", "");
+      p.setSetting(`recipe:${dir}`, JSON.stringify({ off: ["P1.T1"], done: [] }));
+      let at = 1;
+      for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? dir : "/p/x", at: at++, evidence: "seed" });
+      p.close();
+      const b = await boot({ cwd: dir });
+      b.replies.push(JSON.stringify({ talk: "Write `top_word(text: str) -> str` returning the most frequent word.", solve: "Write `days_between(a: str, b: str) -> int` for two ISO dates." }),
+        "check P1.T1: top_word('a b a') == 'a'", "```python\nfrom collections import Counter\ndef top_word(text):\n    return Counter(text.split()).most_common(1)[0][0]\n```");
+      const shown = () => b.messages.map((m) => JSON.stringify(m.message));
+      await b.commands["tutor-step-up"].handler("", b.ctx);
+      await waitFor(() => shown().some((t) => /talking test/.test(t)));
+      expect(shown().some((t) => /top_word/.test(t))).toBe(true);
+      await turn(b.events, b.ctx, "I would split the text into words and count how often each comes up", judged("none"));
+      expect(shown().filter((t) => /pieces:/.test(t))).toHaveLength(1);
+      await turn(b.events, b.ctx, "I'd count them with a dictionary", judged("none"));
+      expect(shown().filter((t) => /pieces:/.test(t))).toHaveLength(2);
+      await turn(b.events, b.ctx, "1. split the text into words\n2. count each word\n3. take the most common\npieces: split, dict, sorted", judged("none"));
+      const state = JSON.parse((await setting(`stepup:${dir}`)) ? JSON.stringify(await setting(`stepup:${dir}`)) : "{}");
+      expect(state).toMatchObject({ stage: "coding", plan: { pieces: ["split", "dict", "sorted"] }, talk: { matched: 3, total: 3 } });
+    });
     it("final review I1a: a recipe turned off is not started again in a new Pi session", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");

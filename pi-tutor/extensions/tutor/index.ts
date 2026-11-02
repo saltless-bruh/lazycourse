@@ -21,14 +21,14 @@ import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
-import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow } from "./checks.js";
+import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
-import { stepUpOffered, missingForStepUp } from "./step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules } from "./step-up.js";
 import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
@@ -538,6 +538,7 @@ export default function (pi: ExtensionAPI): void {
     // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
     const prompt = event.messageType === "user" ? event.prompt : "";
     if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
+    if (stepUp && prompt && !prompt.startsWith(TUTOR_PREFIX)) stepUpTurn(prompt);
     const asked = /^\[ask-error\] (.+?):(\d+): (.*?) \| code: /.exec(prompt);
     if (asked) {
       const base = project?.path ?? session?.cwd;
@@ -614,6 +615,8 @@ export default function (pi: ExtensionAPI): void {
     const parts: string[] = [];
     if (episode && role.ladder) parts.push(formatEpisodeContext(episode, run.step ?? "teach"));
     if (exam && role.ladder) parts.push(formatExamContext(exam, Date.now()));
+    // Spec 2026-10-26 §6.3: during the talking test the tutor listens; the plan is the learner's.
+    if (stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask")) parts.push(`[step-up] talking test on: ${stepUp.talkTask}\nThe learner plans it in words. Ask at most one short question; never name functions, pieces or code yourself, and never solve it.`);
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     // Phase 1 live check: a right-click question is about the error, so the recipe step stays out of that turn.
     if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) parts.push(formatWorkflowContext(workflow, band));
@@ -1304,6 +1307,41 @@ export default function (pi: ExtensionAPI): void {
     paint();
   }
 
+  /** Spec 2026-10-26 §6.3: the step-up in progress, kept per project (`stepup:<root>`). */
+  interface StepUpState {
+    stage: "preparing" | "talk" | "plan" | "plan-reask" | "coding";
+    language: string; band: string; talkTask: string; solveTask: string; module: string | null;
+    talkRef: string; talkChecks: Check[]; plan?: { steps: string[]; pieces: string[] } | null; talk?: { matched: number; total: number }; started: number;
+  }
+  let stepUp: StepUpState | null = null;
+  function saveStepUp(s: StepUpState | null) {
+    stepUp = s;
+    if (project && profile) { const p = profile, key = `stepup:${project.path}`; profileWrite(() => p.setSetting(key, s ? JSON.stringify(s) : "")); }
+  }
+  function showStepUp(text: string) {
+    pi.sendMessage({ customType: "tutor_stepup", content: text, display: true }, { triggerTurn: false });
+  }
+  /** The learner's message during the talking test: free talk, then the plan (asked for again once). */
+  function stepUpTurn(prompt: string) {
+    const s = stepUp;
+    if (!s) return;
+    if (s.stage === "talk") {
+      saveStepUp({ ...s, stage: "plan" });
+      showStepUp("Now your plan: numbered steps (1., 2., …), then one line `pieces: …` naming the Python pieces you would use (for example `pieces: open, split, dict`).");
+      return;
+    }
+    if (s.stage !== "plan" && s.stage !== "plan-reask") return;
+    const plan = parsePlan(prompt);
+    if (!plan && s.stage === "plan") {
+      saveStepUp({ ...s, stage: "plan-reask" });
+      showStepUp("The plan needs numbered steps and one line starting with `pieces:` (for example `pieces: split, dict, sorted`). Only that plan is marked, not the talk before it.");
+      return;
+    }
+    const talk = plan ? piecesMatch(plan.pieces, s.talkRef, s.language) : { matched: 0, total: 0 };
+    saveStepUp({ ...s, stage: "coding", plan, talk });
+    ui?.notify(plan ? `plan saved: ${talk.matched} of ${talk.total} pieces match the hidden solution; the coding test comes next` : "no plan with a pieces: line was given; the coding test comes next", "info");
+  }
+
   pi.registerCommand("tutor-step-up", {
     description: "The step-up to the next band: a talking test and a coding test (spec 2026-10-26 §6.3)",
     handler: async (_args, ctx) => {
@@ -1314,7 +1352,27 @@ export default function (pi: ExtensionAPI): void {
       profileWrite(() => { events = p.habitEvents(); });
       const missing = missingForStepUp(band, (h) => solidIn(events.filter((e) => e.habit === h), lang));
       if (missing.length) { ctx.ui.notify(`not yet: these habits are still growing: ${missing.map((h) => HABIT_LABEL[h]).join(", ")} (/tutor-progress shows the evidence)`, "info"); return; }
-      ctx.ui.notify(`your ${band} habits are solid: the step-up is ready`, "info");
+      if (stepUp) { ctx.ui.notify(`a step-up is already running (${stepUp.stage})`, "info"); return; }
+      const proj = project, root = proj.path, frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
+      const module = unfamiliarModule(lang, importedModules(projectSources(root), lang));
+      const prep: StepUpState = { stage: "preparing", language: lang, band, talkTask: "", solveTask: "", module, talkRef: "", talkChecks: [], started: Date.now() };
+      saveStepUp(prep);
+      ctx.ui.notify("the step-up is being prepared: a talking test, then a coding test", "info");
+      void (async () => {
+        try {
+          const complete = rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS));
+          const raw = await complete(systemText("step-up"), `Language: ${lang}. Band: ${band}.${module ? ` The solve problem must need the module \`${module}\`.` : ""}`);
+          const json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as { talk?: unknown; solve?: unknown };
+          if (typeof json.talk !== "string" || typeof json.solve !== "string") throw new Error("the problems came back incomplete");
+          const entry = projectRun(root, lang).entry ?? "src/main.py";
+          const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
+          saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, talkRef: ref.reference, talkChecks: ref.checks });
+          showStepUp(`Step-up, part 1: the talking test.\n\n${json.talk}\n\nTalk it through in your own words: what the program needs, the steps, and which pieces you would use. No code yet.`);
+        } catch (e) {
+          saveStepUp(null);
+          ui?.notify(`the step-up could not be prepared: ${e instanceof Error ? e.message : String(e)}; try /tutor-step-up again`, "warning");
+        }
+      })();
     },
   });
 
