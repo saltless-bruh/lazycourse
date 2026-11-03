@@ -316,9 +316,41 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     writeFileSync(join(root, "stepup", "plan.py"), "def top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n");
     await b.commands["tutor-step-up"].handler("check", b.ctx);
     expect(b.notes.at(-1)).toMatch(/solve 1\/1 · fix 2\/2 · plan 2\/2/);
-    await b.commands["tutor-step-up"].handler("submit", b.ctx);
-    expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 34/);
-    expect(b.widgets["tutor"]?.[0]).not.toContain("lvl 34");
+    // Final review C1 + I4: a new Pi session restores the step-up, and the tutor gets the exam rule for stepup/.
+    const { realpathSync } = await import("node:fs");
+    const c = await boot({ nvim: h!.socket, cwd: realpathSync(h!.root) });
+    (c.pi as { exec: unknown }).exec = realExec;
+    await c.commands["tutor-step-up"].handler("check", c.ctx);
+    expect(c.notes.at(-1)).toMatch(/solve 1\/1 · fix 2\/2 · plan 2\/2/);
+    const asked = await turn(c.events, c.ctx, "what is wrong in fix.py?", judged("none"));
+    expect(JSON.stringify(asked.message?.content ?? "")).toMatch(/\[step-up\] coding test.*never write, complete or fix/);
+    await c.commands["tutor-step-up"].handler("submit", c.ctx);
+    expect(c.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 34/);
+    expect(c.widgets["tutor"]?.[0]).not.toContain("lvl 34");
+    await c.commands["tutor-progress"].handler("", c.ctx);
+    expect(JSON.stringify(c.messages.at(-1))).toMatch(/passed the beginner step-up/); // final review M12
+    await c.events["session_shutdown"]({ type: "session_shutdown" }, c.ctx);
+  }, 120000);
+  it("final review I2: a coding test whose setup stopped is prepared again by check", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    p.setSetting(`stepup:${root}`, JSON.stringify({ stage: "coding", language: "python", band: "beginner", talkTask: "Write `top_word(text)`.", solveTask: "Write `weekday(iso)`.", fixTask: "Write `tip(total)`.", module: "datetime",
+      talkRef: "def top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n", talkChecks: [{ task: "P1.T1", kind: "value", expr: "top_word('a b a')", expected: "'a'", milestone: 1, status: "trusted" }],
+      plan: { steps: ["split", "most"], pieces: ["split", "max"] }, talk: { matched: 2, total: 2 }, started: 1 }));
+    p.close();
+    const { realpathSync } = await import("node:fs");
+    const c = await boot({ nvim: h!.socket, cwd: realpathSync(root) });
+    (c.pi as { exec: unknown }).exec = realExec;
+    const replies = [
+      "check P1.T1: weekday('2026-11-02') == 'Monday'", "```python\nimport datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n```",
+      "check P1.T1: tip(40) == 6.0\ncheck P1.T1: tip(100) == 15.0", "```python\ndef tip(total):\n    return total * 0.15\n```",
+    ];
+    (c.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] });
+    await c.commands["tutor-step-up"].handler("check", c.ctx);
+    expect(c.notes.at(-1)).toMatch(/preparing the coding test again/);
+    await until(() => existsSync(join(root, "stepup", "fix.py")), 30000);
+    await c.events["session_shutdown"]({ type: "session_shutdown" }, c.ctx);
   }, 120000);
   it("after a failed step-up, a retake waits for 3 more ticked tasks (Task 12)", async () => {
     const { b, root } = await doneProject(code("/"), two);
@@ -332,6 +364,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/after 2 more task\(s\)/);
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.some((n) => /habits are solid: \/tutor-step-up/.test(n))).toBe(false); // final review M9: no offer while waiting
     await b.commands["tutor-step-up"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
   }, 60000);

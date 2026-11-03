@@ -1,5 +1,7 @@
 // The step-up (spec 2026-10-26 §6.2, §6.3): offered when a band's habits are solid; a talking test and a
 // coding test decide it; the learner says yes before the level crosses the band edge.
+import { existsSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import type { Band } from "./policy.js";
 import type { HabitId } from "./habits.js";
 import { GATE_HABITS, HABIT_LABEL } from "./levels.js";
@@ -46,6 +48,9 @@ const ALIASES: Record<string, Record<string, string[]>> = {
 
 /** The pieces of the hidden solution: what it calls (its own functions left out) and its main keywords. */
 export function referencePieces(reference: string, language: string): string[] {
+  // Final review I3: what only runs the file as a program (print/input under __main__) is not part of the solution.
+  const main = reference.search(/^if __name__ == ["']__main__["']\s*:/m);
+  if (main >= 0) reference = reference.slice(0, main);
   const own = new Set([...reference.matchAll(/\b(?:def|fn|func|function)\s+([A-Za-z_]\w*)/g)].map((m) => m[1].toLowerCase()));
   const calls = [...reference.matchAll(/([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1].toLowerCase()).filter((n) => !own.has(n));
   // A method named without a call is a piece too (`max(words, key=words.count)`).
@@ -58,9 +63,15 @@ export function referencePieces(reference: string, language: string): string[] {
 export function piecesMatch(pieces: string[], reference: string, language: string): { matched: number; total: number } {
   const ref = new Set(referencePieces(reference, language));
   const alias = ALIASES[language] ?? {};
-  const matched = pieces.filter((p) => ref.has(p) || (alias[p] ?? []).some((a) => ref.has(a))).length;
-  return { matched, total: pieces.length };
+  // Final review I3: control keywords (for, if, return…) are in almost every solution; they never count.
+  const keywords = new Set(KEYWORDS[language] ?? []);
+  const named = pieces.filter((p) => !keywords.has(p));
+  const matched = named.filter((p) => ref.has(p) || (alias[p] ?? []).some((a) => ref.has(a))).length;
+  return { matched, total: named.length };
 }
+
+/** Final review I7: languages whose coding-test files can each be checked on their own (compiled ones build together). */
+export const STEP_UP_LANGUAGES = new Set(["python", "lua"]);
 
 /** Designer's call: at least 3 of every 4 named pieces match, and at least 2 were named. */
 export function talkPassed(m: { matched: number; total: number }): boolean {
@@ -136,4 +147,13 @@ export function fixMutants(source: string): string[] {
   for (const m of source.matchAll(/\b(True|False|true|false)\b/g)) add(m.index!, m[0].length, { True: "False", False: "True", true: "false", false: "true" }[m[0]]!);
   for (const m of source.matchAll(/==|!=|~=/g)) add(m.index!, 2, m[0] === "==" ? (source.includes("~=") ? "~=" : "!=") : "==");
   return [...new Set([...slipMutants(source), ...out])];
+}
+
+/** Final review C1: an existing stepup/ folder (a learner's earlier work) is moved aside, never overwritten. */
+export function backupStepUp(root: string, now: number): string | null {
+  const from = join(root, "stepup");
+  if (!existsSync(from)) return null;
+  const name = `stepup.before-${now}`;
+  renameSync(from, join(root, name));
+  return name;
 }

@@ -1,5 +1,8 @@
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, referencePieces, talkPassed, unfamiliarModule, stepUpResult, brokenProgram, fixMutants } from "../extensions/tutor/step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, referencePieces, talkPassed, unfamiliarModule, stepUpResult, brokenProgram, fixMutants, STEP_UP_LANGUAGES, backupStepUp } from "../extensions/tutor/step-up.js";
 import { GATE_HABITS } from "../extensions/tutor/levels.js";
 
 const DAY = 86_400_000;
@@ -88,5 +91,32 @@ describe("fixMutants: bugs to plant for the fix part (phase 3 live check)", () =
   });
   it("brokenProgram finds a bug for a one-line index solution", async () => {
     expect(await brokenProgram("def first(items):\n    return items[0]\n", async (src) => src.includes("items[1]"))).toBe("def first(items):\n    return items[1]\n");
+  });
+});
+
+describe("final review (phase 3)", () => {
+  const ref = "def top_word(text):\n    words = text.split()\n    best = None\n    for w in words:\n        if best is None or words.count(w) > words.count(best):\n            best = w\n    return best\n\n\nif __name__ == '__main__':\n    print(top_word(input()))\n";
+  it("I3: control keywords alone never pass the talking test", () => {
+    expect(talkPassed(piecesMatch(["for", "return"], ref, "python"))).toBe(false);
+    expect(piecesMatch(["for", "if", "split", "count"], ref, "python")).toEqual({ matched: 2, total: 2 });
+  });
+  it("I3: names only used to run the file as a program are not pieces", () => {
+    expect(referencePieces(ref, "python")).not.toContain("print");
+    expect(referencePieces(ref, "python")).not.toContain("input");
+  });
+  it("I7: the step-up runs only where the coding test's files can be checked one by one", () => {
+    expect([...STEP_UP_LANGUAGES].sort()).toEqual(["lua", "python"]);
+  });
+});
+
+describe("backupStepUp (final review C1: never overwrite the learner's step-up work)", () => {
+  it("moves an existing stepup/ aside and returns its new name; nothing to move gives null", () => {
+    const root = mkdtempSync(join(tmpdir(), "su-"));
+    expect(backupStepUp(root, 1000)).toBeNull();
+    mkdirSync(join(root, "stepup"));
+    writeFileSync(join(root, "stepup", "solve.py"), "mine\n");
+    expect(backupStepUp(root, 1000)).toBe("stepup.before-1000");
+    expect(existsSync(join(root, "stepup"))).toBe(false);
+    expect(readFileSync(join(root, "stepup.before-1000", "solve.py"), "utf8")).toBe("mine\n");
   });
 });
