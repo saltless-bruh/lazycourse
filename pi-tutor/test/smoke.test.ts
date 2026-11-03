@@ -1578,6 +1578,76 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       expect(Object.keys((await setting(`checks:${dir}`)).milestones)).toEqual(["1"]);
     });
     const recipeTasks = (b: { entries: { type: string; data: unknown }[] }) => b.entries.filter((e) => e.type === "tutor_workflow" && (e.data as { done?: number }).done === undefined).map((e) => (e.data as { task: string }).task);
+    it("the step-up's talking test: a problem, free talk, then a plan with one re-ask at most (habits Task 11, Review Focus #4)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nentry: src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+      const p = Profile.open(file); p.setSetting("onboarding", "");
+      let at = 1;
+      for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? dir : "/p/x", at: at++, evidence: "seed" });
+      p.close();
+      const b = await boot({ cwd: dir });
+      const recipeStep = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number } | undefined)?.step;
+      expect(recipeStep()).toBe(1); // a beginner's recipe is running on P1.T1 (final review I6)
+      b.replies.push(JSON.stringify({ talk: "Write `top_word(text: str) -> str` returning the most frequent word.", solve: "Write `days_between(a: str, b: str) -> int` for two ISO dates." }),
+        "check P1.T1: top_word('a b a') == 'a'", "```python\nfrom collections import Counter\ndef top_word(text):\n    return Counter(text.split()).most_common(1)[0][0]\n```");
+      const shown = () => b.messages.map((m) => JSON.stringify(m.message));
+      await b.commands["tutor-step-up"].handler("", b.ctx);
+      await waitFor(() => shown().some((t) => /talking test/.test(t)));
+      expect(shown().some((t) => /top_word/.test(t))).toBe(true);
+      await turn(b.events, b.ctx, "I would split the text into words and count how often each comes up", judged("none"));
+      expect(shown().filter((t) => /pieces:/.test(t))).toHaveLength(1);
+      await turn(b.events, b.ctx, "I'd count them with a dictionary", judged("none"));
+      expect(shown().filter((t) => /pieces:/.test(t))).toHaveLength(2);
+      await turn(b.events, b.ctx, "1. split the text into words\n2. count each word\n3. take the most common\npieces: split, dict, sorted", judged("none"));
+      expect(b.notes.some((n) => /^plan saved: 3 of 3 pieces match/.test(n))).toBe(true);
+      expect(recipeStep()).toBe(1); // final review I6: step-up messages are not recipe steps
+      expect(shown().filter((t) => /pieces:/.test(t)).every((t) => !/split, dict|open, split/.test(t))).toBe(true); // final review I3: no example pieces to copy
+      // Final review I5: without a sandbox nothing is confirmed, so the coding test stops instead of failing the learner.
+      await waitFor(() => b.notes.some((n) => /coding test could not be prepared: no confirmed checks/.test(n)));
+      expect(await setting(`stepup:${dir}`)).toBeNull();
+      expect(await setting("stepup-wait:python")).toBeNull();
+    });
+    it("a learner message typed while the tutor answers (a steer) still reaches the recipe and the step-up (phase 3 live check)", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      const user = (text: string) => ({ type: "message_start", message: { role: "user", content: [{ type: "text", text }], timestamp: 1 } });
+      expect(step()).toBe(1);
+      await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "hello", systemPromptOptions: { sections: {} } }, b.ctx);
+      await b.events["message_start"](user("hello"), b.ctx);
+      await b.events["input"]({ type: "input", text: "P1.T1 is the tip box", source: "interactive", streamingBehavior: "steer" }, b.ctx);
+      await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
+      await b.events["message_start"](user("P1.T1 is the tip box"), b.ctx);
+      expect(step()).toBe(2);
+    });
+    it("final review M10: a plan sent as the first message of the talking test is taken as the plan", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nentry: src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+      const p = Profile.open(file); p.setSetting("onboarding", "");
+      let at = 1;
+      for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? dir : "/p/x", at: at++, evidence: "seed" });
+      p.close();
+      const b = await boot({ cwd: dir });
+      b.replies.push(JSON.stringify({ talk: "Write `top_word(text)`.", solve: "Write `weekday(iso)`.", fix: "Write `tip(t)`." }),
+        "check P1.T1: top_word('a b a') == 'a'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```");
+      await b.commands["tutor-step-up"].handler("", b.ctx);
+      await waitFor(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))));
+      const asks = () => b.messages.filter((m) => /Now your plan/.test(JSON.stringify(m.message))).length;
+      await turn(b.events, b.ctx, "[ask-error] src/main.py:1: x | code: y", judged("none"));
+      expect(asks()).toBe(0); // a right-click question is not the talk
+      await turn(b.events, b.ctx, "1. split\n2. keep the most common\npieces: split, max, count", judged("none"));
+      expect(asks()).toBe(0); // the plan came first: nothing more to ask
+      expect(b.notes.some((n) => /^plan saved: 3 of 3 pieces match/.test(n))).toBe(true);
+    });
     it("final review I1a: a recipe turned off is not started again in a new Pi session", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n- [ ] P1.T2 print\n");

@@ -234,3 +234,14 @@ pieces often" (3 of 7 counted habits solid → 14). P1.T2: wrong, then fixed (ow
 run: right-direction ×3 good, small-runs ×3 good, own-fixes ×2 good; `/tutor-progress` showed fixes own bugs and
 goes the right direction "showing", runs small pieces "solid", looks things up "shown in the step-up". Pi's
 settings unchanged.
+
+**Phase 3 (2026-11-02, real LazyVim, Python, level 30, all counted beginner habits seeded solid, nemotron; the
+driver plays a good learner).** Run 1: the whole step-up ran (problems, talking test with the plan asked once,
+pieces 4/4, stepup/ written, check, submit passed, level left at 30 until the learner types /tutor-level 34),
+but the fix task was `get_first_element` (`return items[0]`): no operator to slip, so the part passed untested
+— fixed with a wider bug set for the fix part (off-by-one numbers and indexes, True/False, ==/!=) and a prompt
+asking for a fix task with real logic. Run 2: the plan, typed while a six-minute reply streamed, never reached
+the step-up (a steer is delivered without before_agent_start) — fixed: one learnerMessage() serves fresh and
+steered messages, which also stops recipe steps typed mid-reply being lost. Run 3: plan asked once, pieces
+4/4, fix.py planted with `sum(2 for …)`, check "solve 3/3 · fix 2/2 · plan 3/3", submit passed, level 30 kept;
+no hidden solution in the project; Pi's settings unchanged.
