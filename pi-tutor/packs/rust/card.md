@@ -4,7 +4,7 @@
 - **Names:** `snake_case` functions, variables and modules; `UpperCamelCase` types and traits; `SCREAMING_SNAKE_CASE` constants.
 - **Errors:** `Result<T, E>` with `?` for failures, `Option<T>` for absence; `panic!` is for bugs, and `unwrap`/`expect` belong in examples and tests. Compiler errors read top-down: the code (`E0502`) and the arrows show which borrow conflicts; `rustc --explain E0502` explains it.
 - **Layout:** `Cargo.toml`, `src/main.rs` or `src/lib.rs`, unit tests in `#[cfg(test)] mod tests` beside the code, integration tests in `tests/`.
-- **Test:** `cargo test`.
+- **Test:** `cargo test`. A task's own test is `#[test] fn p1_t1_<what>()` (task P1.T1), in `mod tests`.
 - **Newer:** edition 2024 and async closures (1.85), `if let … && …` let chains in edition 2024 (1.88).
 - **Pitfalls:** a shared and a mutable borrow at once; `String` (owned) vs `&str` (borrowed); `.clone()` to silence the borrow checker hides a design question; integer overflow panics in debug builds; a forgotten `mut`; shadowing hides an earlier binding.
 

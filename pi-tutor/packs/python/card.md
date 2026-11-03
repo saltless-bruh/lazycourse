@@ -4,7 +4,7 @@
 - **Names:** `snake_case` functions and variables, `PascalCase` classes, `UPPER_CASE` constants, `_private` by convention.
 - **Errors:** exceptions; `try`/`except KeyError` over checking first; catch the narrowest type, never bare `except:`. Tracebacks read bottom-up: last line is the error, the frame above is where.
 - **Layout:** `pyproject.toml`, `src/<package>/`, `tests/test_*.py`; scripts end with `if __name__ == "__main__": main()`; use a venv.
-- **Test:** `python3 -m pytest` when pytest is installed, else `python3 -m unittest`.
+- **Test:** `python3 -m pytest` when pytest is installed, else `python3 -m unittest`. A task's own test is named `test_p1_t1_<what>` (task P1.T1), in `tests/test_*.py`.
 - **Newer:** `match` (3.10), `except*` (3.11), `type X = …` (3.12), `t"…"` strings, lazy annotations, `except A, B:` (3.14). Hints are checked by mypy/pyright, not at run time.
 - **Pitfalls:** a mutable default (`def f(x=[])`) is shared between calls; a closure in a loop sees the last value; `is` compares identity, not value; changing a list while looping over it skips items; `/` is float division, `//` floors; naming a variable `list` or `id` hides the builtin.
 
