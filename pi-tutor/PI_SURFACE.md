@@ -109,7 +109,10 @@ Re-verify every line when bumping versions.
 - `ctx.modelRegistry.find(provider, modelId)` → `Model | undefined` (model-registry.d.ts:29, Pi 1.3.0). Used by
   `/tutor-checker` (habits Task 19) to resolve `provider/model` (first `/` splits, so `nvidia/z-ai/glm-5.3-flash`
   is provider `nvidia`, id `z-ai/glm-5.3-flash`); the second reader is then called with
-  `ctx.modelRegistry.complete(thatModel, …, { signal: AbortSignal.timeout(60_000) })`.
+  `ctx.modelRegistry.complete(thatModel, …, { signal })`, where `signal` is `AbortSignal.any` of a 3-minute
+  timeout and `ctx.signal` ("the current abort signal, or undefined when the agent is not streaming",
+  types.d.ts:239–240), so Esc stops the wait. `complete` resolves failures as `stopReason: "error"`/`"aborted"`
+  with `errorMessage` (pi-ai `stream(...).result()`), it does not throw them.
 - `ctx.ui.select(title, options)` / `ctx.ui.input(title, placeholder)` → `string | undefined` (Esc = undefined);
   `ctx.ui.setWorkingMessage(text?)` (only visible during an agent turn — interactive-mode.js:2061 — so
   it is not progress for a command); `ctx.model` (undefined → `/tutor-start` refuses).
