@@ -257,4 +257,7 @@ test: ticked, "your test test_p1_t1_uneven passes and catches a broken version",
 src/main.py unchanged; Pi's settings unchanged. Before merge: broken copies land only in the functions the test
 calls, in any project file (a side agent's note: the entry file's first slips missed a function lower down or
 in another module); final review: symlinks are never followed out of the project, and a broken Python copy that
-loops forever is cut at 10 s.
+loops forever is cut at 10 s. Independent final review: when no broken copy can be tried (nothing to break, every
+copy only crashes), the checks tick it with a note and no habit is recorded; string literals are changed too,
+so a string task's test can be tried; only the functions the task's own test calls are broken; a failing
+Rust/Go test keeps its own name; a Rust lifetime no longer reads as a quote.
