@@ -158,7 +158,7 @@ export async function writeMilestoneChecks(d: {
     const probe = async (all: Check[]): Promise<Map<string, string>> => {
       const weak = new Map(roundingWeakTasks(all, types).map((t) => [t, ROUNDED]));
       const trusted = all.filter((c) => c.status === "trusted");
-      for (const mutant of slipMutants(reference)) {
+      for (const mutant of slipMutants(reference, 8, d.language)) {
         writeFileSync(entryPath, mutant);
         const m = await run(trusted);
         if (m.missing || m.results.some((x) => x.error || x.outcome)) continue; // did not build or load: not an answer

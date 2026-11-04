@@ -12,6 +12,7 @@ import type { RunExec } from "./exam/layout.js";
 import { sandboxFor, type Sandboxed } from "./check-run.js";
 import { manifestFor } from "./manifest.js";
 import { fixMutants } from "./step-up.js";
+import { rustLifetime } from "./near-miss.js";
 
 export const OWN_TEST_LANGUAGES = new Set(["python", "rust", "go"]);
 const SKIP_DIRS = new Set(["node_modules", "target", "__pycache__", "venv", "stepup"]);
@@ -60,7 +61,7 @@ export function findOwnTests(root: string, language: string, task: string): stri
       for (const line of readFileSync(join(root, f), "utf8").split("\n")) {
         const c = /^class\s+(\w+)/.exec(line);
         if (c) { cls = c[1]; continue; }
-        if (/^\S/.test(line)) cls = null;
+        if (/^[^\s#@]/.test(line)) cls = null; // final review M1: a column-0 comment or decorator keeps the class
         const d = /^(\s*)(?:async\s+)?def\s+(test_\w+)\s*\(/.exec(line);
         if (!d || !d[2].startsWith(`test_${snake}`)) continue;
         if (d[1] === "") out.push(`${f}::${d[2]}`);
@@ -69,7 +70,7 @@ export function findOwnTests(root: string, language: string, task: string): stri
     }
   } else if (language === "rust") {
     for (const f of sources(root, (n) => n.endsWith(".rs")))
-      for (const d of readFileSync(join(root, f), "utf8").matchAll(/\bfn\s+((?:test_)?p\d+_t\d+_\w*)\s*\(/g))
+      for (const d of readFileSync(join(root, f), "utf8").matchAll(/#\[test\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+((?:test_)?p\d+_t\d+_\w*)\s*\(/g)) // final review M4: #[test] only
         if (d[1].replace(/^test_/, "").startsWith(snake)) out.push(`${f}::${d[1]}`);
   } else {
     for (const f of sources(root, (n) => n.endsWith("_test.go")))
@@ -94,7 +95,7 @@ export function ownTestName(language: string, task: string): string {
 }
 
 const PY_OWN = String.raw`
-import sys, os, re, json, traceback, importlib.util, unittest, inspect
+import sys, os, re, json, traceback, importlib.util, unittest, inspect, asyncio
 MARK = "\x1eTUTOR\t"
 entry = sys.argv[1]
 for d in (os.getcwd(), os.path.join(os.getcwd(), "src"), os.path.dirname(os.path.abspath(entry or "."))):
@@ -110,9 +111,7 @@ def short(text):
         if mm and os.path.abspath(mm.group(1)).startswith(os.getcwd() + os.sep):
             code = lines[k + 1].strip() if k + 1 < len(lines) and not lines[k + 1].strip().startswith(("File ", "~", "^")) else ""
             at = "%s:%s: %s" % (os.path.relpath(mm.group(1)), mm.group(2), code)
-    if not at: return last
-    err = last if last != "AssertionError" else "AssertionError"
-    return "%s (%s)" % (at, err)
+    return "%s (%s)" % (at, last) if at else last
 def say(spec, ok, kind="", msg=""):
     if msg: msg = short(msg)
     print(MARK + json.dumps({"spec": spec, "ok": ok, "kind": kind, "msg": msg[-600:]}), flush=True)
@@ -139,7 +138,7 @@ for spec in sys.argv[2:]:
         if inspect.signature(f).parameters:
             say(spec, False, "error", name + " takes arguments (pytest fixtures are not supported here)")
             continue
-        f()
+        asyncio.run(f()) if inspect.iscoroutinefunction(f) else f()
         say(spec, True)
     except AssertionError:
         say(spec, False, "assert", traceback.format_exc())
@@ -147,7 +146,7 @@ for spec in sys.argv[2:]:
         say(spec, False, "error", traceback.format_exc())
 `;
 
-interface OneRun { pass: boolean; out: string; assertFailed: boolean; built: boolean }
+interface OneRun { pass: boolean; out: string; assertFailed: boolean; built: boolean; failed?: string }
 
 const tail = (s: string, n = 400) => (s.length > n ? `…${s.slice(-n)}` : s).trim();
 
@@ -175,7 +174,7 @@ async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests
     const pass = rows.length === i.tests.length && bad.length === 0;
     const first = bad[0];
     const out = pass ? "" : first ? `${first.spec.split("::")[1]}: ${tail(first.msg)}` : tail(r.stderr || r.stdout) || `exit ${r.code}`;
-    return { pass, out, assertFailed: bad.some((x) => x.kind === "assert"), built: true };
+    return { pass, out, assertFailed: bad.some((x) => x.kind === "assert"), built: true, failed: first?.spec.split("::")[1].split(".").at(-1) };
   }
   // Rust and Go: build first, so a broken copy that does not compile is told apart from a test that fails.
   const manifest = manifestFor(i.language, "project");
@@ -194,8 +193,15 @@ async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests
   if (text.includes("\x1eBUILD")) return { pass: false, out: tail(text.replace("\x1eBUILD", "")), assertFailed: false, built: false };
   const ran = i.language === "rust" ? /test result: ok\. [1-9]/.test(text) : names.every((n) => text.includes(`--- PASS: ${n}`));
   const pass = r.code === 0 && ran;
-  const assertFailed = !pass && (i.language === "rust" ? /assertion/.test(text) : /--- FAIL/.test(text) && !/^panic:/m.test(text));
-  return { pass, out: pass ? "" : tail(text) || `exit ${r.code}`, assertFailed, built: true };
+  // Final review M3: the assertion is in the panic message, not anywhere in the output (a test name can say "assertion").
+  const assertFailed = !pass && (i.language === "rust" ? /panicked at[^\n]*(?:\n\s*|: ?'?)assert/.test(text) : /--- FAIL/.test(text) && !/^panic:/m.test(text));
+  if (pass) return { pass, out: "", assertFailed, built: true };
+  // Final review I3: the failing test's own name and message, so a try keeps one spot between runs.
+  const failed = i.language === "rust" ? /---- (?:[\w:]*::)?(\w+) stdout ----/.exec(text)?.[1] : /--- FAIL: (\w+)/.exec(text)?.[1];
+  const body = failed && i.language === "rust" ? new RegExp(`---- (?:[\\w:]*::)?${failed} stdout ----\\n([\\s\\S]*?)(?:\\n\\n|$)`).exec(text)?.[1]
+    : failed ? new RegExp(`=== RUN\\s+${failed}\\n([\\s\\S]*?)--- FAIL`).exec(text)?.[1] : undefined;
+  const out = failed ? `${failed}: ${(body ?? "").trim().replace(/\s*\n\s*/g, " ").slice(0, 400) || "failed"}` : tail(text) || `exit ${r.code}`;
+  return { pass, out, assertFailed, built: true, failed };
 }
 
 const firstDiff = (a: string, b: string) => { let k = 0; while (k < a.length && a[k] === b[k]) k++; return k; };
@@ -233,12 +239,12 @@ async function sandbox(exec: RunExec, root: string, language: string, host: Sand
 }
 
 /** Run the own tests on the learner's code as it is. `missing` when the sandbox cannot start. */
-export async function runOwnTests(exec: RunExec, i: { root: string; language: string; tests: string[]; sandbox: SandboxHost; entry?: string | null }): Promise<{ pass: boolean; out: string; missing?: boolean }> {
+export async function runOwnTests(exec: RunExec, i: { root: string; language: string; tests: string[]; sandbox: SandboxHost; entry?: string | null }): Promise<{ pass: boolean; out: string; missing?: boolean; failed?: string }> {
   if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return { pass: false, out: "no own test" };
   const sb = await sandbox(exec, i.root, i.language, i.sandbox);
   if (!sb) return { pass: false, out: "the sandbox cannot start", missing: true };
   const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [] });
-  return { pass: r.pass, out: r.out };
+  return { pass: r.pass, out: r.out, failed: r.failed };
 }
 
 /** Functions defined in `source`: name and the span of its body, so a planted bug lands where a test looks. */
@@ -271,56 +277,99 @@ const isTestFile = (rel: string, language: string) =>
   language === "go" ? rel.endsWith("_test.go") : language === "python" ? /(^|\/)tests?\/|(^|\/)test_[^/]*\.py$|_test\.py$/.test(rel) : false;
 const EXT: Record<string, string> = { python: ".py", rust: ".rs", go: ".go" };
 
+/** Copies of `source`, each with one string literal changed (final review I1: a string task's only operator slip, `+`, just crashes). */
+function stringMutants(source: string, language: string): string[] {
+  const out: string[] = [];
+  const quotes = language === "python" ? `"'` : `"`;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if ((language === "python" && ch === "#") || (language !== "python" && ch === "/" && source[i + 1] === "/")) { const nl = source.indexOf("\n", i); if (nl < 0) break; i = nl; continue; }
+    if (language === "rust" && ch === "'") {
+      if (rustLifetime(source, i)) continue;
+      i = source.indexOf("'", i + (source[i + 1] === "\\" ? 3 : 2)); if (i < 0) break; continue;
+    }
+    if (language === "go" && ch === "`") { const e = source.indexOf("`", i + 1); if (e < 0) break; i = e; continue; }
+    if (!quotes.includes(ch)) continue;
+    if (language === "python" && source.startsWith(ch.repeat(3), i)) { const e = source.indexOf(ch.repeat(3), i + 3); if (e < 0) break; i = e + 2; continue; }
+    let j = i + 1;
+    while (j < source.length && source[j] !== ch && source[j] !== "\n") j += source[j] === "\\" ? 2 : 1;
+    if (source[j] === ch) out.push(source.slice(0, j) + "!" + source.slice(j));
+    i = j;
+  }
+  return out;
+}
+
+/** Names called inside the own tests' bodies (final review I2: not anywhere in a file that tests other tasks too). */
+function calledByTests(root: string, language: string, tests: string[]): Set<string> {
+  const called = new Set<string>();
+  for (const t of tests) {
+    const [file, name] = t.split("::");
+    let text = "";
+    try { text = readFileSync(join(root, file), "utf8"); } catch { continue; }
+    const own = functionSpans(text, language).find((f) => f.name === name.split(".").at(-1));
+    for (const m of (own ? text.slice(own.at, own.end) : text).matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) called.add(m[1]);
+  }
+  return called;
+}
+
 /**
- * Broken copies to try, as (file, text) pairs: one planted slip each, inside the functions the own tests call,
- * wherever in the project they are defined (side-agent note: the entry file's first slips missed a function
- * lower down or in another module). Test code is never touched. With no called function found, the entry file.
+ * Broken copies to try, as (file, text) pairs: one planted slip or changed string each, inside the functions the
+ * own tests call, wherever in the project they are defined (side-agent note), taken in turn from each function
+ * (final review I2) so the budget is not spent on one. Test code is never touched. With no called function
+ * found, the entry file.
  */
 function brokenCopies(root: string, language: string, tests: string[], entry: string | null): [string, string][] {
-  const testFiles = [...new Set(tests.map((t) => t.split("::")[0]))];
-  const called = new Set<string>();
-  for (const f of testFiles) {
-    let text = "";
-    try { text = readFileSync(join(root, f), "utf8"); } catch { continue; }
-    for (const m of text.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) called.add(m[1]);
-  }
+  const called = calledByTests(root, language, tests);
   const notTest = (n: string) => !/^(test_|Test)/.test(n) && !/^p\d+_t\d+_/.test(n);
-  const out: [string, string][] = [];
-  const add = (rel: string, source: string, keep: (at: number) => boolean) => {
+  const groups: [string, string][][] = [];
+  let found = false;
+  const add = (rel: string, source: string, spans: { at: number; end: number }[] | null) => {
     const guarded = testSpans(source, language);
-    for (const m of fixMutants(source, 1000)) {
+    const byFn = new Map<number, [string, string][]>();
+    for (const m of [...fixMutants(source, 1000, language), ...stringMutants(source, language)]) {
       const at = firstDiff(source, m);
-      if (!guarded.some(([a, b]) => at >= a && at < b) && keep(at)) out.push([rel, m]);
+      if (guarded.some(([a, b]) => at >= a && at < b)) continue;
+      const k = spans ? spans.findIndex((f) => at >= f.at && at < f.end) : 0;
+      if (k < 0) continue;
+      byFn.set(k, [...(byFn.get(k) ?? []), [rel, m]]);
     }
+    groups.push(...byFn.values());
   };
   for (const rel of sources(root, (n) => n.endsWith(EXT[language]))) {
     if (isTestFile(rel, language)) continue;
     let source: string;
     try { source = readFileSync(join(root, rel), "utf8"); } catch { continue; }
     const spans = functionSpans(source, language).filter((f) => called.has(f.name) && notTest(f.name));
-    if (spans.length) add(rel, source, (at) => spans.some((f) => at >= f.at && at < f.end));
+    if (spans.length) { found = true; add(rel, source, spans); }
   }
-  if (!out.length && entry) {
-    try { add(entry, readFileSync(join(root, entry), "utf8"), () => true); } catch { /* no entry file */ }
+  // Only when no function the test calls was found: a found one with nothing to break stays untestable.
+  if (!found && entry) {
+    try { add(entry, readFileSync(join(root, entry), "utf8"), null); } catch { /* no entry file */ }
   }
+  const out: [string, string][] = [];
+  for (let k = 0; groups.some((g) => k < g.length); k++) for (const g of groups) if (k < g.length) out.push(g[k]);
   return out;
 }
 
 /**
- * Whether the own tests can fail: some broken copy of the code they call (one planted slip each) makes one of
- * them fail an assertion. A copy that only crashes, or does not build, proves nothing, since a test with no
- * assertion "fails" on it too.
+ * Whether the own tests can fail (final review I1, three answers): "caught" — a broken copy of the code they call
+ * made one of them fail an assertion; "missed" — a broken copy ran and every test still passed; "untestable" —
+ * no copy could be tried (nothing to break, every copy only crashed or did not build, or no sandbox). A copy that
+ * only crashes proves nothing, since a test with no assertion "fails" on it too.
  */
-export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost }): Promise<boolean> {
-  if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return false;
+export type CanFail = "caught" | "missed" | "untestable";
+export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost }): Promise<CanFail> {
+  if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return "untestable";
   const copies = brokenCopies(i.root, i.language, i.tests, i.entry ?? null);
-  if (!copies.length) return false;
+  if (!copies.length) return "untestable";
   const sb = await sandbox(exec, i.root, i.language, i.sandbox);
-  if (!sb) return false;
+  if (!sb) return "untestable";
   const max = i.language === "python" ? MAX_MUTANTS.python : MAX_MUTANTS.compiled;
+  let missed = false;
   for (const [rel, broken] of copies.slice(0, max)) {
     const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [[rel, broken]], sec: i.language === "python" ? MUTANT_SEC.python : MUTANT_SEC.compiled });
-    if (r.built && !r.pass && r.assertFailed) return true;
+    if (r.built && !r.pass && r.assertFailed) return "caught";
+    if (r.pass) missed = true;
   }
-  return false;
+  return missed ? "missed" : "untestable";
 }

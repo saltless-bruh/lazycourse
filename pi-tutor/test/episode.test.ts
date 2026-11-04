@@ -396,6 +396,16 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
     expect(b.notes.at(-1)).toMatch(/no test of yours is named for P2\.T2 \(test_p2_t2_<what>\), so none was run/);
   }, 60000);
+  it("own tests (final review I1): with nothing in the code to break, the checks tick it, a note says so, no habit", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n\n\ndef same(x):\n    return x\n", [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "trusted" }]);
+    await b.commands["tutor-level"].handler("70", b.ctx);
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(join(root, "tests", "test_split.py"), "from main import same\n\ndef test_p2_t2_same():\n    assert same(3) == 3\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/your test passes; no broken version of the code it calls could be made to try it on/);
+    expect((await habits()).map(([h]) => h)).not.toContain("tests-that-fail");
+  }, 60000);
   it("own tests (Task 14): a beginner's own test is not asked for, so a test that cannot fail does not block", async () => {
     const { b, root } = await doneProject(code("/"), two);
     mkdirSync(join(root, "tests"), { recursive: true });

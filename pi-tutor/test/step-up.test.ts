@@ -80,6 +80,9 @@ describe("the coding test and the result (spec 2026-10-26 §6.3)", () => {
 });
 
 describe("fixMutants: bugs to plant for the fix part (phase 3 live check)", () => {
+  it("final review I4: a Rust lifetime does not hide the code after it", () => {
+    expect(fixMutants("fn a(x: &'static [i32]) -> i32 {\n    x[0]\n}\n", 8, "rust")).toContain("fn a(x: &'static [i32]) -> i32 {\n    x[1]\n}\n");
+  });
   it("off-by-one numbers and indexes, flipped booleans and equality, and the operator slips", () => {
     expect(fixMutants("def first(items):\n    return items[0]\n")).toContain("def first(items):\n    return items[1]\n");
     expect(fixMutants("def f(x):\n    return x == 2\n")).toEqual(expect.arrayContaining(["def f(x):\n    return x != 2\n", "def f(x):\n    return x == 3\n"]));

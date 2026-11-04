@@ -25,12 +25,18 @@ export function roundingWeakTasks(checks: Check[], types?: Map<string, "int" | "
 const SWAP: Record<string, string> = { "/": "*", "*": "/", "+": "-", "-": "+", "<": "<=", "<=": "<", ">": ">=", ">=": ">" };
 
 /** Copies of `source`, each with one spaced binary operator swapped, outside strings and comments; at most `max`. */
-export function slipMutants(source: string, max = 8): string[] {
+/** Final review I4: in Rust `'` opens a char literal only (`'x'`, `'\n'`); `'static` and `'a` are lifetimes. */
+export function rustLifetime(source: string, i: number): boolean {
+  return !/^'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'/.test(source.slice(i, i + 12));
+}
+
+export function slipMutants(source: string, max = 8, language?: string): string[] {
   const out: string[] = [];
   let quote: string | null = null;
   for (let i = 0; i < source.length && out.length < max; i++) {
     const ch = source[i];
     if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
+    if (ch === "'" && language === "rust" && rustLifetime(source, i)) continue;
     if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
     if (ch === "#" || (ch === "/" && source[i + 1] === "/") || (ch === "-" && source[i + 1] === "-")) { const nl = source.indexOf("\n", i); if (nl < 0) break; i = nl; continue; }
     if (source[i - 1] !== " ") continue;

@@ -1286,16 +1286,19 @@ export default function (pi: ExtensionAPI): void {
         const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, sandbox: host, entry });
         if (ran.missing) return tick("checks", `${passed}; your test could not run: the sandbox cannot start`);
         if (!ran.pass) {
-          const name = /^(\S+?):/.exec(ran.out)?.[1] ?? own[0].split("::")[1];
-          const line = `your test ${name} fails: ${ran.out.replace(/^\S+?: /, "")}`;
+          // Final review I3: the failing test's own name keeps one spot for its tries.
+          const name = ran.failed ?? own[0].split("::")[1].split(".").at(-1)!;
+          const line = `your test ${name} fails: ${ran.out.startsWith(`${name}: `) ? ran.out.slice(name.length + 2) : ran.out}`;
           ui?.notify(`${id} not yet: ${line}`, "warning");
           failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `test:${id}:${name}`);
           paint();
           return;
         }
         const able = await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host });
-        recordHabit("tests-that-fail", able, `test:${id}`);
-        if (!able) { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
+        // Final review I1: with nothing in the code that a broken copy could try it on, the checks prove the task.
+        if (able === "untestable") return tick("checks", `${passed}; your test passes; no broken version of the code it calls could be made to try it on`);
+        recordHabit("tests-that-fail", able === "caught", `test:${id}`);
+        if (able === "missed") { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
         return tick("checks", `${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`);
       }
       failedCheck(id, failed[0]);

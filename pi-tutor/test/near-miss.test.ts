@@ -16,6 +16,11 @@ describe("roundingWeakTasks (spec 2026-10-22 §5.5)", () => {
 });
 
 describe("slipMutants", () => {
+  it("final review I4: a Rust lifetime is not a quote; a char literal still is", () => {
+    expect(slipMutants("const N: &'static str = \"x\";\nfn a(x: i32) -> i32 { x + 1 }\n", 8, "rust")).toEqual(["const N: &'static str = \"x\";\nfn a(x: i32) -> i32 { x - 1 }\n"]);
+    expect(slipMutants("let c = '\"';\nlet y = a + b;\n", 8, "rust")).toEqual(["let c = '\"';\nlet y = a - b;\n"]);
+    expect(slipMutants("print('a b')\nx = a + b\n", 8, "python")).toEqual(["print('a b')\nx = a - b\n"]);
+  });
   it("swaps one spaced operator at a time, never inside strings or comments", () => {
     expect(slipMutants("return total / people  # a / b\n")).toEqual(["return total * people  # a / b\n"]);
     expect(slipMutants('s = "a + b"\nx = a + b\n')).toEqual(['s = "a + b"\nx = a - b\n']);
