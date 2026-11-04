@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Band } from "./policy.js";
 import type { HabitId } from "./habits.js";
 import { GATE_HABITS, HABIT_LABEL } from "./levels.js";
-import { slipMutants } from "./near-miss.js";
+import { rustLifetime, slipMutants } from "./near-miss.js";
 
 const DAY_MS = 86_400_000;
 
@@ -117,12 +117,13 @@ export async function brokenProgram(reference: string, failsChecks: (source: str
 }
 
 /** Which characters are code (not inside a string or a comment). */
-function codeMask(source: string): boolean[] {
+function codeMask(source: string, language?: string): boolean[] {
   const mask = new Array<boolean>(source.length).fill(true);
   let quote: string | null = null;
   for (let i = 0; i < source.length; i++) {
     const ch = source[i];
     if (quote) { mask[i] = false; if (ch === "\\") { if (i + 1 < source.length) mask[++i] = false; } else if (ch === quote) quote = null; continue; }
+    if (ch === "'" && language === "rust" && rustLifetime(source, i)) continue;
     if (ch === '"' || ch === "'" || ch === "`") { quote = ch; mask[i] = false; continue; }
     if (ch === "#" || (ch === "/" && source[i + 1] === "/") || (ch === "-" && source[i + 1] === "-")) {
       const nl = source.indexOf("\n", i), end = nl < 0 ? source.length : nl;
@@ -137,8 +138,8 @@ function codeMask(source: string): boolean[] {
  * Bugs to plant for the step-up's fix part (phase 3 live check: `return items[0]` has no operator to slip):
  * the one-character operator slips, plus off-by-one integers and indexes, flipped booleans and ==/!=.
  */
-export function fixMutants(source: string): string[] {
-  const code = codeMask(source), out: string[] = [];
+export function fixMutants(source: string, slipMax = 8, language?: string): string[] {
+  const code = codeMask(source, language), out: string[] = [];
   const add = (at: number, len: number, by: string) => {
     for (let k = at; k < at + len; k++) if (!code[k]) return;
     out.push(source.slice(0, at) + by + source.slice(at + len));
@@ -146,7 +147,7 @@ export function fixMutants(source: string): string[] {
   for (const m of source.matchAll(/(?<![\w.])\d+(?![\w.])/g)) add(m.index!, m[0].length, String(Number(m[0]) + 1));
   for (const m of source.matchAll(/\b(True|False|true|false)\b/g)) add(m.index!, m[0].length, { True: "False", False: "True", true: "false", false: "true" }[m[0]]!);
   for (const m of source.matchAll(/==|!=|~=/g)) add(m.index!, 2, m[0] === "==" ? (source.includes("~=") ? "~=" : "!=") : "==");
-  return [...new Set([...slipMutants(source), ...out])];
+  return [...new Set([...slipMutants(source, slipMax, language), ...out])];
 }
 
 /** Final review C1: an existing stepup/ folder (a learner's earlier work) is moved aside, never overwritten. */

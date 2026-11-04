@@ -81,6 +81,14 @@ describe("turn protocol (live findings 2026-10-13)", () => {
 });
 
 describe("prompt budget (spec §7 #2)", () => {
+  it("habits Task 14: the intermediate band teaches tests that can fail, named for the task; the beginner band does not", () => {
+    const mid = tutorPrompt("intermediate");
+    expect(mid).toMatch(/arrange → act → check/);
+    expect(mid).toContain("test_p1_t1_");
+    expect(mid).toMatch(/fail on a broken version/);
+    expect(mid).toMatch(/tool from the language card/);
+    expect(tutorPrompt("beginner")).not.toContain("test_p1_t1_");
+  });
   it("estimates tokens as ceil(chars / 4)", () => {
     expect(estimateTokens("")).toBe(0);
     expect(estimateTokens("abcde")).toBe(2);

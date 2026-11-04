@@ -245,3 +245,19 @@ the step-up (a steer is delivered without before_agent_start) — fixed: one lea
 steered messages, which also stops recipe steps typed mid-reply being lost. Run 3: plan asked once, pieces
 4/4, fix.py planted with `sum(2 for …)`, check "solve 3/3 · fix 2/2 · plan 3/3", submit passed, level 30 kept;
 no hidden solution in the project; Pi's settings unchanged.
+
+**Phase 4 (2026-11-04, real LazyVim, Python, level 40, the task's trusted checks seeded, nemotron; the driver
+plays the learner).** Asked how to write a test for P1.T1, the tutor taught arrange → act → check and "a good
+test can fail", with an unrelated `unittest` example, and did not write the learner's test; in both runs it
+never said how to name the test — so code now says it at the tick when a test exists but none is named for the
+task. A test that checks nothing: "passes even on a broken version", no tick, tests-that-fail miss. A test
+expecting 16.67: a try on `test:P1.T1:test_p1_t1_uneven`; run 1 showed the harness traceback with a sandbox
+path — fixed to `tests/test_split.py:5: assert split_amount(50, 3) == 16.67 (AssertionError)` (run 2). A good
+test: ticked, "your test test_p1_t1_uneven passes and catches a broken version", tests-that-fail good.
+src/main.py unchanged; Pi's settings unchanged. Before merge: broken copies land only in the functions the test
+calls, in any project file (a side agent's note: the entry file's first slips missed a function lower down or
+in another module); final review: symlinks are never followed out of the project, and a broken Python copy that
+loops forever is cut at 10 s. Independent final review: when no broken copy can be tried (nothing to break, every
+copy only crashes), the checks tick it with a note and no habit is recorded; string literals are changed too,
+so a string task's test can be tried; only the functions the task's own test calls are broken; a failing
+Rust/Go test keeps its own name; a Rust lifetime no longer reads as a quote.

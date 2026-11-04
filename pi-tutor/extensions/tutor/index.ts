@@ -23,6 +23,7 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
+import { canFail, findOwnTests, hasTests, ownTestName, runOwnTests } from "./own-tests.js";
 import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
@@ -1274,7 +1275,31 @@ export default function (pi: ExtensionAPI): void {
         const extra = shaky.length ? `; ${shaky.length} unverified check(s) failed and do not block: ${shaky.map((x) => x.check.expr ?? JSON.stringify(x.check.stdin)).join(", ")}` : "";
         // Only a trusted check proves it; unverified ones alone make it self-checked (final review I5).
         if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
-        return tick("checks", `${r.results.length - shaky.length} check(s) passed${extra}`);
+        const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
+        // Spec 2026-10-26 §7 (both must pass): from intermediate on, the learner's own test for the task adds proof.
+        const own = bandFor(level()) === "beginner" ? [] : findOwnTests(root, proj.language, id);
+        // Phase 4 live run: a weak model may never say how to name the test; code points it out.
+        if (!own.length) return tick("checks", bandFor(level()) !== "beginner" && hasTests(root, proj.language)
+          ? `${passed}; no test of yours is named for ${id} (${ownTestName(proj.language, id)}), so none was run`
+          : passed);
+        const host = sandboxHost()!;
+        const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, sandbox: host, entry });
+        if (ran.missing) return tick("checks", `${passed}; your test could not run: the sandbox cannot start`);
+        if (!ran.pass) {
+          // Final review I3: the failing test's own name keeps one spot for its tries.
+          const name = ran.failed ?? own[0].split("::")[1].split(".").at(-1)!;
+          const line = `your test ${name} fails: ${ran.out.startsWith(`${name}: `) ? ran.out.slice(name.length + 2) : ran.out}`;
+          ui?.notify(`${id} not yet: ${line}`, "warning");
+          failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `test:${id}:${name}`);
+          paint();
+          return;
+        }
+        const able = await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host });
+        // Final review I1: with nothing in the code that a broken copy could try it on, the checks prove the task.
+        if (able === "untestable") return tick("checks", `${passed}; your test passes; no broken version of the code it calls could be made to try it on`);
+        recordHabit("tests-that-fail", able === "caught", `test:${id}`);
+        if (able === "missed") { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
+        return tick("checks", `${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`);
       }
       failedCheck(id, failed[0]);
     }),
@@ -1321,14 +1346,15 @@ export default function (pi: ExtensionAPI): void {
     if (profile) { const p = profile; profileWrite(() => { state = readChecksState(p.setting(key)); state.ticks = { ...state.ticks, [id]: how }; p.setSetting(key, JSON.stringify(state)); }); }
     writeChecksMd(root, state, currentMilestone(r.text, lesson));
     // Only passing checks solve it; a self-checked or `anyway` tick gives the episode up (final review I2).
-    const handed = how === "checks" && episode?.spot?.startsWith(`check:${id}:`) ? stepFor(episode, { exam: false }) === "fix" : null;
+    const onTask = (spot?: string | null) => !!spot && (spot.startsWith(`check:${id}:`) || spot.startsWith(`test:${id}:`));
+    const handed = how === "checks" && onTask(episode?.spot) ? stepFor(episode, { exam: false }) === "fix" : null;
     if (handed !== null && episode) recordHabit("own-fixes", ownFixEvent(handed ? "fix-step" : "checks"), episode.id);
     if (how === "checks") fixStepStreak = handed ? fixStepStreak + 1 : 0;
     // Final review I8: without a check run there is nothing to say about the idea.
     if (how === "checks") recordHabit("ideas-to-code", ideasToCodeEvent(ownStepsOf(id).has(4), true), `tick:${id}`);
     tickHanded = handed === true;
-    if (episode?.spot?.startsWith(`check:${id}:`)) closeEp(how === "checks" ? "run_passed" : "superseded");
-    for (const k of [...spotMemory.keys()]) if (k.startsWith(`check:${id}:`)) spotMemory.delete(k);
+    if (onTask(episode?.spot)) closeEp(how === "checks" ? "run_passed" : "superseded");
+    for (const k of [...spotMemory.keys()]) if (onTask(k)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
     if (profile && project) { const p = profile, key = `stepup-wait:${project.language}`; profileWrite(() => { const w = Number(p.setting(key) ?? "0") || 0; if (w > 0) p.setSetting(key, String(w - 1)); }); }
     settleLevel(tickHanded);
