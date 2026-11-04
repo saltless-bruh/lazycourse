@@ -21,15 +21,17 @@ import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
-import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
+import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
+import { calledFunctions, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { canFail, findOwnTests, hasTests, ownTestName, runOwnTests } from "./own-tests.js";
-import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
+import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
+import { crossCheckOnReference, currentMilestone, extractCode, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
-import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, brokenProgram, backupStepUp, STEP_UP_LANGUAGES } from "./step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, brokenProgram, backupStepUp, STEP_UP_LANGUAGES, ADVANCED_STEP_UP_LANGUAGES } from "./step-up.js";
 import { commentPrefix } from "./scaffold.js";
 import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
@@ -554,12 +556,15 @@ export default function (pi: ExtensionAPI): void {
     pendingSteers = 0;
     // Spec 2026-10-21 §6: a rewrite run keeps the re-ask count of the reply it replaces; any other run starts at 0.
     const isRewrite = event.messageType === "custom" && event.message.customType === "tutor_rewrite";
+    // Phase 5 live run: the pro notes turn has its own shape; the five bold parts won over the request.
+    const isNotes = event.messageType === "custom" && event.message.customType === "tutor_notes";
     if (!isRewrite) rewrite = null;
     // Final review I2: on a run's episode the fix answers the failed run's own nudge (or its rewrite, or a pro's
     // /tutor-fix); a chat question after it is at why, so a later unrelated question never runs with the leak check off.
     let step = role.ladder ? stepFor(episode, { exam: exam !== null }) : null;
     const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
+    if (isNotes) step = null;
     run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
     let snap: EditorSnapshot | null = null;
     if (link) {
@@ -618,7 +623,7 @@ export default function (pi: ExtensionAPI): void {
     else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(replyReminder(run.step, workflow !== null && role.ladder));
+    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -1224,6 +1229,130 @@ export default function (pi: ExtensionAPI): void {
    * sandbox: all pass → ticked; one fails → a graded try on that check's spot. Unverified checks never block;
    * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
    */
+  /**
+   * Habits Task 17 ("improve it", spec 2026-10-26 §8): working code made better, measured before → after. The
+   * model writes edge-case checks and one timed large-input check, kept only when the hidden reference passes
+   * them; the task's own checks must still pass. Better on something and worse on nothing is the optimizes habit.
+   */
+  interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured; beforeSource?: string }
+  const improveKey = (root: string) => `improve:${root}`;
+  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string, asOf?: string) {
+    const host = sandboxHost()!, exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
+    // Phase 5 live run: `asOf` measures that exact text (laid over in the throwaway copy), so an edit made while
+    // /tutor-improve is still working never mixes into the before.
+    const asOver = asOf !== undefined ? { [entry]: asOf } : undefined;
+    const r = await runChecks(exec, { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host, overlay: asOver });
+    const own = r.results.slice(0, st.checks.length), extra = r.results.slice(st.checks.length);
+    const metrics = await codeMetrics(exec, { root, entry, sandbox: host, functions: st.functions, overlay: asOver });
+    const timed = extra.find((x) => x.check.kind === "timed");
+    let ms = timed?.ms ?? null, baseMs: number | null = null;
+    // Load flake: the first timing ran at another moment, under other load; the code as it was before is timed
+    // again right next to the code as it is now, twice each in turn, and the faster of each counts.
+    if (baseline !== undefined && timed && ms !== null) {
+      const once = async (overlay?: Record<string, string>) =>
+        (await runChecks(exec, { language: "python", root, entry, runCmd: null, checks: [{ ...timed.check, limitMs: undefined }], sandbox: host, overlay })).results[0]?.ms ?? null;
+      const runs: { base: number[]; now: number[] } = { base: [], now: [ms] };
+      for (let k = 0; k < 2; k++) {
+        const b = await once({ [entry]: baseline }); if (b !== null) runs.base.push(b);
+        if (k === 0) { const n = await once(); if (n !== null) runs.now.push(n); }
+      }
+      ms = Math.min(...runs.now);
+      baseMs = runs.base.length ? Math.min(...runs.base) : null;
+    }
+    const m: Measured | null = metrics && { ...metrics, edgePassed: extra.filter((x) => x.check.kind === "value" && x.pass).length, ms };
+    return { m, baseMs, failed: own.find((x) => !x.pass), missing: r.missing };
+  }
+  pi.registerCommand("tutor-improve", {
+    description: "Make a ticked task's working code better, measured before and after: /tutor-improve <task id>|done|off",
+    handler: (args, ctx) => exclusive(ctx, async () => {
+      if (!project || !profile) { ctx.ui.notify("/tutor-improve works inside a project: /tutor-start makes one", "warning"); return; }
+      const proj = project, p = profile, root = proj.path, arg = args.trim();
+      let st: ImproveState | null = null;
+      profileWrite(() => { try { st = JSON.parse(p.setting(improveKey(root)) ?? "null"); } catch { st = null; } });
+      const running = st as ImproveState | null;
+      if (arg === "off") {
+        profileWrite(() => p.setSetting(improveKey(root), ""));
+        ctx.ui.notify(running ? `the improve-it task for ${running.task} dropped` : "no improve-it task is running", "info");
+        return;
+      }
+      if (proj.language !== "python") { ctx.ui.notify("improve-it measures Python code for now", "info"); return; }
+      if (exam && arg !== "done") { ctx.ui.notify("improve-it waits until the exam is over (/tutor-submit)", "info"); return; }
+      if (running && arg !== "done") { ctx.ui.notify(`an improve-it task for ${running.task} is running: /tutor-improve done, or /tutor-improve off first`, "info"); return; }
+      if (!sandboxHost()) { ctx.ui.notify("improve-it runs your code in the sandbox, and it is off (/tutor-exam sandbox on)", "info"); return; }
+      const { entry } = projectRun(root, proj.language);
+      if (!entry) { ctx.ui.notify("no entry file: name it in README.md's `run:` command", "warning"); return; }
+      if (arg === "done") {
+        if (!running) { ctx.ui.notify("no improve-it task is running: /tutor-improve <ticked task id> starts one", "info"); return; }
+        const after = await measure(root, entry, running, running.beforeSource);
+        if (after.missing) { ctx.ui.notify(after.missing, "warning"); return; }
+        const f = after.failed;
+        if (f) {
+          const what = f.check.kind === "value" ? `${f.check.expr} ${f.error ? `failed: ${f.error}` : gaveExpected(f.got ?? "", f.check.expected ?? "")}` : f.error ?? "a check failed";
+          ctx.ui.notify(`${running.task} not yet: the task's checks must still pass: ${what}`, "warning");
+          return;
+        }
+        if (!after.m) { ctx.ui.notify("your file does not parse, so it could not be measured", "warning"); return; }
+        const { better, worse } = improveResult({ ...running.before, ms: after.baseMs ?? running.before.ms }, after.m);
+        // Final review I3: a success counts once per task and project; making it worse and undoing it again earns nothing.
+        const evidence = `improve:${root}:${running.task}`;
+        let counted = false;
+        profileWrite(() => { counted = p.habitEvents().some((e) => e.habit === "optimizes" && e.ok && e.evidence === evidence); });
+        const good = better.length > 0 && worse.length === 0;
+        if ((better.length || worse.length) && !(good && counted)) recordHabit("optimizes", good, evidence);
+        if (good) {
+          profileWrite(() => p.setSetting(improveKey(root), ""));
+          ctx.ui.notify(`${running.task} improved: ${better.join(" · ")}${counted ? ` (optimizes counts once per task; ${running.task} already counted)` : ""}`, "info");
+          return;
+        }
+        ctx.ui.notify(`${running.task} is not better yet: ${worse.length ? `worse: ${worse.join(" · ")}` : "nothing measured changed"}${better.length ? `; better: ${better.join(" · ")}` : ""}`, "info");
+        return;
+      }
+      const id = arg;
+      if (!/^P\d+\.T\d+$/.test(id)) { ctx.ui.notify("usage: /tutor-improve <ticked task id like P1.T2>|done|off", "info"); return; }
+      let tasksMd = "";
+      try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { /* none */ }
+      if (!tickedIds(tasksMd).has(id)) { ctx.ui.notify(`${id} is not a ticked task: improve-it starts from working code`, "info"); return; }
+      let cs: ChecksState = { milestones: {} };
+      profileWrite(() => { cs = readChecksState(p.setting(`checks:${root}`)); });
+      const all = Object.values(cs.milestones).flatMap((m) => m.checks);
+      const checks = liveChecks(all, currentMilestone(tasksMd, lesson)).filter((c) => c.status === "trusted" && c.kind !== "timed" && (c.task === id || c.task.startsWith(`${id}.`)));
+      const ms = Object.entries(cs.milestones).find(([, m]) => m.checks.some((c) => c.task === id));
+      const reference = ms?.[1].reference ?? "";
+      if (!checks.length || !reference) { ctx.ui.notify(`${id} has no trusted checks to keep it working, so it cannot be improved here`, "info"); return; }
+      let beforeSource: string;
+      try { beforeSource = readFileSync(join(root, entry), "utf8"); } catch { ctx.ui.notify(`cannot read ${entry}`, "warning"); return; }
+      const line = tasksMd.split("\n").find((l) => l.includes(` ${id} `)) ?? id;
+      ctx.ui.notify(`writing edge-case and timing checks for ${id}…`, "info");
+      const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
+      const text = await rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS))(systemText("improve"),
+        improvePrompt({ taskLine: line, checks: checks.map((c) => c.kind === "value" ? `check ${c.task}: ${c.expr} == ${c.expected}` : `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}`) }));
+      const parsed = parseChecks(text, { language: "python", taskIds: [id], milestone: checks[0].milestone }).checks.filter((c) => c.kind !== "io");
+      const extra = (await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: "python", entry, runCmd: null, reference, checks: parsed, root }))
+        .filter((c) => c.status === "trusted");
+      const functions = calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : [])));
+      const before = await measure(root, entry, { checks, extra, functions }, undefined, beforeSource);
+      if (before.missing || !before.m) { ctx.ui.notify(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
+      if (before.failed) { ctx.ui.notify(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
+      const next: ImproveState = { task: id, checks, extra, functions, before: before.m, beforeSource };
+      profileWrite(() => p.setSetting(improveKey(root), JSON.stringify(next)));
+      const timed = extra.find((c) => c.kind === "timed")?.expr ?? null;
+      ctx.ui.notify(`improve ${id}: make the working code better — faster, simpler, or right on more edge cases. `
+        + `measured now: ${measuredLine(before.m, extra.filter((c) => c.kind === "value").length, timed)}. `
+        + "The task's checks must still pass. /tutor-improve done measures it again; /tutor-improve off drops it.", "info");
+    }),
+  });
+
+  /** Task 16: the pro notes on design and naming (no points) are on by default; `/tutor-notes off` stops them. */
+  pi.registerCommand("tutor-notes", {
+    description: "Notes on design and naming after a pro tick: /tutor-notes on|off",
+    handler: async (args, ctx) => {
+      const want = args.trim();
+      if (want !== "on" && want !== "off") { ctx.ui.notify(`usage: /tutor-notes on|off (now ${profile?.setting("pro-notes") === "off" ? "off" : "on"})`, "info"); return; }
+      if (profile) { const p = profile; profileWrite(() => p.setSetting("pro-notes", want)); }
+      ctx.ui.notify(want === "off" ? "no design and naming notes after a pro tick" : "design and naming notes after a pro tick, with no points", "info");
+    },
+  });
+
   pi.registerCommand("tutor-done", {
     description: "Tick a task when its checks pass: /tutor-done [task id] [anyway]",
     handler: (args, ctx) => exclusive(ctx, async () => {
@@ -1276,15 +1405,26 @@ export default function (pi: ExtensionAPI): void {
         // Only a trusted check proves it; unverified ones alone make it self-checked (final review I5).
         if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
         const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
+        // Task 16: at pro a tick from checks shows the pro score, built only from facts code checked here.
+        // Final review M3: `judged` false when the own tests could not run, so a sandbox failure never suggests a level.
+        const scored = async (why: string, own: string[], ownPass: boolean, catches: boolean, judged = own.length > 0) => {
+          if (bandFor(level()) !== "pro") return tick("checks", why);
+          const named = doneWhenCalls(tasksMd, id);
+          const cases = named.length ? named : [...new Set(trusted.flatMap((x) => (x.check.kind === "value" && x.check.expr ? [x.check.expr] : [])))];
+          const facts: ProFacts = { checksPass: true, ownTestsPass: ownPass, ownTestsCanFail: catches, edgeCasesTotal: cases.length,
+            edgeCasesCovered: ownPass ? coveredCalls(cases, ownTestBodies(root, proj.language, own)) : 0 };
+          await tick("checks", `${why}; ${scoreLine(facts)}`);
+          afterProTick(ctx, id, proScore(facts), judged);
+        };
         // Spec 2026-10-26 §7 (both must pass): from intermediate on, the learner's own test for the task adds proof.
         const own = bandFor(level()) === "beginner" ? [] : findOwnTests(root, proj.language, id);
         // Phase 4 live run: a weak model may never say how to name the test; code points it out.
-        if (!own.length) return tick("checks", bandFor(level()) !== "beginner" && hasTests(root, proj.language)
+        if (!own.length) return scored(bandFor(level()) !== "beginner" && hasTests(root, proj.language)
           ? `${passed}; no test of yours is named for ${id} (${ownTestName(proj.language, id)}), so none was run`
-          : passed);
+          : passed, [], false, false);
         const host = sandboxHost()!;
         const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, sandbox: host, entry });
-        if (ran.missing) return tick("checks", `${passed}; your test could not run: the sandbox cannot start`);
+        if (ran.missing) return scored(`${passed}; your test could not run: the sandbox cannot start`, own, false, false, false);
         if (!ran.pass) {
           // Final review I3: the failing test's own name keeps one spot for its tries.
           const name = ran.failed ?? own[0].split("::")[1].split(".").at(-1)!;
@@ -1296,10 +1436,10 @@ export default function (pi: ExtensionAPI): void {
         }
         const able = await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host });
         // Final review I1: with nothing in the code that a broken copy could try it on, the checks prove the task.
-        if (able === "untestable") return tick("checks", `${passed}; your test passes; no broken version of the code it calls could be made to try it on`);
+        if (able === "untestable") return scored(`${passed}; your test passes; no broken version of the code it calls could be made to try it on`, own, true, false);
         recordHabit("tests-that-fail", able === "caught", `test:${id}`);
         if (able === "missed") { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
-        return tick("checks", `${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`);
+        return scored(`${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`, own, true, true);
       }
       failedCheck(id, failed[0]);
     }),
@@ -1322,12 +1462,39 @@ export default function (pi: ExtensionAPI): void {
     // checked function, blocks the tick but is no try.
     if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
     if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
-    const line = c.kind === "value"
+    const line = c.kind === "timed" ? `check ${id}: ${c.expr} ${f.error ?? "was too slow"}`
+      : c.kind === "value"
       ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : gaveExpected(f.got ?? "", c.expected ?? "")}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
     ui?.notify(`${id} not yet: ${line.replace(/^check \S+: /, "")}`, "warning");
     failedRun({ kind: "run", cmd: ["/tutor-done", id], code: 1, trace: line }, true, `check:${id}:${c.expr ?? c.stdin}`);
     paint();
+  }
+
+  const BUILTINS = new Set(["print", "input", "len", "range", "round", "max", "min", "sum", "abs", "sorted", "int", "float", "str", "list", "dict", "set", "tuple", "map", "filter", "zip", "enumerate", "open", "isinstance", "type", "any", "all"]);
+  /** Habits Task 17: the task's lines name three or more functions, or it is multi-part and its code imports a module new to this language. */
+  function complexTask(root: string, md: string, id: string): boolean {
+    const lines = md.split("\n").filter((l) => new RegExp(`\\b${id.replace(".", "\\.")}(\\.S\\d+)?\\b`).test(l)).join("\n");
+    // Final review M4: built-ins in backticks (`round(x)`, `len(…)`) are not the task's functions.
+    const named = new Set([...lines.matchAll(/`([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]).filter((n) => !BUILTINS.has(n)));
+    let fresh = false;
+    if (profile && project) {
+      const p = profile, key = `modules:${project.language}`, { entry } = projectRun(root, project.language);
+      let src = "";
+      try { if (entry) src = readFileSync(join(root, entry), "utf8"); } catch { /* none */ }
+      const now = importedModules([src], project.language);
+      profileWrite(() => {
+        const seen = p.setting(key);
+        let known = new Set<string>();
+        try { known = new Set<string>(seen ? JSON.parse(seen) : []); } catch { known = new Set(); }
+        fresh = seen !== null && [...now].some((m) => !known.has(m));
+        p.setSetting(key, JSON.stringify([...new Set([...known, ...now])]));
+      });
+    }
+    // Side-agent note: a module new to the learner counts only in a multi-part task (two or more functions named,
+    // or subtasks); otherwise the first one-liner with `math`, then `random`, … would each count as complex.
+    const parts = named.size >= 2 || new RegExp(`\\b${id.replace(".", "\\.")}\\.S\\d+\\b`).test(md);
+    return named.size >= 3 || (fresh && parts);
   }
 
   /** Tick `id` and its open subtasks in spec/tasks.md, record how, refresh spec/checks.md, close its check episode. */
@@ -1352,6 +1519,9 @@ export default function (pi: ExtensionAPI): void {
     if (how === "checks") fixStepStreak = handed ? fixStepStreak + 1 : 0;
     // Final review I8: without a check run there is nothing to say about the idea.
     if (how === "checks") recordHabit("ideas-to-code", ideasToCodeEvent(ownStepsOf(id).has(4), true), `tick:${id}`);
+    // Habits Task 17: a complex task (three or more functions named, or a module never used in an earlier tick)
+    // solved from checks counts toward "figures out complex problems" — unless the tutor handed the fix.
+    if (how === "checks" && complexTask(root, md, id)) recordHabit("complex", handed !== true, `tick:${id}`);
     tickHanded = handed === true;
     if (onTask(episode?.spot)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (onTask(k)) spotMemory.delete(k);
@@ -1372,6 +1542,8 @@ export default function (pi: ExtensionAPI): void {
     solveChecks?: Check[]; fixChecks?: Check[]; fixMissing?: boolean;
     /** Hidden solutions, kept in the profile like a milestone's reference, never in the project. */
     solveRef?: string; fixRef?: string;
+    /** Habits Task 17, the intermediate step-up: an improve-it part (clumsy working code, measured) and a tests part. */
+    improveTask?: string; improveChecks?: Check[]; improveExtra?: Check[]; improveFunctions?: string[]; improveBefore?: Measured; improveMissing?: boolean; improveRef?: string; improveSource?: string;
   }
   let stepUpModel: ExtensionContext | null = null;
   const NEXT_BAND: Record<string, { level: number; name: string }> = { beginner: { level: 34, name: "intermediate" }, intermediate: { level: 67, name: "pro" } };
@@ -1397,16 +1569,46 @@ export default function (pi: ExtensionAPI): void {
         ui?.notify("the coding test could not be prepared: no confirmed checks (is the sandbox on? /tutor-exam sandbox on). Nothing counts against you: /tutor-step-up starts again", "warning");
         return;
       }
+      // Habits Task 17: the improve-it part — clumsy working code from the model, confirmed by the checks.
+      let improve: Partial<StepUpState> = {};
+      if (s.improveTask) {
+        const imp = await one(s.improveTask);
+        const impTrusted = trustedOnly(imp.checks);
+        const clumsy = impTrusted.length ? extractCode(await complete(systemText("step-up-clumsy"), `Language: ${lang}.\nThe task: ${s.improveTask}\nIts checks:\n${impTrusted.map((c) => `check P1.T1: ${c.expr} == ${c.expected}`).join("\n")}`)) : "";
+        const works = !!clumsy && (await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: clumsy, checks: impTrusted, root })).every((c) => c.status === "trusted");
+        if (!works) improve = { improveMissing: true };
+        else {
+          const asked = await complete(systemText("improve"), improvePrompt({ taskLine: `P1.T1 ${s.improveTask}`, checks: impTrusted.map((c) => `check P1.T1: ${c.expr} == ${c.expected}`) }));
+          const extra = trustedOnly(await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: imp.reference,
+            checks: parseChecks(asked, { language: lang, taskIds: ["P1.T1"], milestone: 1 }).checks.filter((c) => c.kind !== "io"), root }));
+          improve = { improveChecks: impTrusted, improveExtra: extra, improveFunctions: calledFunctions(impTrusted.flatMap((c) => (c.expr ? [c.expr] : []))), improveRef: imp.reference, improveClumsy: clumsy } as Partial<StepUpState>;
+        }
+      }
       const broken = await brokenProgram(fix.reference, async (src) =>
         (await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: src, checks: fixTrusted, root })).some((c) => c.status === "unverified"));
       const moved = backupStepUp(root, Date.now());
       const c = commentPrefix(`x${ext}`);
       const steps = (s.plan?.steps ?? []).map((st, i) => `${c} ${i + 1}. ${st}`).join("\n");
-      writeInRoot(root, "stepup/README.md", `# Step-up, part 2: the coding test\n\n1. \`stepup/solve${ext}\`: ${s.solveTask}${s.module ? ` You will likely need \`${s.module}\`: look it up.` : ""}\n2. \`stepup/fix${ext}\`: ${s.fixTask ?? ""} This code has a bug: find it and fix it.\n3. \`stepup/plan${ext}\`: ${s.talkTask} Build the plan you gave in the talking test.\n\n\`/tutor-step-up check\` runs the checks; \`/tutor-step-up submit\` decides.\n`);
+      const clumsy = (improve as { improveClumsy?: string }).improveClumsy;
+      delete (improve as { improveClumsy?: string }).improveClumsy;
+      let more = "";
+      if (s.improveTask) {
+        const solveFn = calledFunctions(trustedOnly(solve.checks).flatMap((c) => (c.expr ? [c.expr] : [])))[0] ?? "the solve function";
+        more += `4. \`stepup/test_solve${ext}\`: write tests for \`${solveFn}\` (functions named \`test_…\`, \`from solve import ${solveFn}\`). They run against a hidden solution: they must pass on it and must fail on a broken version of it.\n`;
+        if (clumsy) {
+          writeInRoot(root, `stepup/improve${ext}`, clumsy.endsWith("\n") ? clumsy : `${clumsy}\n`);
+          const before = await measure(root, `stepup/improve${ext}`, { checks: improve.improveChecks!, extra: improve.improveExtra!, functions: improve.improveFunctions! });
+          if (before.m && !before.failed) { improve.improveBefore = before.m; improve.improveSource = clumsy.endsWith("\n") ? clumsy : `${clumsy}\n`; }
+          else improve = { improveMissing: true };
+          const timed = improve.improveExtra?.find((c) => c.kind === "timed")?.expr ?? null;
+          more += `5. \`stepup/improve${ext}\`: ${s.improveTask} This code works but is clumsy: make it better (faster, simpler, right on more edge cases) and keep it working.${before.m ? ` measured now: ${measuredLine(before.m, (improve.improveExtra ?? []).filter((c) => c.kind === "value").length, timed)}.` : ""}\n`;
+        } else more += `5. \`stepup/improve${ext}\`: no clumsy version could be confirmed, so this part counts as done.\n`;
+      }
+      writeInRoot(root, "stepup/README.md", `# Step-up, part 2: the coding test\n\n1. \`stepup/solve${ext}\`: ${s.solveTask}${s.module ? ` You will likely need \`${s.module}\`: look it up.` : ""}\n2. \`stepup/fix${ext}\`: ${s.fixTask ?? ""} This code has a bug: find it and fix it.\n3. \`stepup/plan${ext}\`: ${s.talkTask} Build the plan you gave in the talking test.\n${more}\n\`/tutor-step-up check\` runs the checks; \`/tutor-step-up submit\` decides.\n`);
       writeInRoot(root, `stepup/solve${ext}`, `${c} ${s.solveTask}\n`);
       writeInRoot(root, `stepup/fix${ext}`, broken ?? `${c} ${s.fixTask ?? ""}\n`);
       writeInRoot(root, `stepup/plan${ext}`, `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
-      saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference });
+      saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference, ...improve });
       showStepUp(`Step-up, part 2: the coding test is in stepup/ (README.md says what each file is for).${moved ? ` Your earlier stepup/ folder was moved to ${moved}.` : ""} No timer: take the time you need. /tutor-step-up check runs the checks; /tutor-step-up submit decides.`);
     } catch (e) {
       ui?.notify(`the coding test could not be prepared: ${e instanceof Error ? e.message : String(e)}; /tutor-step-up check tries again`, "warning");
@@ -1416,18 +1618,35 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Each part's trusted checks against the learner's file in stepup/. */
-  async function scoreStepUp(s: StepUpState): Promise<Record<"solve" | "fix" | "plan", { passed: number; total: number }>> {
+  async function scoreStepUp(s: StepUpState): Promise<Record<"solve" | "fix" | "plan", { passed: number; total: number }> & { tests?: { passed: number; total: number }; improve?: { passed: number; total: number } }> {
     const root = project!.path, ext = extname(projectRun(root, s.language).entry ?? "src/main.py") || ".py";
     const score = async (file: string, checks: Check[]) => {
       if (!checks.length) return { passed: 0, total: 0 };
       const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: s.language, root, entry: `stepup/${file}${ext}`, runCmd: null, checks, sandbox: sandboxHost() });
       return { passed: r.results.filter((x) => x.pass).length, total: checks.length };
     };
-    return {
+    const base = {
       solve: await score("solve", trustedOnly(s.solveChecks)),
       fix: s.fixMissing ? { passed: 1, total: 1 } : await score("fix", trustedOnly(s.fixChecks)),
       plan: await score("plan", trustedOnly(s.talkChecks)),
     };
+    if (!s.improveTask) return base;
+    // Habits Task 17: the learner's tests run against the hidden solve solution (laid over in the throwaway copy):
+    // they must pass on it and catch a broken copy of it.
+    const host = sandboxHost();
+    const tests = testsInFile(root, `stepup/test_solve${ext}`);
+    let testsOk = false;
+    if (host && tests.length && s.solveRef) {
+      const overlay = { [`stepup/solve${ext}`]: s.solveRef };
+      const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, sandbox: host, entry: `stepup/solve${ext}`, overlay });
+      testsOk = ran.pass && (await canFail((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, entry: `stepup/solve${ext}`, sandbox: host, overlay, only: [`stepup/solve${ext}`] })) === "caught";
+    }
+    let improveOk = s.improveMissing === true;
+    if (!improveOk && s.improveBefore && host) {
+      const after = await measure(root, `stepup/improve${ext}`, { checks: s.improveChecks ?? [], extra: s.improveExtra ?? [], functions: s.improveFunctions ?? [] }, s.improveSource);
+      if (after.m && !after.failed && !after.missing) { const r = improveResult({ ...s.improveBefore, ms: after.baseMs ?? s.improveBefore.ms }, after.m); improveOk = r.better.length > 0 && r.worse.length === 0; }
+    }
+    return { ...base, tests: { passed: testsOk ? 1 : 0, total: 1 }, improve: { passed: improveOk ? 1 : 0, total: 1 } };
   }
   let stepUp: StepUpState | null = null;
   function saveStepUp(s: StepUpState | null) {
@@ -1476,7 +1695,7 @@ export default function (pi: ExtensionAPI): void {
         }
         if (!s || s.stage !== "coding-ready") { ctx.ui.notify(s ? `the coding test is not ready yet (${s.stage})` : "no step-up is running: /tutor-step-up starts one", "info"); return; }
         const parts = await scoreStepUp(s);
-        const line = (["solve", "fix", "plan"] as const).map((k) => `${k} ${parts[k].passed}/${parts[k].total}`).join(" · ");
+        const line = (["solve", "fix", "plan", "tests", "improve"] as const).flatMap((k) => (parts[k] ? [`${k} ${parts[k]!.passed}/${parts[k]!.total}`] : [])).join(" · ");
         if (sub === "check") { ctx.ui.notify(line, "info"); return; }
         const r = stepUpResult(parts, s.talk ?? { matched: 0, total: 0 });
         const next = NEXT_BAND[s.band];
@@ -1497,6 +1716,7 @@ export default function (pi: ExtensionAPI): void {
       if (band === "pro") { ctx.ui.notify("you are at the top band; there is no step-up above pro", "info"); return; }
       if (exam) { ctx.ui.notify("the step-up waits until the exam is over (/tutor-submit)", "info"); return; }
       if (!STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the step-up is not ready for ${lang} yet (Python and Lua for now)`, "info"); return; }
+      if (band === "intermediate" && !ADVANCED_STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the intermediate step-up measures code and is ready for Python only for now, not ${lang}`, "info"); return; }
       let events: ReturnType<Profile["habitEvents"]> = [];
       profileWrite(() => { events = p.habitEvents(); });
       const missing = missingForStepUp(band, (h) => solidIn(events.filter((e) => e.habit === h), lang));
@@ -1516,7 +1736,9 @@ export default function (pi: ExtensionAPI): void {
           if (typeof json.talk !== "string" || typeof json.solve !== "string") throw new Error("the problems came back incomplete");
           const entry = projectRun(root, lang).entry ?? "src/main.py";
           const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
-          saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, fixTask: typeof json.fix === "string" ? json.fix : json.solve, talkRef: ref.reference, talkChecks: ref.checks });
+          const improveTask = band === "intermediate" && typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve : undefined;
+          if (band === "intermediate" && !improveTask) throw new Error("the improve-it problem came back missing");
+          saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, fixTask: typeof json.fix === "string" ? json.fix : json.solve, talkRef: ref.reference, talkChecks: ref.checks, ...(improveTask ? { improveTask } : {}) });
           showStepUp(`Step-up, part 1: the talking test.\n\n${json.talk}\n\nTalk it through in your own words: what the program needs, the steps, and which pieces you would use. No code yet.`);
         } catch (e) {
           saveStepUp(null);
@@ -1618,6 +1840,51 @@ export default function (pi: ExtensionAPI): void {
   function saveOnboarding(o: Onboarding | null) {
     onboarding = o;
     if (profile) { const p = profile; profileWrite(() => p.setSetting("onboarding", o ? JSON.stringify(o) : "")); }
+  }
+  const NOTES_REMINDER = "[tutor-reply] This reply is notes only, not the bold parts: at most three lines, each `path:line: one sentence` on design or naming, "
+    + "then the ```tutor-judgment block. No code and no fix.";
+  /**
+   * Task 16 (spec 2026-10-21 §8): after a scored tick, remember the score; three far from the level suggest one
+   * (the learner decides; the tutor never moves it); and, unless /tutor-notes off, ask the tutor for notes on
+   * design and naming that carry no points.
+   */
+  function afterProTick(ctx: ExtensionContext, id: string, score: number, judged: boolean) {
+    if (!profile || !project) return;
+    try { if (!openTaskIds(readFileSync(join(project.path, "spec", "tasks.md"), "utf8")).every((t) => t !== id)) return; } catch { return; }
+    const p = profile, key = `proscores:${project.language}`;
+    let scores: number[] = [];
+    // Side-agent note: a task ticked without an own test is not judged for a level.
+    if (!judged) { notesAfter(ctx, id, score); return; }
+    profileWrite(() => { try { scores = JSON.parse(p.setting(key) ?? "[]"); } catch { scores = []; } scores = [...scores, score].slice(-5); });
+    const to = levelSuggestion(scores, level());
+    if (to !== null) {
+      const recent = scores.slice(-3), avg = Math.round(recent.reduce((a, b) => a + b, 0) / recent.length);
+      ui?.notify(`your last 3 pro scores average ${avg}; /tutor-level ${to} if you want ${to > level() ? "harder" : "easier"} work (you decide)`, "info");
+      scores = [];
+    }
+    profileWrite(() => p.setSetting(key, JSON.stringify(scores)));
+    notesAfter(ctx, id, score);
+  }
+  function notesAfter(ctx: ExtensionContext, id: string, score: number) {
+    if (profile?.setting("pro-notes") === "off") return;
+    // Phase 5 live run: name each function's line, so a weak model has real lines to point at.
+    let where = "";
+    if (project) {
+      const { entry } = projectRun(project.path, project.language);
+      try {
+        if (entry) where = readFileSync(join(project.path, entry), "utf8").split("\n")
+          .flatMap((l, k) => { const d = /^\s*(?:async\s+)?(?:def|fn|func|function)\s+(\w+)/.exec(l); return d ? [`${entry}:${k + 1} ${d[1]}`] : []; }).join(", ");
+      } catch { where = ""; }
+    }
+    customWhenIdle(ctx, "tutor_notes", `[tutor] ${id} is ticked; code scored it ${score}/100 from its checks and the learner's tests. `
+      + `Give at most three notes on design or naming in the code for ${id}, each starting with path:line and one sentence long. `
+      + "Notes carry no points and do not change the level. No code and no fix; if nothing is worth a note, say so in one line."
+      + (where ? ` The functions: ${where}.` : ""));
+  }
+  function customWhenIdle(ctx: ExtensionContext, customType: string, text: string, tries = 0) {
+    if (closing) return;
+    if (ctx.isIdle() || tries >= 600) { pi.sendMessage({ customType, content: text, display: false }, { triggerTurn: true }); return; }
+    setTimeout(() => customWhenIdle(ctx, customType, text, tries + 1), 50).unref?.();
   }
   /**
    * Live check 2026-10-19: a message queued while a run is still ending (from agent_end) runs as a follow-up

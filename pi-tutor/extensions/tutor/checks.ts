@@ -4,11 +4,13 @@
 
 export interface Check {
   task: string;
-  kind: "value" | "io";
+  /** "timed" (habits Task 17): a large-input call that must finish within `limitMs` (the reference's time × 3). */
+  kind: "value" | "io" | "timed";
   expr?: string;
   expected?: string;
   stdin?: string;
   contains?: string;
+  limitMs?: number;
   milestone: number;
   status: "trusted" | "unverified";
 }
@@ -17,6 +19,9 @@ export interface Check {
 export const VALUE_LANGUAGES = new Set(["python", "lua", "rust", "go"]);
 
 const VALUE = /^check\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*(.+)$/;
+/** Languages a timed check can time (habits Task 17: Python first). */
+export const TIMED_LANGUAGES = new Set(["python"]);
+const TIMED = /^timed\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*(.+)$/;
 const IO = /^run\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*stdin\s+"((?:[^"\\]|\\.)*)"\s*(?:->|→)\s*stdout\s+contains\s+"((?:[^"\\]|\\.)*)"\s*$/;
 
 const unquote = (s: string) => s.replace(/\\(.)/g, (_, c: string) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
@@ -44,6 +49,8 @@ export function parseChecks(text: string, o: { language: string; taskIds: string
     if (line === "" || line.startsWith("```")) continue;
     const io = IO.exec(line);
     if (io && known.has(io[1])) { checks.push({ task: io[1], kind: "io", stdin: unquote(io[2]), contains: unquote(io[3]), milestone: o.milestone, status: "unverified" }); continue; }
+    const tm = TIMED.exec(line);
+    if (tm && known.has(tm[1]) && TIMED_LANGUAGES.has(o.language)) { checks.push({ task: tm[1], kind: "timed", expr: tm[2].trim(), milestone: o.milestone, status: "unverified" }); continue; }
     const v = VALUE.exec(line), parts = v ? splitValue(v[2]) : null;
     if (v && parts && known.has(v[1]) && VALUE_LANGUAGES.has(o.language)) {
       checks.push({ task: v[1], kind: "value", expr: parts[0], expected: parts[1], milestone: o.milestone, status: "unverified" });
@@ -54,14 +61,15 @@ export function parseChecks(text: string, o: { language: string; taskIds: string
   return { checks, rejected };
 }
 
-const called = (c: Check) => (c.kind === "value" ? /^([A-Za-z_][\w.:]*)\s*\(/.exec(c.expr ?? "")?.[1] : undefined);
+const called = (c: Check) => (c.kind !== "io" ? /^([A-Za-z_][\w.:]*)\s*\(/.exec(c.expr ?? "")?.[1] : undefined);
 
 /** Checks up to `milestone`; a later milestone's value check on a function retires an earlier one on it. */
 export function liveChecks(all: Check[], milestone: number): Check[] {
   const reached = all.filter((c) => c.milestone <= milestone);
   const newest = new Map<string, number>();
-  for (const c of reached) { const f = called(c); if (f) newest.set(f, Math.max(newest.get(f) ?? 0, c.milestone)); }
-  return reached.filter((c) => { const f = called(c); return !f || newest.get(f) === c.milestone; });
+  // Final review M7: only value checks retire; a timed check is kept unless a newer value check names its function.
+  for (const c of reached) { const f = c.kind === "value" ? called(c) : undefined; if (f) newest.set(f, Math.max(newest.get(f) ?? 0, c.milestone)); }
+  return reached.filter((c) => { const f = called(c); return !f || (c.kind === "timed" ? c.milestone >= (newest.get(f) ?? 0) : newest.get(f) === c.milestone); });
 }
 
 const show = (s: string) => JSON.stringify(s);
@@ -87,7 +95,9 @@ export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?:
   for (const t of tasks) {
     out.push(`## ${t}${ticked.has(t) ? ` (${HOW[o.how?.[t] ?? "checks"]})` : o.weak?.has(t) ? " (a near miss may pass these checks)" : ""}`);
     for (const c of checks.filter((x) => x.task === t)) {
-      const body = c.kind === "value" ? `${c.expr} == ${c.expected}` : `type ${show(c.stdin ?? "")} → output contains ${show(c.contains ?? "")}`;
+      const body = c.kind === "value" ? `${c.expr} == ${c.expected}`
+        : c.kind === "timed" ? (c.limitMs ? `${c.expr} finishes within ${c.limitMs} ms` : `${c.expr} is timed`)
+        : `type ${show(c.stdin ?? "")} → output contains ${show(c.contains ?? "")}`;
       out.push(`- ${body}${c.status === "unverified" ? " (unverified)" : ""}`);
     }
     out.push("");

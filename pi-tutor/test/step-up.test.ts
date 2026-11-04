@@ -67,6 +67,11 @@ describe("the coding test and the result (spec 2026-10-26 §6.3)", () => {
   it("names what to practise when a part or the talk falls short", () => {
     expect(stepUpResult({ solve: two, fix: ok, plan: ok }, { matched: 3, total: 3 })).toEqual({ pass: false, practise: ["looks things up"] });
     expect(stepUpResult({ solve: ok, fix: two, plan: two }, { matched: 1, total: 3 })).toEqual({ pass: false, practise: ["fixes own bugs", "turns ideas into code", "breaks a problem into steps first"] });
+    // Habits Task 17: the intermediate → advanced step-up adds a tests part and an improve-it part.
+    const one = { passed: 1, total: 1 }, none = { passed: 0, total: 1 };
+    expect(stepUpResult({ solve: ok, fix: ok, plan: ok, tests: one, improve: one }, { matched: 3, total: 3 })).toEqual({ pass: true, practise: [] });
+    expect(stepUpResult({ solve: ok, fix: ok, plan: ok, tests: none, improve: none }, { matched: 3, total: 3 }))
+      .toEqual({ pass: false, practise: ["writes tests that can fail", "optimizes logic, speed and code"] });
   });
   it("a part with no checks cannot pass", () => {
     expect(stepUpResult({ solve: { passed: 0, total: 0 }, fix: ok, plan: ok }, { matched: 3, total: 3 }).pass).toBe(false);

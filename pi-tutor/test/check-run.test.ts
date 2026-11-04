@@ -4,6 +4,7 @@ import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { runChecks, projectRun, CHECKS_SANDBOX_OFF, PRINTED_TOO_MUCH } from "../extensions/tutor/check-run.js";
+import { crossCheckOnReference } from "../extensions/tutor/check-job.js";
 import type { RunExec } from "../extensions/tutor/exam/layout.js";
 import { SANDBOX_MISSING, type SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import type { Check } from "../extensions/tutor/checks.js";
@@ -162,4 +163,40 @@ describe.skipIf(!bwrapReady || !has("lua", "-v"))("runChecks: Lua in the sandbox
     const clean = project({ "src/main.lua": "function double(x) return x * 2 end\n" });
     expect((await lua(clean, [value("tip_rate(true)", "0.2")])).results[0]).toMatchObject({ pass: false, error: "tip_rate is not defined yet" });
   }, 30_000);
+});
+
+// Habits Task 17: speed is measured by a timed large-input check, limited to the reference's time × 3.
+describe.skipIf(!bwrapReady)("timed checks (habits spec 2026-10-26 §8)", () => {
+  const LINEAR = "def count_unique(items):\n    return len(set(items))\n";
+  const QUADRATIC = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+  const timed = (limitMs?: number): Check => ({ task: "P2.T2", kind: "timed", expr: "count_unique(list(range(20000)))", milestone: 2, status: "trusted", ...(limitMs ? { limitMs } : {}) });
+  it("takes its limit from the reference, then passes a linear version and fails a quadratic one", async () => {
+    const [ref] = await crossCheckOnReference({ exec: realExec, sandbox: host(), language: "python", entry: "src/main.py", runCmd: null, reference: LINEAR, checks: [timed()] });
+    expect(ref.status).toBe("trusted");
+    expect(ref.limitMs).toBeGreaterThanOrEqual(50);
+    expect(ref.limitMs).toBeLessThan(1000);
+    const fast = await py(project({ "src/main.py": LINEAR }), [ref]);
+    expect(fast.results[0]).toMatchObject({ pass: true });
+    const slow = await py(project({ "src/main.py": QUADRATIC }), [ref]);
+    expect(slow.results[0].pass).toBe(false);
+    expect(slow.results[0].error).toMatch(new RegExp(`^took \\d+ ms; the limit is ${ref.limitMs} ms \\(the reference's time × 3\\)$`));
+    expect(slow.results[0].ms).toBeGreaterThan(ref.limitMs!);
+    // final review I1: the reference's answer on the large input is kept, so wrong-but-fast code fails
+    expect(ref.expected).toBe("20000");
+    const cheat = await py(project({ "src/main.py": "def count_unique(items):\n    if len(items) > 1000:\n        return 0\n    return len(set(items))\n" }), [ref]);
+    expect(cheat.results[0]).toMatchObject({ pass: false, error: "gave a different answer on the large input than the hidden solution" });
+  }, 120_000);
+  it("a call that fails is an error, not a time", async () => {
+    const r = await py(project({ "src/main.py": "def count_unique(items):\n    return 1 / 0\n" }), [timed(100)]);
+    expect(r.results[0]).toMatchObject({ pass: false, error: "ZeroDivisionError: division by zero" });
+  }, 60_000);
+});
+
+describe("projectRun keeps the entry inside the project (final review I6)", () => {
+  it("an entry that points outside the root is no entry", () => {
+    const root = project({ "README.md": "---\nrun: python3 src/main.py\nentry: ../outside.py\n---\n" });
+    expect(projectRun(root, "python").entry).toBeNull();
+    const ok = project({ "README.md": "---\nrun: python3 src/main.py\n---\n", "src/main.py": "" });
+    expect(projectRun(ok, "python").entry).toBe("src/main.py");
+  });
 });

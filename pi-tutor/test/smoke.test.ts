@@ -1246,6 +1246,18 @@ describe("/tutor-progress (gap #8)", () => {
   });
 });
 
+describe("pro notes run (phase 5 live run: nemotron answered in the five bold parts)", () => {
+  it("a tutor_notes run is told to give at most three path:line notes, not the bold parts", async () => {
+    const b = await boot();
+    await b.commands["tutor-level"].handler("70", b.ctx);
+    const opts = { sections: {} as Record<string, string> };
+    const message = { role: "custom", customType: "tutor_notes", content: "[tutor] P1.T1 is ticked", display: false, timestamp: Date.now() };
+    const r = (await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, b.ctx)) as { message?: { content: string } } | undefined;
+    expect(r?.message?.content).toMatch(/notes only, not the bold parts: at most three lines, each `path:line: one sentence`/);
+    expect(r?.message?.content).not.toMatch(/Use the bold parts/);
+  });
+});
+
 describe("Pi 1.2+: before_agent_start also fires for custom-message runs (messageType)", () => {
   it("a run started by another extension's custom message gets the tutor prompt but opens no episode and does not throw", async () => {
     const b = await boot();

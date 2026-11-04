@@ -93,6 +93,13 @@ describe.skipIf(!bwrapReady)("running own tests in the sandbox", () => {
     const same = project({ "src/main.py": "def ident(x):\n    return x\n", "tests/test_i.py": "from main import ident\n\ndef test_p1_t1_same():\n    assert ident(3) == 3\n" });
     expect(await canFail(realExec, { root: same, language: "python", tests: findOwnTests(same, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe("untestable");
   }, 120_000);
+  it("phase 5 live run: code with no operator to slip gets logic slips (not in ↔ in, and ↔ or, if → if not)", async () => {
+    const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+    const root = project({ "src/main.py": SLOW, "tests/test_c.py": "from main import count_unique\n\ndef test_p1_t1_repeats():\n    assert count_unique([1, 1, 2]) == 2\n" });
+    expect(await canFail(realExec, { root, language: "python", tests: findOwnTests(root, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe("caught");
+    const both = project({ "src/main.py": "def ok(a, b):\n    return a and b\n", "tests/test_o.py": "from main import ok\n\ndef test_p1_t1_both():\n    assert ok(True, False) is False\n" });
+    expect(await canFail(realExec, { root: both, language: "python", tests: findOwnTests(both, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe("caught");
+  }, 120_000);
   it("final review I2: only the functions this task's test calls are broken, not other tasks' in the same file", async () => {
     const parse = "def parse(s):\n" + Array.from({ length: 14 }, (_, k) => `    s = s * 1 + ${k} - ${k}\n`).join("") + "    return s\n\n\ndef area(w, h):\n    return w * h\n";
     const root = project({ "src/main.py": parse, "tests/test_all.py": "from main import parse, area\n\ndef test_p1_t2_parse():\n    assert parse(2) == 2\n\ndef test_p1_t1_area():\n    assert area(2, 3) == 6\n" });

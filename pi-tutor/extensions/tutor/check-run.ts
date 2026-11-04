@@ -3,6 +3,7 @@
 // there, and nothing a check writes reaches the real folder. One process per check, so an endless loop in
 // one check cannot hide the others.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { LANGS } from "./knowledge/versions.js";
 import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
@@ -16,7 +17,7 @@ import { manifestFor } from "./manifest.js";
  */
 /** The kind of value a check's call returned (spec 2026-10-26 §5.3: integer tasks skip the rounding probe). */
 export type ValueType = "int" | "float" | "other";
-export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere"; valueType?: ValueType }
+export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere"; valueType?: ValueType; ms?: number }
 
 export const CHECKS_SANDBOX_OFF = "checks run only in the sandbox, and it is off (/tutor-exam sandbox on turns it back on)";
 export const TOO_LONG = "took too long (an endless loop?)";
@@ -36,6 +37,15 @@ const SOURCE_EXT: Record<string, RegExp> = {
 
 const DEFAULT_ENTRY: Record<string, string> = { rust: "src/main.rs", go: "src/main.go" };
 
+/** Final review I6: an entry that leaves the project folder (`../x.py`, an absolute path, a symlink out) is no entry. */
+function inRoot(root: string, entry: string): string | null {
+  let base: string;
+  try { base = realpathSync(root); } catch { base = resolve(root); }
+  let full = resolve(base, entry);
+  try { full = realpathSync(full); } catch { /* not there yet: the plain path decides */ }
+  return full.startsWith(`${base}/`) ? entry : null;
+}
+
 /** The project's `run:` command (README front matter) and the entry file named in it. */
 export function projectRun(root: string, language: string): { runCmd: string | null; entry: string | null } {
   let text = "";
@@ -50,18 +60,20 @@ export function projectRun(root: string, language: string): { runCmd: string | n
     const e = /^entry:\s*(.+?)\s*$/.exec(l);
     if (e) named = e[1];
   }
-  if (named) return { runCmd, entry: named };
+  if (named) return { runCmd, entry: inRoot(root, named) };
   const ext = SOURCE_EXT[language];
   const inRun = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
   // Spec 2026-10-22 §5.1: older Rust/Go projects (`cargo run`, `go run ./src`) start in the language's usual file.
   const fallback = DEFAULT_ENTRY[language];
-  return { runCmd, entry: inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null) };
+  const found = inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null);
+  return { runCmd, entry: found && inRoot(root, found) };
 }
 
 const PY_HARNESS = `
-import builtins, json, math, os, sys, types
+import builtins, json, math, os, sys, time, types
 MARK = ${JSON.stringify(MARK)}
 entry, expr, expected = sys.argv[1], sys.argv[2], sys.argv[3]
+timed = len(sys.argv) > 4 and sys.argv[4] == "timed"
 class _Input(Exception): pass
 def _no_input(*a, **k): raise _Input()
 builtins.input = _no_input
@@ -95,11 +107,13 @@ def missing(name):
     if stopped: return stopped
     return "%s is not defined yet" % name
 try:
-    want = eval(expected, ns)
+    want = None if timed else eval(expected, ns)
 except BaseException as e:
     out(error="the check's expected value does not work: %s: %s" % (type(e).__name__, e)); sys.exit(0)
 try:
+    t0 = time.perf_counter()
     got = eval(expr, ns)
+    ms = (time.perf_counter() - t0) * 1000
 except NameError as e:
     out(error=missing(e.name))
 except _Input:
@@ -107,6 +121,19 @@ except _Input:
 except BaseException as e:
     out(error="%s: %s" % (type(e).__name__, e))
 else:
+    if timed:
+        # Final review I1: the answer on the large input must match the hidden solution's (kept as its repr, or a
+        # sha256 of a long one), so wrong-but-fast code is not faster.
+        import hashlib
+        r = repr(got)
+        h = hashlib.sha256(r.encode()).hexdigest()
+        if expected:
+            try:
+                ok = expected[7:] == h if expected.startswith("sha256:") else same(got, eval(expected, ns))
+            except BaseException:
+                ok = False
+            if not ok: out(error="gave a different answer on the large input than the hidden solution"); sys.exit(0)
+        out(ms=ms, got=r if len(r) <= 2000 else "sha256:" + h); sys.exit(0)
     kind = "other" if isinstance(got, bool) else "int" if isinstance(got, int) else "float" if isinstance(got, float) else "other"
     out(**{"pass": same(got, want), "got": repr(got), "type": kind})
 `;
@@ -228,6 +255,18 @@ async function limitedRun(sb: Sandboxed, argv: string[], limitSec: number) {
 
 const tail = (s: string, n = 300) => (s.length > n ? `…${s.slice(-n)}` : s).trim();
 
+/** Habits Task 17: a timed check passes when its call finishes within its limit (none yet: it only measures). */
+function timedResult(check: Check, r: { stdout: string; stderr: string; code: number; killed: boolean }): CheckResult {
+  const v = valueResult(check, r);
+  if (v.error !== undefined) return v;
+  const line = r.stdout.split("\n").filter((l) => l.startsWith(MARK)).at(-1)!;
+  const o = JSON.parse(line.slice(MARK.length)) as { ms: number; got?: string };
+  const ms = Math.round(o.ms);
+  const limit = check.limitMs;
+  return limit === undefined || ms <= limit ? { check, pass: true, ms, got: o.got }
+    : { check, pass: false, ms, error: `took ${ms} ms; the limit is ${limit} ms (the reference's time × 3)` };
+}
+
 function valueResult(check: Check, r: { stdout: string; stderr: string; code: number; killed: boolean }): CheckResult {
   if (r.killed) return { check, pass: false, error: TOO_LONG };
   if (flooded(r.stdout)) return { check, pass: false, error: PRINTED_TOO_MUCH };
@@ -237,7 +276,19 @@ function valueResult(check: Check, r: { stdout: string; stderr: string; code: nu
   return o.error !== undefined ? { check, pass: false, error: o.error } : { check, pass: o.pass === true, got: o.got, valueType: o.type ?? "other" };
 }
 
-export async function runChecks(exec: RunExec, i: { language: string; root: string; entry: string | null; runCmd: string | null; checks: Check[]; sandbox: SandboxHost | null; limitSec?: number }): Promise<{ results: CheckResult[]; missing?: string }> {
+/** `sh -c` prefix that writes `files` into the throwaway overlay before the command runs (the real folder never sees them). */
+function withOverlay(files: [string, string][], argv: string[]): string[] {
+  if (!files.length) return argv;
+  const script = 'while [ "$1" != "--" ]; do mkdir -p "$(dirname "$1")" && printf "%s" "$2" > "$1" || exit 126; shift 2; done; shift; exec "$@"';
+  return ["sh", "-c", script, "sh", ...files.flat(), "--", ...argv];
+}
+
+/**
+ * `overlay` (habits Task 17, the load flake): files laid over the project in the throwaway copy only, so the code
+ * as it was before an improvement can be timed again right next to the code as it is now.
+ */
+export async function runChecks(exec: RunExec, i: { language: string; root: string; entry: string | null; runCmd: string | null; checks: Check[]; sandbox: SandboxHost | null; limitSec?: number; overlay?: Record<string, string> }): Promise<{ results: CheckResult[]; missing?: string }> {
+  const over = Object.entries(i.overlay ?? {});
   if (!i.sandbox) return { results: [], missing: CHECKS_SANDBOX_OFF };
   const interp = LANGS[i.language]?.command;
   const runTool = i.runCmd?.split(/\s+/)[0];
@@ -261,13 +312,18 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
       results.push({ check, pass, got: tail(r.stdout), ...(pass || r.code === 0 ? {} : { error: tail(r.stderr, 200) || `exit ${r.code}` }) });
       continue;
     }
+    if (check.kind === "timed") {
+      if (!i.entry || !interp || i.language !== "python") { results.push({ check, pass: false, outcome: "unfit", error: "timed checks run for Python only" }); continue; }
+      results.push(timedResult(check, await limitedRun(sb, capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? "", "timed"])), limit)));
+      continue;
+    }
     if (!i.entry || !interp || (i.language !== "python" && i.language !== "lua")) {
       results.push({ check, pass: false, error: "no entry file to load: name it in README.md's `run:` command" });
       continue;
     }
     const argv = i.language === "python"
-      ? capped([interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? ""])
-      : capped([interp, "-e", `local ENTRY, EXPR, EXPECTED = ${luaString(i.entry)}, ${luaString(check.expr ?? "")}, ${luaString(check.expected ?? "")}\n${LUA_HARNESS}`]);
+      ? capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? ""]))
+      : capped(withOverlay(over, [interp, "-e", `local ENTRY, EXPR, EXPECTED = ${luaString(i.entry)}, ${luaString(check.expr ?? "")}, ${luaString(check.expected ?? "")}\n${LUA_HARNESS}`]));
     results.push(valueResult(check, await limitedRun(sb, argv, limit)));
   }
   return { results };
