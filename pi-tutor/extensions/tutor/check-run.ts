@@ -16,7 +16,7 @@ import { manifestFor } from "./manifest.js";
  */
 /** The kind of value a check's call returned (spec 2026-10-26 §5.3: integer tasks skip the rounding probe). */
 export type ValueType = "int" | "float" | "other";
-export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere"; valueType?: ValueType }
+export interface CheckResult { check: Check; pass: boolean; got?: string; error?: string; outcome?: "unfit" | "elsewhere"; valueType?: ValueType; ms?: number }
 
 export const CHECKS_SANDBOX_OFF = "checks run only in the sandbox, and it is off (/tutor-exam sandbox on turns it back on)";
 export const TOO_LONG = "took too long (an endless loop?)";
@@ -59,9 +59,10 @@ export function projectRun(root: string, language: string): { runCmd: string | n
 }
 
 const PY_HARNESS = `
-import builtins, json, math, os, sys, types
+import builtins, json, math, os, sys, time, types
 MARK = ${JSON.stringify(MARK)}
 entry, expr, expected = sys.argv[1], sys.argv[2], sys.argv[3]
+timed = len(sys.argv) > 4 and sys.argv[4] == "timed"
 class _Input(Exception): pass
 def _no_input(*a, **k): raise _Input()
 builtins.input = _no_input
@@ -95,11 +96,13 @@ def missing(name):
     if stopped: return stopped
     return "%s is not defined yet" % name
 try:
-    want = eval(expected, ns)
+    want = None if timed else eval(expected, ns)
 except BaseException as e:
     out(error="the check's expected value does not work: %s: %s" % (type(e).__name__, e)); sys.exit(0)
 try:
+    t0 = time.perf_counter()
     got = eval(expr, ns)
+    ms = (time.perf_counter() - t0) * 1000
 except NameError as e:
     out(error=missing(e.name))
 except _Input:
@@ -107,6 +110,7 @@ except _Input:
 except BaseException as e:
     out(error="%s: %s" % (type(e).__name__, e))
 else:
+    if timed: out(ms=ms); sys.exit(0)
     kind = "other" if isinstance(got, bool) else "int" if isinstance(got, int) else "float" if isinstance(got, float) else "other"
     out(**{"pass": same(got, want), "got": repr(got), "type": kind})
 `;
@@ -228,6 +232,17 @@ async function limitedRun(sb: Sandboxed, argv: string[], limitSec: number) {
 
 const tail = (s: string, n = 300) => (s.length > n ? `…${s.slice(-n)}` : s).trim();
 
+/** Habits Task 17: a timed check passes when its call finishes within its limit (none yet: it only measures). */
+function timedResult(check: Check, r: { stdout: string; stderr: string; code: number; killed: boolean }): CheckResult {
+  const v = valueResult(check, r);
+  if (v.error !== undefined) return v;
+  const line = r.stdout.split("\n").filter((l) => l.startsWith(MARK)).at(-1)!;
+  const ms = Math.round((JSON.parse(line.slice(MARK.length)) as { ms: number }).ms);
+  const limit = check.limitMs;
+  return limit === undefined || ms <= limit ? { check, pass: true, ms }
+    : { check, pass: false, ms, error: `took ${ms} ms; the limit is ${limit} ms (the reference's time × 3)` };
+}
+
 function valueResult(check: Check, r: { stdout: string; stderr: string; code: number; killed: boolean }): CheckResult {
   if (r.killed) return { check, pass: false, error: TOO_LONG };
   if (flooded(r.stdout)) return { check, pass: false, error: PRINTED_TOO_MUCH };
@@ -259,6 +274,11 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
       if (flooded(r.stdout)) { results.push({ check, pass: false, error: PRINTED_TOO_MUCH }); continue; }
       const pass = r.stdout.includes(check.contains ?? "");
       results.push({ check, pass, got: tail(r.stdout), ...(pass || r.code === 0 ? {} : { error: tail(r.stderr, 200) || `exit ${r.code}` }) });
+      continue;
+    }
+    if (check.kind === "timed") {
+      if (!i.entry || !interp || i.language !== "python") { results.push({ check, pass: false, outcome: "unfit", error: "timed checks run for Python only" }); continue; }
+      results.push(timedResult(check, await limitedRun(sb, capped([interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", "", "timed"]), limit)));
       continue;
     }
     if (!i.entry || !interp || (i.language !== "python" && i.language !== "lua")) {

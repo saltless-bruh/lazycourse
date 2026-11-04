@@ -98,3 +98,21 @@ describe("task lines a weak model wrote loosely (final review I4)", () => {
     expect([...tickedIds("- [x] P1.T2.S1: sub\n")]).toEqual(["P1.T2.S1"]);
   });
 });
+
+describe("timed check lines (habits Task 17)", () => {
+  it("parse for Python; other languages reject them", () => {
+    expect(parseChecks("timed P1.T1: count_unique(list(range(20000)))", { language: "python", taskIds: ["P1.T1"], milestone: 1 }).checks)
+      .toEqual([{ task: "P1.T1", kind: "timed", expr: "count_unique(list(range(20000)))", milestone: 1, status: "unverified" }]);
+    expect(parseChecks("timed P1.T1: f(1)", { language: "lua", taskIds: ["P1.T1"], milestone: 1 }).rejected).toEqual(["timed P1.T1: f(1)"]);
+  });
+});
+
+describe("timed checks in checks.md (habits Task 17)", () => {
+  it("show the call and its time limit, and a later milestone's check on the function retires them", () => {
+    const t: Check = { task: "P1.T1", kind: "timed", expr: "count_unique(list(range(20000)))", milestone: 1, status: "trusted", limitMs: 60 };
+    expect(renderChecksMd([t], new Set())).toContain("- count_unique(list(range(20000))) finishes within 60 ms");
+    expect(renderChecksMd([{ ...t, limitMs: undefined, status: "unverified" }], new Set())).toContain("- count_unique(list(range(20000))) is timed (unverified)");
+    const later: Check = { task: "P2.T1", kind: "value", expr: "count_unique([1])", expected: "1", milestone: 2, status: "trusted" };
+    expect(liveChecks([t, later], 2)).toEqual([later]);
+  });
+});

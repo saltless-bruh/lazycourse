@@ -1344,7 +1344,8 @@ export default function (pi: ExtensionAPI): void {
     // checked function, blocks the tick but is no try.
     if (f.outcome === "unfit") { ui?.notify(`${id} not yet: ${f.error}`, "warning"); return; }
     if (f.outcome === "elsewhere") { ui?.notify(`${f.error}, so ${id} could not be checked`, "warning"); return; }
-    const line = c.kind === "value"
+    const line = c.kind === "timed" ? `check ${id}: ${c.expr} ${f.error ?? "was too slow"}`
+      : c.kind === "value"
       ? `check ${id}: ${c.expr} ${f.error ? `failed: ${f.error}` : gaveExpected(f.got ?? "", c.expected ?? "")}`
       : `check ${id}: typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${f.error ? `; it failed: ${f.error}` : ""}; it printed: ${f.got ?? ""}`;
     ui?.notify(`${id} not yet: ${line.replace(/^check \S+: /, "")}`, "warning");
