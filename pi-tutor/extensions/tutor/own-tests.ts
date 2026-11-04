@@ -4,7 +4,7 @@
 // planted slips, reused), or it is "a test that cannot fail". Own tests are the learner's code, so they run
 // only inside the exam sandbox, over a throwaway overlay of the project folder: a broken copy is written there
 // and never reaches the real file.
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { LANGS } from "./knowledge/versions.js";
 import { cappedArgv, type SandboxHost } from "./exam/sandbox.js";
@@ -16,6 +16,9 @@ import { fixMutants } from "./step-up.js";
 export const OWN_TEST_LANGUAGES = new Set(["python", "rust", "go"]);
 const SKIP_DIRS = new Set(["node_modules", "target", "__pycache__", "venv", "stepup"]);
 const LIMIT_SEC = 60;
+// Final review: a planted slip can loop forever (`i + 1` → `i - 1`); a Python copy gets 10 s, not 60, so
+// /tutor-done, which holds the lock, is not stuck for minutes. Rust and Go copies must build, so they keep 60.
+const MUTANT_SEC = { python: 10, compiled: LIMIT_SEC };
 const MAX_MUTANTS = { python: 12, compiled: 6 };
 const MARK = "\x1eTUTOR\t";
 
@@ -30,7 +33,9 @@ function sources(root: string, test: (name: string) => boolean): string[] {
       if (n.startsWith(".") || SKIP_DIRS.has(n) || n.startsWith("stepup.before-")) continue;
       const p = join(dir, n);
       let st;
-      try { st = statSync(p); } catch { continue; }
+      // Final review: a symlink can point out of the project; it is never followed (CLAUDE.md root rule).
+      try { st = lstatSync(p); } catch { continue; }
+      if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) walk(p, depth + 1);
       else if (st.isFile() && st.size < 512_000 && test(n)) out.push(relative(root, p));
     }
@@ -146,11 +151,11 @@ interface OneRun { pass: boolean; out: string; assertFailed: boolean; built: boo
 
 const tail = (s: string, n = 400) => (s.length > n ? `…${s.slice(-n)}` : s).trim();
 
-async function limited(sb: Sandboxed, argv: string[]) {
+async function limited(sb: Sandboxed, argv: string[], sec = LIMIT_SEC) {
   const capped = cappedArgv(argv, 65536, 8192);
   const r = sb.limited
-    ? await sb.run(["timeout", "-k", "5", String(LIMIT_SEC), ...capped], (LIMIT_SEC + 15) * 1000)
-    : await sb.run(capped, LIMIT_SEC * 1000);
+    ? await sb.run(["timeout", "-k", "5", String(sec), ...capped], (sec + 15) * 1000)
+    : await sb.run(capped, sec * 1000);
   return { ...r, killed: r.killed || (sb.limited && (r.code === 124 || r.code === 137)) };
 }
 
@@ -160,10 +165,10 @@ function withFiles(files: [string, string][], argv: string[]): string[] {
   return ["sh", "-c", script, "sh", ...files.flat(), "--", ...argv];
 }
 
-async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests: string[]; entry: string | null; files: [string, string][] }): Promise<OneRun> {
+async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests: string[]; entry: string | null; files: [string, string][]; sec?: number }): Promise<OneRun> {
   const names = i.tests.map((t) => t.split("::")[1]);
   if (i.language === "python") {
-    const r = await limited(sb, withFiles(i.files, [LANGS.python.command, "-c", PY_OWN, i.entry ?? "", ...i.tests]));
+    const r = await limited(sb, withFiles(i.files, [LANGS.python.command, "-c", PY_OWN, i.entry ?? "", ...i.tests]), i.sec);
     if (r.killed) return { pass: false, out: "your test took too long (an endless loop?)", assertFailed: false, built: true };
     const rows = r.stdout.split("\n").filter((l) => l.startsWith(MARK)).map((l) => JSON.parse(l.slice(MARK.length)) as { spec: string; ok: boolean; kind: string; msg: string });
     const bad = rows.filter((x) => !x.ok);
@@ -183,7 +188,7 @@ async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests
   const argv = i.language === "rust"
     ? ["sh", "-c", script, "sh", ...names]
     : ["env", `DIRS=${dirs.join(" ")}`, `RUN=${names.join("|")}`, "sh", "-c", script];
-  const r = await limited(sb, withFiles(files, argv));
+  const r = await limited(sb, withFiles(files, argv), i.sec);
   const text = r.stdout + r.stderr;
   if (r.killed) return { pass: false, out: "your test took too long (an endless loop?)", assertFailed: false, built: true };
   if (text.includes("\x1eBUILD")) return { pass: false, out: tail(text.replace("\x1eBUILD", "")), assertFailed: false, built: false };
@@ -314,7 +319,7 @@ export async function canFail(exec: RunExec, i: { root: string; language: string
   if (!sb) return false;
   const max = i.language === "python" ? MAX_MUTANTS.python : MAX_MUTANTS.compiled;
   for (const [rel, broken] of copies.slice(0, max)) {
-    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [[rel, broken]] });
+    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [[rel, broken]], sec: i.language === "python" ? MUTANT_SEC.python : MUTANT_SEC.compiled });
     if (r.built && !r.pass && r.assertFailed) return true;
   }
   return false;

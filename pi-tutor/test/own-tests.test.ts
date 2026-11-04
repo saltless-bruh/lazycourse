@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -23,6 +23,14 @@ describe("findOwnTests (spec 2026-10-26 §7)", () => {
     const root = project({ "src/main.py": SRC, "tests/test_split.py": GOOD + "\nclass T:\n    def test_p1_t1_other(self):\n        pass\n\ndef test_p1_t2_tip():\n    pass\n" });
     expect(findOwnTests(root, "python", "P1.T1")).toEqual(["tests/test_split.py::test_p1_t1_splits_evenly", "tests/test_split.py::T.test_p1_t1_other"]);
     expect(findOwnTests(root, "python", "P1.T3")).toEqual([]);
+  });
+  it("final review: a symlink is never followed out of the project (CLAUDE.md root rule)", () => {
+    const outside = project({ "test_x.py": "def test_p1_t1_outside():\n    pass\n" });
+    const root = project({ "src/main.py": SRC });
+    symlinkSync(outside, join(root, "lib"));
+    symlinkSync(join(outside, "test_x.py"), join(root, "test_link.py"));
+    expect(findOwnTests(root, "python", "P1.T1")).toEqual([]);
+    expect(hasTests(root, "python")).toBe(false);
   });
   it("Go and Rust names are found too", () => {
     expect(findOwnTests(project({ "src/split_test.go": "package main\nfunc TestP1T1Even(t *testing.T) {}\n" }), "go", "P1.T1")).toEqual(["src/split_test.go::TestP1T1Even"]);
@@ -65,6 +73,13 @@ describe.skipIf(!bwrapReady)("running own tests in the sandbox", () => {
     const other = project({ "src/main.py": busy + "from money import split_amount\n", "src/money.py": SRC, "tests/test_split.py": GOOD });
     expect(await canFail(realExec, { root: other, language: "python", tests: findOwnTests(other, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe(true);
     expect(readFileSync(join(other, "src/money.py"), "utf8")).toBe(SRC);
+  }, 120_000);
+  it("final review: a broken copy that loops forever is cut short, so /tutor-done is not held for a minute per copy", async () => {
+    const loop = "def count(n):\n    i = 0\n    while i < n:\n        i = i + 1\n    return i\n";
+    const root = project({ "src/main.py": loop, "tests/test_count.py": "from main import count\n\ndef test_p1_t1_runs():\n    count(3)\n" });
+    const t0 = Date.now();
+    expect(await canFail(realExec, { root, language: "python", tests: findOwnTests(root, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(30_000);
   }, 120_000);
   it.skipIf(spawnSync("go", ["version"]).status !== 0)("Go: go test runs the own test; it can fail on a broken copy, a test with no check cannot", async () => {
     const main = "package main\n\nfunc Split(total, people float64) float64 {\n\treturn total / people\n}\n\nfunc main() {}\n";
