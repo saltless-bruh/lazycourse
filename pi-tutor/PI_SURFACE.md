@@ -106,6 +106,10 @@ Re-verify every line when bumping versions.
 - `ctx.modelRegistry.complete(ctx.model, { systemPrompt, messages: [UserMessage] })` → `AssistantMessage`
   (model-registry.d.ts:40; pattern from examples/extensions/qna.ts). Used by `/tutor-start` for the
   suggester and the scaffold; non-`"stop"` `stopReason` is an error (`errorMessage` shown).
+- `ctx.modelRegistry.find(provider, modelId)` → `Model | undefined` (model-registry.d.ts:29, Pi 1.3.0). Used by
+  `/tutor-checker` (habits Task 19) to resolve `provider/model` (first `/` splits, so `nvidia/z-ai/glm-5.3-flash`
+  is provider `nvidia`, id `z-ai/glm-5.3-flash`); the second reader is then called with
+  `ctx.modelRegistry.complete(thatModel, …, { signal: AbortSignal.timeout(60_000) })`.
 - `ctx.ui.select(title, options)` / `ctx.ui.input(title, placeholder)` → `string | undefined` (Esc = undefined);
   `ctx.ui.setWorkingMessage(text?)` (only visible during an agent turn — interactive-mode.js:2061 — so
   it is not progress for a command); `ctx.model` (undefined → `/tutor-start` refuses).
@@ -127,6 +131,8 @@ Re-verify every line when bumping versions.
 - `pi.on("turn_end", (event) => …)`: `event.message` is the AgentMessage; assistant `content` is
   `(TextContent | ThinkingContent | ToolCall)[]`, `ToolCall.type === "toolCall"`.
 - `pi.on("message_end", (event: { message }) => { message? })` (types.d.ts:824, 1097, 1194;
+  the handler may be async — `ExtensionHandler` returns `Promise<R | void> | R | void`, types.d.ts:1182 — and
+  the second reader of habits Task 19 is awaited there before the held reply is shown;
   `MessageEndEventResult`): the replacement must keep the role. agent-session.js
   `_replaceMessageInPlace` swaps it into the same object before `turn_end`, session persistence and
   `--mode json` output (probe 2026-10-14, Pi 1.1.0: `turn_end` and the JSON `message_end` both had the
