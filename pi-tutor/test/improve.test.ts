@@ -20,16 +20,23 @@ describe.skipIf(!bwrapReady)("codeMetrics", () => {
   it("a nested function: its length, how deep it nests, how many branches it has", async () => {
     const src = "def f(xs):\n    total = 0\n    for x in xs:\n        if x > 0 and x < 9:\n            while x:\n                x -= 1\n    return total\n\n\ndef g():\n    return 1\n";
     expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() }))
-      .toEqual({ longestFunction: 7, maxNesting: 3, branches: 4 });
+      .toEqual({ longestFunction: 6, maxNesting: 3, branches: 4 });
   }, 60_000);
   it("an elif chain is one level, not a staircase", async () => {
     const src = "def grade(n):\n    if n > 90:\n        return 'A'\n    elif n > 80:\n        return 'B'\n    elif n > 70:\n        return 'C'\n    return 'D'\n";
     expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() }))
-      .toEqual({ longestFunction: 8, maxNesting: 1, branches: 3 });
+      .toEqual({ longestFunction: 7, maxNesting: 1, branches: 3 });
+  }, 60_000);
+  it("side-agent note: size counts statements, so blank lines, comments and joined lines change nothing", async () => {
+    const tidy = "def f(xs):\n    a = 1\n    b = 2\n    return a + b\n";
+    const messy = "def f(xs):\n\n    # set up\n    a = 1\n\n    b = 2\n    return a + b\n";
+    const joined = "def f(xs):\n    a = 1; b = 2\n    return a + b\n";
+    for (const src of [tidy, messy, joined])
+      expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() })).toEqual({ longestFunction: 3, maxNesting: 0, branches: 0 });
   }, 60_000);
   it("only the named functions, when given; a file that does not parse gives null", async () => {
     const root = project({ "src/main.py": "def a():\n    if 1:\n        pass\n\n\ndef b():\n    return 2\n" });
-    expect(await codeMetrics(realExec, { root, entry: "src/main.py", sandbox: host(), functions: ["b"] })).toEqual({ longestFunction: 2, maxNesting: 0, branches: 0 });
+    expect(await codeMetrics(realExec, { root, entry: "src/main.py", sandbox: host(), functions: ["b"] })).toEqual({ longestFunction: 1, maxNesting: 0, branches: 0 });
     expect(await codeMetrics(realExec, { root: project({ "src/main.py": "def a(:\n" }), entry: "src/main.py", sandbox: host() })).toBeNull();
   }, 60_000);
 });
@@ -41,8 +48,13 @@ describe("improveResult (logic, speed, code; design is notes only)", () => {
       better: ["speed: 800 ms → 40 ms", "nesting: 4 → 2", "branches: 9 → 6"], worse: [],
     });
     expect(improveResult(base, { ...base, edgePassed: 3, longestFunction: 34 })).toEqual({
-      better: ["edge cases passed: 1 → 3"], worse: ["longest function: 30 → 34 lines"],
+      better: ["edge cases passed: 1 → 3"], worse: ["longest function: 30 → 34 statements"],
     });
+  });
+  it("side-agent note: one statement less or more is no change; two is", () => {
+    expect(improveResult(base, { ...base, longestFunction: 29 })).toEqual({ better: [], worse: [] });
+    expect(improveResult(base, { ...base, longestFunction: 31 })).toEqual({ better: [], worse: [] });
+    expect(improveResult(base, { ...base, longestFunction: 28 })).toEqual({ better: ["longest function: 30 → 28 statements"], worse: [] });
   });
   it("timing noise is neither better nor worse; no timed check means no speed at all", () => {
     expect(improveResult(base, { ...base, ms: 830 })).toEqual({ better: [], worse: [] });

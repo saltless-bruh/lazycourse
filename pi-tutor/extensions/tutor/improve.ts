@@ -1,5 +1,5 @@
 // "Improve it" (habits spec 2026-10-26 §8, Task 17): working code made better, measured before → after.
-// logic = edge-case checks that pass; speed = a timed large-input check; code = function length, nesting depth
+// logic = edge-case checks that pass; speed = a timed large-input check; code = function size in statements, nesting depth
 // and branch count from the language's own parser (Python `ast`, run in the sandbox: the code is the learner's);
 // design = the model's notes only, never measured here.
 import { realpathSync } from "node:fs";
@@ -38,7 +38,8 @@ def branches(f):
         elif hasattr(ast, "match_case") and isinstance(x, ast.match_case): n += 1
     return n
 print(json.dumps({
-    "longestFunction": max((f.end_lineno - f.lineno + 1 for f in fns), default=0),
+    # side-agent note: statements, not lines, so blank lines, comments and "a; b" change nothing
+    "longestFunction": max((sum(1 for x in ast.walk(f) if isinstance(x, ast.stmt) and x is not f) for f in fns), default=0),
     "maxNesting": max((depth(f, 0) for f in fns), default=0),
     "branches": sum(branches(f) for f in fns),
 }))
@@ -69,9 +70,10 @@ export function improveResult(before: Measured, after: Measured): { better: stri
     if (after.ms * 2 <= before.ms) better.push(`speed: ${before.ms} ms → ${after.ms} ms`);
     else if (after.ms >= before.ms * 2) worse.push(`speed: ${before.ms} ms → ${after.ms} ms`);
   }
-  const code: [keyof Metrics, string, string][] = [["longestFunction", "longest function", " lines"], ["maxNesting", "nesting", ""], ["branches", "branches", ""]];
-  for (const [k, label, unit] of code) {
-    if (after[k] !== before[k]) (after[k] < before[k] ? better : worse).push(`${label}: ${before[k]} → ${after[k]}${unit}`);
+  // Side-agent note: one statement more or less is no change (a stray `pass`); nesting and branches count each step.
+  const code: [keyof Metrics, string, string, number][] = [["longestFunction", "longest function", " statements", 2], ["maxNesting", "nesting", "", 1], ["branches", "branches", "", 1]];
+  for (const [k, label, unit, step] of code) {
+    if (Math.abs(after[k] - before[k]) >= step) (after[k] < before[k] ? better : worse).push(`${label}: ${before[k]} → ${after[k]}${unit}`);
   }
   return { better, worse };
 }
@@ -88,8 +90,8 @@ export function calledFunctions(exprs: string[]): string[] {
     .filter((n) => !["list", "range", "len", "set", "dict", "tuple", "str", "int", "float", "sorted", "sum", "min", "max", "abs"].includes(n));
 }
 
-/** "longest function 6 lines · nesting 2 · branches 2 · edge cases 2/2 · <timed call> 1840 ms" */
+/** "longest function 5 statements · nesting 2 · branches 2 · edge cases 2/2 · <timed call> 1840 ms" */
 export function measuredLine(m: Measured, edgeTotal: number, timed: string | null): string {
-  return [`longest function ${m.longestFunction} lines`, `nesting ${m.maxNesting}`, `branches ${m.branches}`,
+  return [`longest function ${m.longestFunction} statements`, `nesting ${m.maxNesting}`, `branches ${m.branches}`,
     ...(edgeTotal ? [`edge cases ${m.edgePassed}/${edgeTotal}`] : []), ...(timed && m.ms !== null ? [`${timed} ${m.ms} ms`] : [])].join(" · ");
 }

@@ -359,7 +359,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(readFileSync(join(root, "stepup", "improve.py"), "utf8")).toBe(SLOW);
     const readme = readFileSync(join(root, "stepup", "README.md"), "utf8");
     expect(readme).toMatch(/4\. `stepup\/test_solve\.py`: .*tests for `weekday`.*must fail on a broken version/s);
-    expect(readme).toMatch(/5\. `stepup\/improve\.py`: .*works but is clumsy.*measured now: longest function 6 lines · nesting 2 · branches 2/s);
+    expect(readme).toMatch(/5\. `stepup\/improve\.py`: .*works but is clumsy.*measured now: longest function 5 statements · nesting 2 · branches 2/s);
     writeFileSync(join(root, "stepup", "solve.py"), "import datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n");
     writeFileSync(join(root, "stepup", "fix.py"), "def tip(total):\n    return total * 0.15\n");
     writeFileSync(join(root, "stepup", "plan.py"), "def top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n");
@@ -423,13 +423,13 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(b.notes.at(-1)).toMatch(/no improve-it task is running: \/tutor-improve <ticked task id> starts one/);
     b.replies.push("check P2.T2: count_unique([]) == 0\ncheck P2.T2: count_unique([3, 3, 3]) == 1\ntimed P2.T2: count_unique(list(range(20000)))");
     await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
-    expect(b.notes.at(-1)).toMatch(/improve P2\.T2: .*measured now: longest function 6 lines · nesting 2 · branches 2 · edge cases 2\/2 · count_unique\(list\(range\(20000\)\)\) \d+ ms\. The task's checks must still pass.*\/tutor-improve done/s);
+    expect(b.notes.at(-1)).toMatch(/improve P2\.T2: .*measured now: longest function 5 statements · nesting 2 · branches 2 · edge cases 2\/2 · count_unique\(list\(range\(20000\)\)\) \d+ ms\. The task's checks must still pass.*\/tutor-improve done/s);
     writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return 0\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/P2\.T2 not yet: the task's checks must still pass: count_unique\(\[1, 1, 2\]\) gave 0, expected 2/);
     writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items))\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
-    expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: speed: \d+ ms → \d+ ms · longest function: 6 → 2 lines · nesting: 2 → 0 · branches: 2 → 0/);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: speed: \d+ ms → \d+ ms · longest function: 5 → 1 statements · nesting: 2 → 0 · branches: 2 → 0/);
     expect(await habits()).toContainEqual(["optimizes", true]);
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/no improve-it task is running/);
@@ -442,7 +442,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
     writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    n = 0\n    for i, x in enumerate(items):\n        if x not in items[:i]:\n            n += 1\n    return n\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
-    expect(b.notes.at(-1)).toMatch(/P2\.T2 is not better yet: worse: longest function: 2 → 6 lines · nesting: 0 → 2 · branches: 0 → 2/);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 is not better yet: worse: longest function: 1 → 5 statements · nesting: 0 → 2 · branches: 0 → 2/);
     expect(await habits()).toContainEqual(["optimizes", false]);
     b.replies.push("check P2.T2: count_unique([]) == 0");
     await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
