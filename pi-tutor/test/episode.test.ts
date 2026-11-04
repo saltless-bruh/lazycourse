@@ -434,6 +434,23 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/no improve-it task is running/);
   }, 180000);
+  it("improve it (load flake): the before code is timed again next to the after code, so unchanged code is never faster", async () => {
+    const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+    const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items\n");
+    b.replies.push("timed P2.T2: count_unique(list(range(20000)))");
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    // the first timing happened in a busy moment: ten times slower than the code really is
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const st = JSON.parse(p.setting(`improve:${root}`)!);
+    st.before.ms *= 10;
+    p.setSetting(`improve:${root}`, JSON.stringify(st)); p.close();
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 is not better yet: nothing measured changed/);
+    expect((await habits()).map(([h]) => h)).not.toContain("optimizes");
+  }, 180000);
   it("improve it (Task 17): something worse is no optimizes; /tutor-improve off drops it", async () => {
     const { b, root } = await doneProject("def count_unique(items):\n    return len(set(items))\n", [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
       { reference: "def count_unique(items):\n    return len(set(items))\n" });
@@ -473,6 +490,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     const notes = () => b.messages.filter((m) => (m.message as { customType?: string }).customType === "tutor_notes");
     expect(notes()).toHaveLength(1);
     expect((notes()[0].message as { content: string }).content).toMatch(/at most three notes on design or naming.*path:line.*no points/s);
+    expect((notes()[0].message as { content: string }).content).toMatch(/The functions: src\/main\.py:1 split_amount\./);
     expect(notes()[0].options).toEqual({ triggerTurn: true });
     await b.commands["tutor-notes"].handler("off", b.ctx);
     // P2.T3..T5 share the same checks (they are matched by task id), so give each its own trusted checks.

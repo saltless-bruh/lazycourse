@@ -122,7 +122,7 @@ export async function brokenProgram(reference: string, failsChecks: (source: str
 }
 
 /** Which characters are code (not inside a string or a comment). */
-function codeMask(source: string, language?: string): boolean[] {
+export function codeMask(source: string, language?: string): boolean[] {
   const mask = new Array<boolean>(source.length).fill(true);
   let quote: string | null = null;
   for (let i = 0; i < source.length; i++) {

@@ -11,7 +11,7 @@ import { cappedArgv, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
 import { sandboxFor, type Sandboxed } from "./check-run.js";
 import { manifestFor } from "./manifest.js";
-import { fixMutants } from "./step-up.js";
+import { codeMask, fixMutants } from "./step-up.js";
 import { rustLifetime } from "./near-miss.js";
 
 export const OWN_TEST_LANGUAGES = new Set(["python", "rust", "go"]);
@@ -325,6 +325,32 @@ export function ownTestBodies(root: string, language: string, tests: string[]): 
   });
 }
 
+/**
+ * Logic slips (phase 5 live run: `if x not in seen: seen.append(x)` had no operator, number or string to slip, so
+ * a good test was "untestable"): `not in` ↔ `in` (never a `for … in`), `and` ↔ `or`, and a condition negated
+ * (`if x:` → `if not (x):`; Go/Rust `&&` ↔ `||`, `if x {` → `if !(x) {`). Strings and comments are never touched.
+ */
+function logicMutants(source: string, language: string): string[] {
+  const code = codeMask(source, language), out: string[] = [];
+  const add = (at: number, len: number, by: string) => {
+    for (let k = at; k < at + len; k++) if (!code[k]) return;
+    out.push(source.slice(0, at) + by + source.slice(at + len));
+  };
+  if (language === "python") {
+    for (const m of source.matchAll(/ not in /g)) add(m.index!, m[0].length, " in ");
+    for (const m of source.matchAll(/ in /g)) {
+      const line = source.slice(source.lastIndexOf("\n", m.index!) + 1, m.index!);
+      if (!/\bfor\b/.test(line) && !line.endsWith(" not") && !line.endsWith(" is")) add(m.index!, m[0].length, " not in ");
+    }
+    for (const m of source.matchAll(/ (and|or) /g)) add(m.index!, m[0].length, m[1] === "and" ? " or " : " and ");
+    for (const m of source.matchAll(/^([ \t]*(?:if|elif|while)\s+)(.+?):[ \t]*(#.*)?$/gm)) add(m.index! + m[1].length, m[2].length, `not (${m[2]})`);
+  } else {
+    for (const m of source.matchAll(/ (&&|\|\|) /g)) add(m.index!, m[0].length, m[1] === "&&" ? " || " : " && ");
+    for (const m of source.matchAll(/^([ \t]*(?:\} else )?if\s+)(?!let\b)(.+?)\s*\{[ \t]*$/gm)) add(m.index! + m[1].length, m[2].length, `!(${m[2]})`);
+  }
+  return out;
+}
+
 /** Names called inside the own tests' bodies (final review I2: not anywhere in a file that tests other tasks too). */
 function calledByTests(root: string, language: string, tests: string[]): Set<string> {
   const called = new Set<string>();
@@ -353,7 +379,7 @@ function brokenCopies(root: string, language: string, tests: string[], entry: st
   const add = (rel: string, source: string, spans: { at: number; end: number }[] | null) => {
     const guarded = testSpans(source, language);
     const byFn = new Map<number, [string, string][]>();
-    for (const m of [...fixMutants(source, 1000, language), ...stringMutants(source, language)]) {
+    for (const m of [...fixMutants(source, 1000, language), ...stringMutants(source, language), ...logicMutants(source, language)]) {
       const at = firstDiff(source, m);
       if (guarded.some(([a, b]) => at >= a && at < b)) continue;
       const k = spans ? spans.findIndex((f) => at >= f.at && at < f.end) : 0;

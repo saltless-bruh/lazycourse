@@ -252,7 +252,19 @@ function valueResult(check: Check, r: { stdout: string; stderr: string; code: nu
   return o.error !== undefined ? { check, pass: false, error: o.error } : { check, pass: o.pass === true, got: o.got, valueType: o.type ?? "other" };
 }
 
-export async function runChecks(exec: RunExec, i: { language: string; root: string; entry: string | null; runCmd: string | null; checks: Check[]; sandbox: SandboxHost | null; limitSec?: number }): Promise<{ results: CheckResult[]; missing?: string }> {
+/** `sh -c` prefix that writes `files` into the throwaway overlay before the command runs (the real folder never sees them). */
+function withOverlay(files: [string, string][], argv: string[]): string[] {
+  if (!files.length) return argv;
+  const script = 'while [ "$1" != "--" ]; do mkdir -p "$(dirname "$1")" && printf "%s" "$2" > "$1" || exit 126; shift 2; done; shift; exec "$@"';
+  return ["sh", "-c", script, "sh", ...files.flat(), "--", ...argv];
+}
+
+/**
+ * `overlay` (habits Task 17, the load flake): files laid over the project in the throwaway copy only, so the code
+ * as it was before an improvement can be timed again right next to the code as it is now.
+ */
+export async function runChecks(exec: RunExec, i: { language: string; root: string; entry: string | null; runCmd: string | null; checks: Check[]; sandbox: SandboxHost | null; limitSec?: number; overlay?: Record<string, string> }): Promise<{ results: CheckResult[]; missing?: string }> {
+  const over = Object.entries(i.overlay ?? {});
   if (!i.sandbox) return { results: [], missing: CHECKS_SANDBOX_OFF };
   const interp = LANGS[i.language]?.command;
   const runTool = i.runCmd?.split(/\s+/)[0];
@@ -278,7 +290,7 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
     }
     if (check.kind === "timed") {
       if (!i.entry || !interp || i.language !== "python") { results.push({ check, pass: false, outcome: "unfit", error: "timed checks run for Python only" }); continue; }
-      results.push(timedResult(check, await limitedRun(sb, capped([interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", "", "timed"]), limit)));
+      results.push(timedResult(check, await limitedRun(sb, capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", "", "timed"])), limit)));
       continue;
     }
     if (!i.entry || !interp || (i.language !== "python" && i.language !== "lua")) {
@@ -286,8 +298,8 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
       continue;
     }
     const argv = i.language === "python"
-      ? capped([interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? ""])
-      : capped([interp, "-e", `local ENTRY, EXPR, EXPECTED = ${luaString(i.entry)}, ${luaString(check.expr ?? "")}, ${luaString(check.expected ?? "")}\n${LUA_HARNESS}`]);
+      ? capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? ""]))
+      : capped(withOverlay(over, [interp, "-e", `local ENTRY, EXPR, EXPECTED = ${luaString(i.entry)}, ${luaString(check.expr ?? "")}, ${luaString(check.expected ?? "")}\n${LUA_HARNESS}`]));
     results.push(valueResult(check, await limitedRun(sb, argv, limit)));
   }
   return { results };

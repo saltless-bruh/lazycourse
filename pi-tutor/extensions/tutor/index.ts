@@ -556,12 +556,15 @@ export default function (pi: ExtensionAPI): void {
     pendingSteers = 0;
     // Spec 2026-10-21 §6: a rewrite run keeps the re-ask count of the reply it replaces; any other run starts at 0.
     const isRewrite = event.messageType === "custom" && event.message.customType === "tutor_rewrite";
+    // Phase 5 live run: the pro notes turn has its own shape; the five bold parts won over the request.
+    const isNotes = event.messageType === "custom" && event.message.customType === "tutor_notes";
     if (!isRewrite) rewrite = null;
     // Final review I2: on a run's episode the fix answers the failed run's own nudge (or its rewrite, or a pro's
     // /tutor-fix); a chat question after it is at why, so a later unrelated question never runs with the leak check off.
     let step = role.ladder ? stepFor(episode, { exam: exam !== null }) : null;
     const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
+    if (isNotes) step = null;
     run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
     let snap: EditorSnapshot | null = null;
     if (link) {
@@ -620,7 +623,7 @@ export default function (pi: ExtensionAPI): void {
     else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(replyReminder(run.step, workflow !== null && role.ladder));
+    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -1231,16 +1234,30 @@ export default function (pi: ExtensionAPI): void {
    * model writes edge-case checks and one timed large-input check, kept only when the hidden reference passes
    * them; the task's own checks must still pass. Better on something and worse on nothing is the optimizes habit.
    */
-  interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured }
+  interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured; beforeSource?: string }
   const improveKey = (root: string) => `improve:${root}`;
-  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }) {
-    const host = sandboxHost()!;
-    const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host });
+  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string) {
+    const host = sandboxHost()!, exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
+    const r = await runChecks(exec, { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host });
     const own = r.results.slice(0, st.checks.length), extra = r.results.slice(st.checks.length);
-    const metrics = await codeMetrics((c, a, o) => pi.exec(c, a, o), { root, entry, sandbox: host, functions: st.functions });
+    const metrics = await codeMetrics(exec, { root, entry, sandbox: host, functions: st.functions });
     const timed = extra.find((x) => x.check.kind === "timed");
-    const m: Measured | null = metrics && { ...metrics, edgePassed: extra.filter((x) => x.check.kind === "value" && x.pass).length, ms: timed?.ms ?? null };
-    return { m, failed: own.find((x) => !x.pass), missing: r.missing };
+    let ms = timed?.ms ?? null, baseMs: number | null = null;
+    // Load flake: the first timing ran at another moment, under other load; the code as it was before is timed
+    // again right next to the code as it is now, twice each in turn, and the faster of each counts.
+    if (baseline !== undefined && timed && ms !== null) {
+      const once = async (overlay?: Record<string, string>) =>
+        (await runChecks(exec, { language: "python", root, entry, runCmd: null, checks: [{ ...timed.check, limitMs: undefined }], sandbox: host, overlay })).results[0]?.ms ?? null;
+      const runs: { base: number[]; now: number[] } = { base: [], now: [ms] };
+      for (let k = 0; k < 2; k++) {
+        const b = await once({ [entry]: baseline }); if (b !== null) runs.base.push(b);
+        if (k === 0) { const n = await once(); if (n !== null) runs.now.push(n); }
+      }
+      ms = Math.min(...runs.now);
+      baseMs = runs.base.length ? Math.min(...runs.base) : null;
+    }
+    const m: Measured | null = metrics && { ...metrics, edgePassed: extra.filter((x) => x.check.kind === "value" && x.pass).length, ms };
+    return { m, baseMs, failed: own.find((x) => !x.pass), missing: r.missing };
   }
   pi.registerCommand("tutor-improve", {
     description: "Make a ticked task's working code better, measured before and after: /tutor-improve <task id>|done|off",
@@ -1261,7 +1278,7 @@ export default function (pi: ExtensionAPI): void {
       if (!entry) { ctx.ui.notify("no entry file: name it in README.md's `run:` command", "warning"); return; }
       if (arg === "done") {
         if (!running) { ctx.ui.notify("no improve-it task is running: /tutor-improve <ticked task id> starts one", "info"); return; }
-        const after = await measure(root, entry, running);
+        const after = await measure(root, entry, running, running.beforeSource);
         if (after.missing) { ctx.ui.notify(after.missing, "warning"); return; }
         const f = after.failed;
         if (f) {
@@ -1270,7 +1287,7 @@ export default function (pi: ExtensionAPI): void {
           return;
         }
         if (!after.m) { ctx.ui.notify("your file does not parse, so it could not be measured", "warning"); return; }
-        const { better, worse } = improveResult(running.before, after.m);
+        const { better, worse } = improveResult({ ...running.before, ms: after.baseMs ?? running.before.ms }, after.m);
         if (better.length || worse.length) recordHabit("optimizes", better.length > 0 && worse.length === 0, `improve:${running.task}`);
         if (better.length && !worse.length) {
           profileWrite(() => p.setSetting(improveKey(root), ""));
@@ -1304,7 +1321,9 @@ export default function (pi: ExtensionAPI): void {
       const before = await measure(root, entry, { checks, extra, functions });
       if (before.missing || !before.m) { ctx.ui.notify(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
       if (before.failed) { ctx.ui.notify(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
-      const next: ImproveState = { task: id, checks, extra, functions, before: before.m };
+      let beforeSource: string | undefined;
+      try { beforeSource = readFileSync(join(root, entry), "utf8"); } catch { beforeSource = undefined; }
+      const next: ImproveState = { task: id, checks, extra, functions, before: before.m, ...(beforeSource !== undefined ? { beforeSource } : {}) };
       profileWrite(() => p.setSetting(improveKey(root), JSON.stringify(next)));
       const timed = extra.find((c) => c.kind === "timed")?.expr ?? null;
       ctx.ui.notify(`improve ${id}: make the working code better — faster, simpler, or right on more edge cases. `
@@ -1507,7 +1526,7 @@ export default function (pi: ExtensionAPI): void {
     /** Hidden solutions, kept in the profile like a milestone's reference, never in the project. */
     solveRef?: string; fixRef?: string;
     /** Habits Task 17, the intermediate step-up: an improve-it part (clumsy working code, measured) and a tests part. */
-    improveTask?: string; improveChecks?: Check[]; improveExtra?: Check[]; improveFunctions?: string[]; improveBefore?: Measured; improveMissing?: boolean; improveRef?: string;
+    improveTask?: string; improveChecks?: Check[]; improveExtra?: Check[]; improveFunctions?: string[]; improveBefore?: Measured; improveMissing?: boolean; improveRef?: string; improveSource?: string;
   }
   let stepUpModel: ExtensionContext | null = null;
   const NEXT_BAND: Record<string, { level: number; name: string }> = { beginner: { level: 34, name: "intermediate" }, intermediate: { level: 67, name: "pro" } };
@@ -1562,7 +1581,7 @@ export default function (pi: ExtensionAPI): void {
         if (clumsy) {
           writeInRoot(root, `stepup/improve${ext}`, clumsy.endsWith("\n") ? clumsy : `${clumsy}\n`);
           const before = await measure(root, `stepup/improve${ext}`, { checks: improve.improveChecks!, extra: improve.improveExtra!, functions: improve.improveFunctions! });
-          if (before.m && !before.failed) improve.improveBefore = before.m;
+          if (before.m && !before.failed) { improve.improveBefore = before.m; improve.improveSource = clumsy.endsWith("\n") ? clumsy : `${clumsy}\n`; }
           else improve = { improveMissing: true };
           const timed = improve.improveExtra?.find((c) => c.kind === "timed")?.expr ?? null;
           more += `5. \`stepup/improve${ext}\`: ${s.improveTask} This code works but is clumsy: make it better (faster, simpler, right on more edge cases) and keep it working.${before.m ? ` measured now: ${measuredLine(before.m, (improve.improveExtra ?? []).filter((c) => c.kind === "value").length, timed)}.` : ""}\n`;
@@ -1607,8 +1626,8 @@ export default function (pi: ExtensionAPI): void {
     }
     let improveOk = s.improveMissing === true;
     if (!improveOk && s.improveBefore && host) {
-      const after = await measure(root, `stepup/improve${ext}`, { checks: s.improveChecks ?? [], extra: s.improveExtra ?? [], functions: s.improveFunctions ?? [] });
-      if (after.m && !after.failed && !after.missing) { const r = improveResult(s.improveBefore, after.m); improveOk = r.better.length > 0 && r.worse.length === 0; }
+      const after = await measure(root, `stepup/improve${ext}`, { checks: s.improveChecks ?? [], extra: s.improveExtra ?? [], functions: s.improveFunctions ?? [] }, s.improveSource);
+      if (after.m && !after.failed && !after.missing) { const r = improveResult({ ...s.improveBefore, ms: after.baseMs ?? s.improveBefore.ms }, after.m); improveOk = r.better.length > 0 && r.worse.length === 0; }
     }
     return { ...base, tests: { passed: testsOk ? 1 : 0, total: 1 }, improve: { passed: improveOk ? 1 : 0, total: 1 } };
   }
@@ -1805,6 +1824,8 @@ export default function (pi: ExtensionAPI): void {
     onboarding = o;
     if (profile) { const p = profile; profileWrite(() => p.setSetting("onboarding", o ? JSON.stringify(o) : "")); }
   }
+  const NOTES_REMINDER = "[tutor-reply] This reply is notes only, not the bold parts: at most three lines, each `path:line: one sentence` on design or naming, "
+    + "then the ```tutor-judgment block. No code and no fix.";
   /**
    * Task 16 (spec 2026-10-21 §8): after a scored tick, remember the score; three far from the level suggest one
    * (the learner decides; the tutor never moves it); and, unless /tutor-notes off, ask the tutor for notes on
@@ -1829,9 +1850,19 @@ export default function (pi: ExtensionAPI): void {
   }
   function notesAfter(ctx: ExtensionContext, id: string, score: number) {
     if (profile?.setting("pro-notes") === "off") return;
+    // Phase 5 live run: name each function's line, so a weak model has real lines to point at.
+    let where = "";
+    if (project) {
+      const { entry } = projectRun(project.path, project.language);
+      try {
+        if (entry) where = readFileSync(join(project.path, entry), "utf8").split("\n")
+          .flatMap((l, k) => { const d = /^\s*(?:async\s+)?(?:def|fn|func|function)\s+(\w+)/.exec(l); return d ? [`${entry}:${k + 1} ${d[1]}`] : []; }).join(", ");
+      } catch { where = ""; }
+    }
     customWhenIdle(ctx, "tutor_notes", `[tutor] ${id} is ticked; code scored it ${score}/100 from its checks and the learner's tests. `
       + `Give at most three notes on design or naming in the code for ${id}, each starting with path:line and one sentence long. `
-      + "Notes carry no points and do not change the level. No code and no fix; if nothing is worth a note, say so in one line.");
+      + "Notes carry no points and do not change the level. No code and no fix; if nothing is worth a note, say so in one line."
+      + (where ? ` The functions: ${where}.` : ""));
   }
   function customWhenIdle(ctx: ExtensionContext, customType: string, text: string, tries = 0) {
     if (closing) return;
