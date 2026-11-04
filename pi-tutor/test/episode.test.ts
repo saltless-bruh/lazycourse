@@ -368,6 +368,36 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
   }, 60000);
+  it("pro score (Task 16): a tick at 67+ shows the score's facts and asks the tutor for notes; /tutor-notes off stops them; three high scores suggest a level", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("70", b.ctx);
+    const levelEntries = () => b.entries.filter((e) => e.type === "tutor_level").length;
+    const levelsBefore = levelEntries();
+    writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 split the bill. done when: `split_amount(48, 3)` is 16.0 and `split_amount(50, 3)` is 16.666666666666668\n- [ ] P2.T3 print\n- [ ] P2.T4 again\n- [ ] P2.T5 again\n");
+    mkdirSync(join(root, "tests"), { recursive: true });
+    const good = (t: string) => `from main import split_amount\n\ndef test_${t}_even():\n    assert split_amount(48, 3) == 16\n`;
+    writeFileSync(join(root, "tests", "test_split.py"), good("p2_t2"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.some((n) => n.includes("pro score 88/100: checks pass 25 · your tests pass 25 · your tests catch a broken version 25 · done-when cases covered 1/2 13"))).toBe(true);
+    const notes = () => b.messages.filter((m) => (m.message as { customType?: string }).customType === "tutor_notes");
+    expect(notes()).toHaveLength(1);
+    expect((notes()[0].message as { content: string }).content).toMatch(/at most three notes on design or naming.*path:line.*no points/s);
+    expect(notes()[0].options).toEqual({ triggerTurn: true });
+    await b.commands["tutor-notes"].handler("off", b.ctx);
+    // P2.T3..T5 share the same checks (they are matched by task id), so give each its own trusted checks.
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const st = JSON.parse(p.setting(`checks:${root}`)!);
+    st.milestones[1].checks.push(...["P2.T3", "P2.T4", "P2.T5"].flatMap((task) => two.map((c) => ({ ...c, task }))));
+    p.setSetting(`checks:${root}`, JSON.stringify(st)); p.close();
+    for (const t of ["P2.T3", "P2.T4"]) {
+      writeFileSync(join(root, "tests", "test_split.py"), good(t.toLowerCase().replace(".", "_")).replace("== 16\n", "== 16\n    assert split_amount(50, 3) == 50 / 3\n"));
+      await b.commands["tutor-done"].handler(t, b.ctx);
+    }
+    expect(notes()).toHaveLength(1);
+    expect(b.notes.some((n) => /your last 3 pro scores average 9\d; \/tutor-level 80 if you want harder work/.test(n))).toBe(true);
+    expect(levelEntries()).toBe(levelsBefore); // the tutor suggests; it never moves the level
+  }, 180000);
   it("own tests (Task 14): a test that cannot fail does not tick; a failing own test is a try; a good one ticks", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("40", b.ctx);

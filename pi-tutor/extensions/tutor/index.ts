@@ -23,7 +23,8 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { canFail, findOwnTests, hasTests, ownTestName, runOwnTests } from "./own-tests.js";
+import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests } from "./own-tests.js";
+import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
 import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
@@ -1224,6 +1225,17 @@ export default function (pi: ExtensionAPI): void {
    * sandbox: all pass → ticked; one fails → a graded try on that check's spot. Unverified checks never block;
    * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
    */
+  /** Task 16: the pro notes on design and naming (no points) are on by default; `/tutor-notes off` stops them. */
+  pi.registerCommand("tutor-notes", {
+    description: "Notes on design and naming after a pro tick: /tutor-notes on|off",
+    handler: async (args, ctx) => {
+      const want = args.trim();
+      if (want !== "on" && want !== "off") { ctx.ui.notify(`usage: /tutor-notes on|off (now ${profile?.setting("pro-notes") === "off" ? "off" : "on"})`, "info"); return; }
+      if (profile) { const p = profile; profileWrite(() => p.setSetting("pro-notes", want)); }
+      ctx.ui.notify(want === "off" ? "no design and naming notes after a pro tick" : "design and naming notes after a pro tick, with no points", "info");
+    },
+  });
+
   pi.registerCommand("tutor-done", {
     description: "Tick a task when its checks pass: /tutor-done [task id] [anyway]",
     handler: (args, ctx) => exclusive(ctx, async () => {
@@ -1276,15 +1288,25 @@ export default function (pi: ExtensionAPI): void {
         // Only a trusted check proves it; unverified ones alone make it self-checked (final review I5).
         if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
         const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
+        // Task 16: at pro a tick from checks shows the pro score, built only from facts code checked here.
+        const scored = async (why: string, own: string[], ownPass: boolean, catches: boolean) => {
+          if (bandFor(level()) !== "pro") return tick("checks", why);
+          const named = doneWhenCalls(tasksMd, id);
+          const cases = named.length ? named : [...new Set(trusted.flatMap((x) => (x.check.kind === "value" && x.check.expr ? [x.check.expr] : [])))];
+          const facts: ProFacts = { checksPass: true, ownTestsPass: ownPass, ownTestsCanFail: catches, edgeCasesTotal: cases.length,
+            edgeCasesCovered: ownPass ? coveredCalls(cases, ownTestBodies(root, proj.language, own)) : 0 };
+          await tick("checks", `${why}; ${scoreLine(facts)}`);
+          afterProTick(ctx, id, proScore(facts));
+        };
         // Spec 2026-10-26 §7 (both must pass): from intermediate on, the learner's own test for the task adds proof.
         const own = bandFor(level()) === "beginner" ? [] : findOwnTests(root, proj.language, id);
         // Phase 4 live run: a weak model may never say how to name the test; code points it out.
-        if (!own.length) return tick("checks", bandFor(level()) !== "beginner" && hasTests(root, proj.language)
+        if (!own.length) return scored(bandFor(level()) !== "beginner" && hasTests(root, proj.language)
           ? `${passed}; no test of yours is named for ${id} (${ownTestName(proj.language, id)}), so none was run`
-          : passed);
+          : passed, [], false, false);
         const host = sandboxHost()!;
         const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, sandbox: host, entry });
-        if (ran.missing) return tick("checks", `${passed}; your test could not run: the sandbox cannot start`);
+        if (ran.missing) return scored(`${passed}; your test could not run: the sandbox cannot start`, own, false, false);
         if (!ran.pass) {
           // Final review I3: the failing test's own name keeps one spot for its tries.
           const name = ran.failed ?? own[0].split("::")[1].split(".").at(-1)!;
@@ -1296,10 +1318,10 @@ export default function (pi: ExtensionAPI): void {
         }
         const able = await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host });
         // Final review I1: with nothing in the code that a broken copy could try it on, the checks prove the task.
-        if (able === "untestable") return tick("checks", `${passed}; your test passes; no broken version of the code it calls could be made to try it on`);
+        if (able === "untestable") return scored(`${passed}; your test passes; no broken version of the code it calls could be made to try it on`, own, true, false);
         recordHabit("tests-that-fail", able === "caught", `test:${id}`);
         if (able === "missed") { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
-        return tick("checks", `${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`);
+        return scored(`${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`, own, true, true);
       }
       failedCheck(id, failed[0]);
     }),
@@ -1618,6 +1640,34 @@ export default function (pi: ExtensionAPI): void {
   function saveOnboarding(o: Onboarding | null) {
     onboarding = o;
     if (profile) { const p = profile; profileWrite(() => p.setSetting("onboarding", o ? JSON.stringify(o) : "")); }
+  }
+  /**
+   * Task 16 (spec 2026-10-21 §8): after a scored tick, remember the score; three far from the level suggest one
+   * (the learner decides; the tutor never moves it); and, unless /tutor-notes off, ask the tutor for notes on
+   * design and naming that carry no points.
+   */
+  function afterProTick(ctx: ExtensionContext, id: string, score: number) {
+    if (!profile || !project) return;
+    try { if (!openTaskIds(readFileSync(join(project.path, "spec", "tasks.md"), "utf8")).every((t) => t !== id)) return; } catch { return; }
+    const p = profile, key = `proscores:${project.language}`;
+    let scores: number[] = [];
+    profileWrite(() => { try { scores = JSON.parse(p.setting(key) ?? "[]"); } catch { scores = []; } scores = [...scores, score].slice(-5); });
+    const to = levelSuggestion(scores, level());
+    if (to !== null) {
+      const recent = scores.slice(-3), avg = Math.round(recent.reduce((a, b) => a + b, 0) / recent.length);
+      ui?.notify(`your last 3 pro scores average ${avg}; /tutor-level ${to} if you want ${to > level() ? "harder" : "easier"} work (you decide)`, "info");
+      scores = [];
+    }
+    profileWrite(() => p.setSetting(key, JSON.stringify(scores)));
+    if (p.setting("pro-notes") === "off") return;
+    customWhenIdle(ctx, "tutor_notes", `[tutor] ${id} is ticked; code scored it ${score}/100 from its checks and the learner's tests. `
+      + `Give at most three notes on design or naming in the code for ${id}, each starting with path:line and one sentence long. `
+      + "Notes carry no points and do not change the level. No code and no fix; if nothing is worth a note, say so in one line.");
+  }
+  function customWhenIdle(ctx: ExtensionContext, customType: string, text: string, tries = 0) {
+    if (closing) return;
+    if (ctx.isIdle() || tries >= 600) { pi.sendMessage({ customType, content: text, display: false }, { triggerTurn: true }); return; }
+    setTimeout(() => customWhenIdle(ctx, customType, text, tries + 1), 50).unref?.();
   }
   /**
    * Live check 2026-10-19: a message queued while a run is still ending (from agent_end) runs as a follow-up

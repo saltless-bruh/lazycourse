@@ -299,6 +299,17 @@ function stringMutants(source: string, language: string): string[] {
   return out;
 }
 
+/** The source of each own test's body (the pro score's done-when coverage, Task 16). */
+export function ownTestBodies(root: string, language: string, tests: string[]): string[] {
+  return tests.flatMap((t) => {
+    const [file, name] = t.split("::");
+    let text = "";
+    try { text = readFileSync(join(root, file), "utf8"); } catch { return []; }
+    const own = functionSpans(text, language).find((f) => f.name === name.split(".").at(-1));
+    return own ? [text.slice(own.at, own.end)] : [];
+  });
+}
+
 /** Names called inside the own tests' bodies (final review I2: not anywhere in a file that tests other tasks too). */
 function calledByTests(root: string, language: string, tests: string[]): Set<string> {
   const called = new Set<string>();
