@@ -368,6 +368,52 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
   }, 60000);
+  it("improve it (Task 17): /tutor-improve measures a ticked task before and after; better and nothing worse is the optimizes habit", async () => {
+    const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+    const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    await b.commands["tutor-level"].handler("70", b.ctx);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items: `count_unique(items)`\n- [ ] P2.T3 print\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/no improve-it task is running: \/tutor-improve <ticked task id> starts one/);
+    b.replies.push("check P2.T2: count_unique([]) == 0\ncheck P2.T2: count_unique([3, 3, 3]) == 1\ntimed P2.T2: count_unique(list(range(20000)))");
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve P2\.T2: .*measured now: longest function 6 lines · nesting 2 · branches 2 · edge cases 2\/2 · count_unique\(list\(range\(20000\)\)\) \d+ ms\. The task's checks must still pass.*\/tutor-improve done/s);
+    writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return 0\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 not yet: the task's checks must still pass: count_unique\(\[1, 1, 2\]\) gave 0, expected 2/);
+    writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items))\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: speed: \d+ ms → \d+ ms · longest function: 6 → 2 lines · nesting: 2 → 0 · branches: 2 → 0/);
+    expect(await habits()).toContainEqual(["optimizes", true]);
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/no improve-it task is running/);
+  }, 180000);
+  it("improve it (Task 17): something worse is no optimizes; /tutor-improve off drops it", async () => {
+    const { b, root } = await doneProject("def count_unique(items):\n    return len(set(items))\n", [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items\n");
+    b.replies.push("check P2.T2: count_unique([]) == 0");
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    n = 0\n    for i, x in enumerate(items):\n        if x not in items[:i]:\n            n += 1\n    return n\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 is not better yet: worse: longest function: 2 → 6 lines · nesting: 0 → 2 · branches: 0 → 2/);
+    expect(await habits()).toContainEqual(["optimizes", false]);
+    b.replies.push("check P2.T2: count_unique([]) == 0");
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await b.commands["tutor-improve"].handler("off", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve-it task for P2\.T2 dropped/);
+    await b.commands["tutor-improve"].handler("P2.T3", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T3 is not a ticked task/);
+  }, 180000);
+  it("complex (Task 17): a task naming three functions, ticked from checks without the fix step, is the complex habit", async () => {
+    const SRC = "def parse(s):\n    return [int(x) for x in s.split()]\n\n\ndef total(xs):\n    return sum(xs)\n\n\ndef report(s):\n    return 'total ' + str(total(parse(s)))\n";
+    const { b, root } = await doneProject(SRC, [{ task: "P2.T2", kind: "value", expr: "report('1 2')", expected: "'total 3'", milestone: 1, status: "trusted" }]);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 write `parse(s)`, `total(xs)` and `report(s)` that work together\n- [ ] P2.T3 print\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(await habits()).toContainEqual(["complex", true]);
+  }, 60000);
   it("pro score (Task 16): a tick at 67+ shows the score's facts and asks the tutor for notes; /tutor-notes off stops them; three high scores suggest a level", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("70", b.ctx);

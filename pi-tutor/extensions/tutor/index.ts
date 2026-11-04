@@ -21,7 +21,8 @@ import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
-import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
+import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
+import { calledFunctions, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests } from "./own-tests.js";
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
@@ -1225,6 +1226,93 @@ export default function (pi: ExtensionAPI): void {
    * sandbox: all pass → ticked; one fails → a graded try on that check's spot. Unverified checks never block;
    * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
    */
+  /**
+   * Habits Task 17 ("improve it", spec 2026-10-26 §8): working code made better, measured before → after. The
+   * model writes edge-case checks and one timed large-input check, kept only when the hidden reference passes
+   * them; the task's own checks must still pass. Better on something and worse on nothing is the optimizes habit.
+   */
+  interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured }
+  const improveKey = (root: string) => `improve:${root}`;
+  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }) {
+    const host = sandboxHost()!;
+    const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host });
+    const own = r.results.slice(0, st.checks.length), extra = r.results.slice(st.checks.length);
+    const metrics = await codeMetrics((c, a, o) => pi.exec(c, a, o), { root, entry, sandbox: host, functions: st.functions });
+    const timed = extra.find((x) => x.check.kind === "timed");
+    const m: Measured | null = metrics && { ...metrics, edgePassed: extra.filter((x) => x.check.kind === "value" && x.pass).length, ms: timed?.ms ?? null };
+    return { m, failed: own.find((x) => !x.pass), missing: r.missing };
+  }
+  pi.registerCommand("tutor-improve", {
+    description: "Make a ticked task's working code better, measured before and after: /tutor-improve <task id>|done|off",
+    handler: (args, ctx) => exclusive(ctx, async () => {
+      if (!project || !profile) { ctx.ui.notify("/tutor-improve works inside a project: /tutor-start makes one", "warning"); return; }
+      const proj = project, p = profile, root = proj.path, arg = args.trim();
+      let st: ImproveState | null = null;
+      profileWrite(() => { try { st = JSON.parse(p.setting(improveKey(root)) ?? "null"); } catch { st = null; } });
+      const running = st as ImproveState | null;
+      if (arg === "off") {
+        profileWrite(() => p.setSetting(improveKey(root), ""));
+        ctx.ui.notify(running ? `the improve-it task for ${running.task} dropped` : "no improve-it task is running", "info");
+        return;
+      }
+      if (proj.language !== "python") { ctx.ui.notify("improve-it measures Python code for now", "info"); return; }
+      if (!sandboxHost()) { ctx.ui.notify("improve-it runs your code in the sandbox, and it is off (/tutor-exam sandbox on)", "info"); return; }
+      const { entry } = projectRun(root, proj.language);
+      if (!entry) { ctx.ui.notify("no entry file: name it in README.md's `run:` command", "warning"); return; }
+      if (arg === "done") {
+        if (!running) { ctx.ui.notify("no improve-it task is running: /tutor-improve <ticked task id> starts one", "info"); return; }
+        const after = await measure(root, entry, running);
+        if (after.missing) { ctx.ui.notify(after.missing, "warning"); return; }
+        const f = after.failed;
+        if (f) {
+          const what = f.check.kind === "value" ? `${f.check.expr} ${f.error ? `failed: ${f.error}` : gaveExpected(f.got ?? "", f.check.expected ?? "")}` : f.error ?? "a check failed";
+          ctx.ui.notify(`${running.task} not yet: the task's checks must still pass: ${what}`, "warning");
+          return;
+        }
+        if (!after.m) { ctx.ui.notify("your file does not parse, so it could not be measured", "warning"); return; }
+        const { better, worse } = improveResult(running.before, after.m);
+        if (better.length || worse.length) recordHabit("optimizes", better.length > 0 && worse.length === 0, `improve:${running.task}`);
+        if (better.length && !worse.length) {
+          profileWrite(() => p.setSetting(improveKey(root), ""));
+          ctx.ui.notify(`${running.task} improved: ${better.join(" · ")}`, "info");
+          return;
+        }
+        ctx.ui.notify(`${running.task} is not better yet: ${worse.length ? `worse: ${worse.join(" · ")}` : "nothing measured changed"}${better.length ? `; better: ${better.join(" · ")}` : ""}`, "info");
+        return;
+      }
+      const id = arg;
+      if (!/^P\d+\.T\d+$/.test(id)) { ctx.ui.notify("usage: /tutor-improve <ticked task id like P1.T2>|done|off", "info"); return; }
+      let tasksMd = "";
+      try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { /* none */ }
+      if (!tickedIds(tasksMd).has(id)) { ctx.ui.notify(`${id} is not a ticked task: improve-it starts from working code`, "info"); return; }
+      let cs: ChecksState = { milestones: {} };
+      profileWrite(() => { cs = readChecksState(p.setting(`checks:${root}`)); });
+      const all = Object.values(cs.milestones).flatMap((m) => m.checks);
+      const checks = liveChecks(all, currentMilestone(tasksMd, lesson)).filter((c) => c.status === "trusted" && c.kind !== "timed" && (c.task === id || c.task.startsWith(`${id}.`)));
+      const ms = Object.entries(cs.milestones).find(([, m]) => m.checks.some((c) => c.task === id));
+      const reference = ms?.[1].reference ?? "";
+      if (!checks.length || !reference) { ctx.ui.notify(`${id} has no trusted checks to keep it working, so it cannot be improved here`, "info"); return; }
+      const line = tasksMd.split("\n").find((l) => l.includes(` ${id} `)) ?? id;
+      ctx.ui.notify(`writing edge-case and timing checks for ${id}…`, "info");
+      const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
+      const text = await rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS))(systemText("improve"),
+        improvePrompt({ taskLine: line, checks: checks.map((c) => c.kind === "value" ? `check ${c.task}: ${c.expr} == ${c.expected}` : `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}`) }));
+      const parsed = parseChecks(text, { language: "python", taskIds: [id], milestone: checks[0].milestone }).checks.filter((c) => c.kind !== "io");
+      const extra = (await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: "python", entry, runCmd: null, reference, checks: parsed, root }))
+        .filter((c) => c.status === "trusted");
+      const functions = calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : [])));
+      const before = await measure(root, entry, { checks, extra, functions });
+      if (before.missing || !before.m) { ctx.ui.notify(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
+      if (before.failed) { ctx.ui.notify(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
+      const next: ImproveState = { task: id, checks, extra, functions, before: before.m };
+      profileWrite(() => p.setSetting(improveKey(root), JSON.stringify(next)));
+      const timed = extra.find((c) => c.kind === "timed")?.expr ?? null;
+      ctx.ui.notify(`improve ${id}: make the working code better — faster, simpler, or right on more edge cases. `
+        + `measured now: ${measuredLine(before.m, extra.filter((c) => c.kind === "value").length, timed)}. `
+        + "The task's checks must still pass. /tutor-improve done measures it again; /tutor-improve off drops it.", "info");
+    }),
+  });
+
   /** Task 16: the pro notes on design and naming (no points) are on by default; `/tutor-notes off` stops them. */
   pi.registerCommand("tutor-notes", {
     description: "Notes on design and naming after a pro tick: /tutor-notes on|off",
@@ -1353,6 +1441,26 @@ export default function (pi: ExtensionAPI): void {
     paint();
   }
 
+  /** Habits Task 17: the task's lines name three or more functions, or its code imports a module new to this language. */
+  function complexTask(root: string, md: string, id: string): boolean {
+    const lines = md.split("\n").filter((l) => new RegExp(`\\b${id.replace(".", "\\.")}(\\.S\\d+)?\\b`).test(l)).join("\n");
+    const named = new Set([...lines.matchAll(/`([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]));
+    let fresh = false;
+    if (profile && project) {
+      const p = profile, key = `modules:${project.language}`, { entry } = projectRun(root, project.language);
+      let src = "";
+      try { if (entry) src = readFileSync(join(root, entry), "utf8"); } catch { /* none */ }
+      const now = importedModules([src], project.language);
+      profileWrite(() => {
+        const seen = p.setting(key);
+        const known = new Set<string>(seen ? JSON.parse(seen) : []);
+        fresh = seen !== null && [...now].some((m) => !known.has(m));
+        p.setSetting(key, JSON.stringify([...new Set([...known, ...now])]));
+      });
+    }
+    return named.size >= 3 || fresh;
+  }
+
   /** Tick `id` and its open subtasks in spec/tasks.md, record how, refresh spec/checks.md, close its check episode. */
   async function tickDone(root: string, id: string, how: TickHow, why: string) {
     const path = join(root, "spec", "tasks.md");
@@ -1375,6 +1483,9 @@ export default function (pi: ExtensionAPI): void {
     if (how === "checks") fixStepStreak = handed ? fixStepStreak + 1 : 0;
     // Final review I8: without a check run there is nothing to say about the idea.
     if (how === "checks") recordHabit("ideas-to-code", ideasToCodeEvent(ownStepsOf(id).has(4), true), `tick:${id}`);
+    // Habits Task 17: a complex task (three or more functions named, or a module never used in an earlier tick)
+    // solved from checks counts toward "figures out complex problems" — unless the tutor handed the fix.
+    if (how === "checks" && complexTask(root, md, id)) recordHabit("complex", handed !== true, `tick:${id}`);
     tickHanded = handed === true;
     if (onTask(episode?.spot)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (onTask(k)) spotMemory.delete(k);

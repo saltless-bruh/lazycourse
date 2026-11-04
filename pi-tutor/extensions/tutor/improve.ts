@@ -74,3 +74,21 @@ export function improveResult(before: Measured, after: Measured): { better: stri
   }
   return { better, worse };
 }
+
+/** The user message for the improve-it checks (prompts/system/improve.md is the system text). */
+export function improvePrompt(i: { taskLine: string; checks: string[] }): string {
+  return ["Language: python.", "The task:", i.taskLine, "", "Its checks so far:", ...i.checks, "", "Line forms:",
+    "check <task id>: <expression> == <expected value>", "timed <task id>: <expression>"].join("\n");
+}
+
+/** The functions the task's checks call (their metrics are what "code" measures). */
+export function calledFunctions(exprs: string[]): string[] {
+  return [...new Set(exprs.flatMap((e) => [...e.matchAll(/(?<![\w.])([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1])))]
+    .filter((n) => !["list", "range", "len", "set", "dict", "tuple", "str", "int", "float", "sorted", "sum", "min", "max", "abs"].includes(n));
+}
+
+/** "longest function 6 lines · nesting 2 · branches 2 · edge cases 2/2 · <timed call> 1840 ms" */
+export function measuredLine(m: Measured, edgeTotal: number, timed: string | null): string {
+  return [`longest function ${m.longestFunction} lines`, `nesting ${m.maxNesting}`, `branches ${m.branches}`,
+    ...(edgeTotal ? [`edge cases ${m.edgePassed}/${edgeTotal}`] : []), ...(timed && m.ms !== null ? [`${timed} ${m.ms} ms`] : [])].join(" · ");
+}
