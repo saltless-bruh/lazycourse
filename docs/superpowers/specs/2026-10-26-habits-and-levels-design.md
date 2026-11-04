@@ -278,3 +278,17 @@ task), a load flake (the before is re-timed next to the after, speed counts at 2
 check now keeps the hidden solution's answer on the large input; metrics follow helper functions; one
 optimizes success per task and project; the step-up's tests part breaks only solve; done-when coverage
 ignores comments and strings; an entry outside the project is no entry.
+
+**Phase 6 (2026-11-04, real LazyVim, Python, level 10, nemotron tutoring, glm-5.3-flash as /tutor-checker; the
+driver plays a beginner with `total * people`).** Run 1 (before the final review): code's checks caught two
+prose fixes; glm then read three replies that passed them: "no" (it quotes the learner's `total * people`),
+"no" (it names the intended behaviour, "split" — too strict: that is the task's own word), "yes"; it took
+154–169 s each; one skip was a resolved provider error read as "an unclear answer: nothing" (final review I2).
+Final review fixes: Esc stops the wait and no rewrite follows it; resolved errors are skips with their message;
+the checker gets the spot and the learner's names, and at `why` only the corrected line is held back; the reply
+is fenced as data; only a first line "yes"/"no[: reason]" is a verdict. Run 2 (final code): code's checks
+rejected seven replies (six prose fixes, one own-code); the two that reached glm both had no answer in three
+minutes, each shown as "the second reader did not answer … shown unread" (side-agent note: a skipped check is
+never silent). Pi's settings unchanged. Finding: the mechanism holds (it only ever made replies stricter, the
+re-ask cap held), but glm on this endpoint is too slow to be a useful second reader; a faster checker model,
+or a longer limit, is the learner's call.

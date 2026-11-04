@@ -11,7 +11,9 @@ import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
-import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "./turns.js";
+import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply, turnInstruction } from "./turns.js";
+/** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
+const CHECKER_TIMEOUT_MS = 180_000;
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL, type ThinkingMode } from "./thinking.js";
 import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.js";
@@ -188,7 +190,7 @@ export default function (pi: ExtensionAPI): void {
   /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
   let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
-  let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep } | null = null;
+  let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
   let pendingRewrite: TurnIssue[] | null = null;
   /** Messages typed mid-reply that Pi has queued (steer or followUp) but not yet delivered to the model. */
@@ -619,7 +621,7 @@ export default function (pi: ExtensionAPI): void {
       const index = packIndex(lang);
       if (index) parts.push(index);
     }
-    if (isRewrite && rewrite) parts.push(formatCheck(rewrite.issues, diagramCols(paneWidth)));
+    if (isRewrite && rewrite) parts.push(formatCheck(rewrite.issues, diagramCols(paneWidth), rewrite.reason));
     else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
@@ -768,6 +770,67 @@ export default function (pi: ExtensionAPI): void {
   /** A teaching turn: its reply is held off screen while it streams and checked before it is shown. */
   const held = () => run !== null && run.step !== null && !onboardingActive();
   const guarded = () => held() && run!.step !== "fix";
+  /**
+   * Habits Task 19 (spec 2026-10-26 §9): `/tutor-checker <provider/model>` names a second model that reads a held
+   * reply after code's checks passed, against this turn's rule. Its "no: <reason>" is handled like a failed code
+   * check; an error, a timeout or an unclear answer lets the reply through, since it may only make replies stricter.
+   */
+  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, names: Set<string>): Promise<string | undefined> {
+    const id = profile?.setting("checker");
+    if (!id || id === "off") return undefined;
+    const slash = id.indexOf("/");
+    if (slash <= 0) { checkerSkipped(`${id} is not a provider/model`); return undefined; } // final review M3
+    const model = ctx.modelRegistry.find(id.slice(0, slash), id.slice(slash + 1));
+    if (!model) { checkerSkipped(`no model ${id} in Pi's model list`); return undefined; }
+    // Final review I3: the facts the rule speaks of, and for `why` only the corrected line is held back.
+    const rule = `${turnInstruction(step)}${step === "why" ? " Do not write the corrected line." : step !== "fix" ? " Do not state the fix, in code or in words." : ""}`;
+    const spot = episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : episode?.spot ?? "";
+    const facts = [spot ? `The spot: ${spot}` : "", names.size ? `The learner's names: ${[...names].slice(0, 30).join(", ")}` : ""].filter(Boolean).join("\n");
+    // Final review M2: the reply is data inside tags, never instructions to the checker.
+    const ask = `This turn's rule: ${rule}${facts ? `\n${facts}` : ""}\n\nThe reply:\n<reply>\n${text}\n</reply>`;
+    const t0 = Date.now();
+    // Final review I1: Esc stops the wait, and nothing it said afterwards counts.
+    const signal = AbortSignal.any([AbortSignal.timeout(CHECKER_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])]);
+    try {
+      const r = await ctx.modelRegistry.complete(model, { systemPrompt: systemText("checker"), messages: [{ role: "user", content: [{ type: "text", text: ask }], timestamp: Date.now() }] }, { signal });
+      // Final review I2: the API resolves its failures (stopReason "error" / "aborted"), it does not throw them.
+      if (ctx.signal?.aborted) { checkerSkipped("stopped"); return undefined; }
+      if (r.stopReason !== "stop") { checkerSkipped(r.stopReason === "aborted" ? "no answer in three minutes" : r.errorMessage || r.stopReason); return undefined; }
+      const answer = r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n").trim();
+      // Final review M1: only a first line that is "yes" or "no" (or "no: reason") is a verdict.
+      const first = (answer.split("\n")[0] ?? "").replace(/\*+/g, "").trim();
+      const v = /^\W*(yes|no)\b\W*?(?:[:—–-]\s*(.*)|\W*)$/i.exec(first);
+      if (!v) { checkerSkipped(`an unclear answer: ${first.slice(0, 60) || "nothing"}`); return undefined; }
+      const verdict = v[1].toLowerCase();
+      pi.appendEntry("tutor_checker", { verdict, ms: Date.now() - t0 }); // live audits count what it read
+      return verdict === "no" ? (v[2]?.trim() || "it breaks this turn's rule") : undefined;
+    } catch (e) {
+      checkerSkipped(ctx.signal?.aborted ? "stopped" : e instanceof Error ? e.message : String(e));
+      return undefined;
+    }
+  }
+  /** Side-agent note: a check that did not happen is never silent; the session counts them for live audits. */
+  function checkerSkipped(why: string) {
+    pi.appendEntry("tutor_checker_skip", { why });
+    ui?.notify(`the second reader did not answer (${why}); this reply was shown unread`, "info");
+  }
+  pi.registerCommand("tutor-checker", {
+    description: "A second model reads each held reply against the turn's rule: /tutor-checker <provider/model>|off",
+    handler: async (args, ctx) => {
+      const want = args.trim();
+      const now = profile?.setting("checker") || "off";
+      if (!want) { ctx.ui.notify(`usage: /tutor-checker <provider/model>|off (now ${now})`, "info"); return; }
+      if (want !== "off") {
+        const slash = want.indexOf("/");
+        if (slash <= 0 || !ctx.modelRegistry.find(want.slice(0, slash), want.slice(slash + 1))) { ctx.ui.notify(`no model ${want} in Pi's model list (/model shows them)`, "warning"); return; }
+      }
+      if (!profile) { ctx.ui.notify("/tutor-checker needs the tutor's profile, which is not open", "warning"); return; } // final review M4
+      const p = profile;
+      profileWrite(() => p.setSetting("checker", want));
+      ctx.ui.notify(want === "off" ? "no second reader: code's checks alone hold replies" : `held replies are also read by ${want} against the turn's rule; it can only make them stricter`, "info");
+    },
+  });
+
   pi.registerMarkdownTransformer((md, c) => {
     // Spec 2026-10-21 §6: before the fix is allowed the thinking (where the model works the fix out) stays hidden.
     if (c.messageType === "assistant-thinking") return thinkingHidden(thinking, bandFor(level()), guarded()) ? THINKING_LABEL : md;
@@ -777,7 +840,7 @@ export default function (pi: ExtensionAPI): void {
     const shown = hideJudgment(scrubInternals(md));
     return held() ? foldPreamble(shown) : shown;
   });
-  pi.on("message_end", (event) => {
+  pi.on("message_end", async (event, ctx) => {
     const m = event.message;
     if (m.role !== "assistant") return;
     // Live check 2026-10-19: a run Pi continues from our kick has no before_agent_start, so the onboarding
@@ -798,17 +861,23 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      const issues = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
+      // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
+      let reason: string | undefined;
+      if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
+        reason = await askChecker(ctx, cur.step, text, cur.names ?? new Set());
+        if (reason) issues = ["checker"];
+      }
       if (issues.length) {
         // The session keeps what was rejected (never shown) so a live audit can tell a leak from a too-strict check.
-        pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000) });
+        pi.appendEntry("tutor_check", { issues, step: cur.step, reasks: cur.reasks ?? 0, rejected: text.slice(0, 2000), ...(reason ? { reason } : {}) });
         // Final review M2: a reply cut off (length) or broken (error) is still the last word of its run: it gets the
         // fallback, never an empty reply. Only a clean stop is re-asked.
         const final = !m.content.some((c) => c.type === "toolCall");
         let replacement = "";
         if (final && m.stopReason === "stop" && (cur.reasks ?? 0) < MAX_REASKS) {
           replacement = REWRITE_TEXT;
-          rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step };
+          rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step, ...(reason ? { reason } : {}) };
           pendingRewrite = issues;
         } else if (final) {
           replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined);

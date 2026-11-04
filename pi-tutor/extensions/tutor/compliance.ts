@@ -89,6 +89,7 @@ export function checkReply(text: string, o: { band: Band; step: TurnStep | null;
 
 const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "missing-judgment": () => "it did not end with the fenced tutor-judgment block (plain text, not a tool call)",
+  "checker": () => "it was read again by a second reader, who found it breaks this turn's instruction; follow it exactly",
   "code-above-rung": () => "it showed code the current rung does not allow; point and explain instead",
   "wide-diagram": (cols) => `a diagram line was wider than the learner's pane (${cols} characters); stack it vertically`,
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
@@ -177,17 +178,18 @@ export function replyReminder(step: TurnStep | null, recipe = false): string {
 }
 
 /** Hidden next-turn note so the model corrects itself (the extension cannot un-write a reply). */
-export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS): string {
+export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS, reason?: string): string {
   // Live check: worded as "your last reply", the model blamed the learner's diagram for its own.
   return [
     "[tutor-check] Your own previous reply (the tutor's, not the learner's) broke these rules. Follow them in this reply, and do not mention this note to the learner:",
-    ...issues.map((i) => `- ${FIX[i](cols)}`),
+    ...issues.map((i) => `- ${i === "checker" && reason ? `it was read again by a second reader: ${reason}; follow this turn's instruction exactly` : FIX[i](cols)}`),
   ].join("\n");
 }
 
 // ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
 
-export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix";
+/** "checker" (habits Task 19): an optional second model read the reply and said it breaks this turn's rule. */
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix" | "checker";
 
 // Spec 2026-10-26 §5.3: nemotron named the fix in words ("use / instead of *", "true division is needed").
 const INSTRUCTION = /\b(use|using|change|replace|switch|should be|instead of|try|needs?|need to|is needed|requires?|must be)\b/i;
