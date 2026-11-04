@@ -18,7 +18,21 @@ try:
 except BaseException:
     print("null"); sys.exit(0)
 names = set(sys.argv[2:])
-fns = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and (not names or n.name in names)]
+defs = {}
+for n in ast.walk(tree):
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)): defs.setdefault(n.name, n)
+# final review I2: the named functions and every function of the file they call, directly or not, so moving the
+# body into a helper changes nothing
+keep, todo = set(), list(names)
+while todo:
+    n = todo.pop()
+    if n in keep or n not in defs: continue
+    keep.add(n)
+    for c in ast.walk(defs[n]):
+        if isinstance(c, ast.Call):
+            f = c.func
+            todo.append(f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else "")
+fns = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and (not names or n.name in keep)]
 BLOCK = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try) + ((ast.Match,) if hasattr(ast, "Match") else ())
 def depth(node, d):
     best = d
@@ -46,13 +60,17 @@ print(json.dumps({
 `;
 
 /** Python metrics of `entry` (only `functions`, when given), or null when it does not parse or cannot run. */
-export async function codeMetrics(exec: RunExec, i: { root: string; entry: string; sandbox: SandboxHost; functions?: string[] }): Promise<Metrics | null> {
+export async function codeMetrics(exec: RunExec, i: { root: string; entry: string; sandbox: SandboxHost; functions?: string[]; overlay?: Record<string, string> }): Promise<Metrics | null> {
   let real = i.root;
   try { real = realpathSync(i.root); } catch { return null; }
   const py = LANGS.python.command;
   const sb = await sandboxFor(exec, real, "python", [py], i.sandbox);
   if ("missing" in sb) return null;
-  const r = await sb.run(cappedArgv([py, "-c", PY_METRICS, i.entry, ...(i.functions ?? [])], 4096, 2048), 30_000);
+  // `overlay`: files laid over the throwaway copy only (the code as it was when /tutor-improve was typed).
+  const files = Object.entries(i.overlay ?? {});
+  const write = 'while [ "$1" != "--" ]; do mkdir -p "$(dirname "$1")" && printf "%s" "$2" > "$1" || exit 126; shift 2; done; shift; exec "$@"';
+  const argv = [py, "-c", PY_METRICS, i.entry, ...(i.functions ?? [])];
+  const r = await sb.run(cappedArgv(files.length ? ["sh", "-c", write, "sh", ...files.flat(), "--", ...argv] : argv, 4096, 2048), 30_000);
   try { return JSON.parse(r.stdout.trim()) as Metrics | null; } catch { return null; }
 }
 

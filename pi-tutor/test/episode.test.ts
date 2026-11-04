@@ -367,6 +367,10 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("check", b.ctx);
     expect(b.notes.at(-1)).toMatch(/solve 2\/2 · fix 1\/1 · plan 1\/1 · tests 0\/1 · improve 0\/1/);
     // the learner's tests run against the hidden solution: a wrong solve.py cannot make wrong tests look right
+    // final review I4: tests of the project's own code, not of solve, do not count, even though they catch a broken copy of it
+    writeFileSync(join(root, "stepup", "test_solve.py"), "from main import split_amount\n\ndef test_x():\n    assert split_amount(48, 3) == 16\n");
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/tests 0\/1/);
     writeFileSync(join(root, "stepup", "solve.py"), "def weekday(iso):\n    return 'Sunday'\n");
     writeFileSync(join(root, "stepup", "test_solve.py"), "from solve import weekday\n\ndef test_monday():\n    assert weekday('2026-11-02') == 'Monday'\n");
     writeFileSync(join(root, "stepup", "improve.py"), "def count_unique(items):\n    return len(set(items))\n");
@@ -433,7 +437,15 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(await habits()).toContainEqual(["optimizes", true]);
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/no improve-it task is running/);
-  }, 180000);
+    // final review I3: make it worse, start again, undo it — a repeat on the same task never counts twice
+    writeFileSync(join(root, "src", "main.py"), SLOW);
+    b.replies.push("check P2.T2: count_unique([]) == 0");
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items))\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: .*\(optimizes counts once per task; P2\.T2 already counted\)/);
+    expect((await habits()).filter(([h]) => h === "optimizes")).toHaveLength(1);
+  }, 240000);
   it("improve it (load flake): the before code is timed again next to the after code, so unchanged code is never faster", async () => {
     const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
     const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
@@ -450,6 +462,20 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/P2\.T2 is not better yet: nothing measured changed/);
     expect((await habits()).map(([h]) => h)).not.toContain("optimizes");
+  }, 180000);
+  it("improve it (phase 5 live run): an edit made while /tutor-improve is still measuring does not change the before", async () => {
+    const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+    const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items\n");
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => {
+      writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items))\n"); // the learner, too early
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "check P2.T2: count_unique([]) == 0" }] };
+    };
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/measured now: longest function 5 statements · nesting 2 · branches 2/);
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: longest function: 5 → 1 statements/);
   }, 180000);
   it("improve it (Task 17): something worse is no optimizes; /tutor-improve off drops it", async () => {
     const { b, root } = await doneProject("def count_unique(items):\n    return len(set(items))\n", [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
@@ -480,7 +506,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     const c = (task: string, expr: string, expected: string) => ({ task, kind: "value", expr, expected, milestone: 1, status: "trusted" });
     const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
       [c("P2.T2", "split_amount(50, 4)", "12.5"), c("P2.T3", "area(1)", "3.141592653589793"), c("P2.T4", "dumps_sorted({'b': 1, 'a': 2})", "'{\"a\": 2, \"b\": 1}'")]);
-    writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 write `split_amount(total, people)`\n- [ ] P2.T3 write `area(r)`, a circle's area\n- [ ] P2.T4 write `sort_keys(d)` and `dumps_sorted(d)` that use it\n");
+    writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 write `split_amount(total, people)` with `round(x)` and `max(a, b)`\n- [ ] P2.T3 write `area(r)`, a circle's area\n- [ ] P2.T4 write `sort_keys(d)` and `dumps_sorted(d)` that use it\n");
     await b.commands["tutor-done"].handler("P2.T2", b.ctx); // the first tick learns which modules are known
     writeFileSync(join(root, "src", "main.py"), "import math\n\ndef area(r):\n    return math.pi * r * r\n");
     await b.commands["tutor-done"].handler("P2.T3", b.ctx);

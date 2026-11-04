@@ -34,6 +34,11 @@ describe.skipIf(!bwrapReady)("codeMetrics", () => {
     for (const src of [tidy, messy, joined])
       expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() })).toEqual({ longestFunction: 3, maxNesting: 0, branches: 0 });
   }, 60_000);
+  it("final review I2: the functions they call count too, so moving the body into a helper changes nothing", async () => {
+    const helper = "def count_unique(xs):\n    return _impl(xs)\n\n\ndef _impl(xs):\n    seen = []\n    for x in xs:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+    expect(await codeMetrics(realExec, { root: project({ "src/main.py": helper }), entry: "src/main.py", sandbox: host(), functions: ["count_unique"] }))
+      .toEqual({ longestFunction: 5, maxNesting: 2, branches: 2 });
+  }, 60_000);
   it("only the named functions, when given; a file that does not parse gives null", async () => {
     const root = project({ "src/main.py": "def a():\n    if 1:\n        pass\n\n\ndef b():\n    return 2\n" });
     expect(await codeMetrics(realExec, { root, entry: "src/main.py", sandbox: host(), functions: ["b"] })).toEqual({ longestFunction: 1, maxNesting: 0, branches: 0 });

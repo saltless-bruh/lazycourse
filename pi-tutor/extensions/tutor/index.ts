@@ -1236,11 +1236,14 @@ export default function (pi: ExtensionAPI): void {
    */
   interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured; beforeSource?: string }
   const improveKey = (root: string) => `improve:${root}`;
-  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string) {
+  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string, asOf?: string) {
     const host = sandboxHost()!, exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
-    const r = await runChecks(exec, { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host });
+    // Phase 5 live run: `asOf` measures that exact text (laid over in the throwaway copy), so an edit made while
+    // /tutor-improve is still working never mixes into the before.
+    const asOver = asOf !== undefined ? { [entry]: asOf } : undefined;
+    const r = await runChecks(exec, { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host, overlay: asOver });
     const own = r.results.slice(0, st.checks.length), extra = r.results.slice(st.checks.length);
-    const metrics = await codeMetrics(exec, { root, entry, sandbox: host, functions: st.functions });
+    const metrics = await codeMetrics(exec, { root, entry, sandbox: host, functions: st.functions, overlay: asOver });
     const timed = extra.find((x) => x.check.kind === "timed");
     let ms = timed?.ms ?? null, baseMs: number | null = null;
     // Load flake: the first timing ran at another moment, under other load; the code as it was before is timed
@@ -1273,6 +1276,8 @@ export default function (pi: ExtensionAPI): void {
         return;
       }
       if (proj.language !== "python") { ctx.ui.notify("improve-it measures Python code for now", "info"); return; }
+      if (exam && arg !== "done") { ctx.ui.notify("improve-it waits until the exam is over (/tutor-submit)", "info"); return; }
+      if (running && arg !== "done") { ctx.ui.notify(`an improve-it task for ${running.task} is running: /tutor-improve done, or /tutor-improve off first`, "info"); return; }
       if (!sandboxHost()) { ctx.ui.notify("improve-it runs your code in the sandbox, and it is off (/tutor-exam sandbox on)", "info"); return; }
       const { entry } = projectRun(root, proj.language);
       if (!entry) { ctx.ui.notify("no entry file: name it in README.md's `run:` command", "warning"); return; }
@@ -1288,10 +1293,15 @@ export default function (pi: ExtensionAPI): void {
         }
         if (!after.m) { ctx.ui.notify("your file does not parse, so it could not be measured", "warning"); return; }
         const { better, worse } = improveResult({ ...running.before, ms: after.baseMs ?? running.before.ms }, after.m);
-        if (better.length || worse.length) recordHabit("optimizes", better.length > 0 && worse.length === 0, `improve:${running.task}`);
-        if (better.length && !worse.length) {
+        // Final review I3: a success counts once per task and project; making it worse and undoing it again earns nothing.
+        const evidence = `improve:${root}:${running.task}`;
+        let counted = false;
+        profileWrite(() => { counted = p.habitEvents().some((e) => e.habit === "optimizes" && e.ok && e.evidence === evidence); });
+        const good = better.length > 0 && worse.length === 0;
+        if ((better.length || worse.length) && !(good && counted)) recordHabit("optimizes", good, evidence);
+        if (good) {
           profileWrite(() => p.setSetting(improveKey(root), ""));
-          ctx.ui.notify(`${running.task} improved: ${better.join(" · ")}`, "info");
+          ctx.ui.notify(`${running.task} improved: ${better.join(" · ")}${counted ? ` (optimizes counts once per task; ${running.task} already counted)` : ""}`, "info");
           return;
         }
         ctx.ui.notify(`${running.task} is not better yet: ${worse.length ? `worse: ${worse.join(" · ")}` : "nothing measured changed"}${better.length ? `; better: ${better.join(" · ")}` : ""}`, "info");
@@ -1309,6 +1319,8 @@ export default function (pi: ExtensionAPI): void {
       const ms = Object.entries(cs.milestones).find(([, m]) => m.checks.some((c) => c.task === id));
       const reference = ms?.[1].reference ?? "";
       if (!checks.length || !reference) { ctx.ui.notify(`${id} has no trusted checks to keep it working, so it cannot be improved here`, "info"); return; }
+      let beforeSource: string;
+      try { beforeSource = readFileSync(join(root, entry), "utf8"); } catch { ctx.ui.notify(`cannot read ${entry}`, "warning"); return; }
       const line = tasksMd.split("\n").find((l) => l.includes(` ${id} `)) ?? id;
       ctx.ui.notify(`writing edge-case and timing checks for ${id}…`, "info");
       const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
@@ -1318,12 +1330,10 @@ export default function (pi: ExtensionAPI): void {
       const extra = (await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: "python", entry, runCmd: null, reference, checks: parsed, root }))
         .filter((c) => c.status === "trusted");
       const functions = calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : [])));
-      const before = await measure(root, entry, { checks, extra, functions });
+      const before = await measure(root, entry, { checks, extra, functions }, undefined, beforeSource);
       if (before.missing || !before.m) { ctx.ui.notify(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
       if (before.failed) { ctx.ui.notify(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
-      let beforeSource: string | undefined;
-      try { beforeSource = readFileSync(join(root, entry), "utf8"); } catch { beforeSource = undefined; }
-      const next: ImproveState = { task: id, checks, extra, functions, before: before.m, ...(beforeSource !== undefined ? { beforeSource } : {}) };
+      const next: ImproveState = { task: id, checks, extra, functions, before: before.m, beforeSource };
       profileWrite(() => p.setSetting(improveKey(root), JSON.stringify(next)));
       const timed = extra.find((c) => c.kind === "timed")?.expr ?? null;
       ctx.ui.notify(`improve ${id}: make the working code better — faster, simpler, or right on more edge cases. `
@@ -1396,14 +1406,15 @@ export default function (pi: ExtensionAPI): void {
         if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
         const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
         // Task 16: at pro a tick from checks shows the pro score, built only from facts code checked here.
-        const scored = async (why: string, own: string[], ownPass: boolean, catches: boolean) => {
+        // Final review M3: `judged` false when the own tests could not run, so a sandbox failure never suggests a level.
+        const scored = async (why: string, own: string[], ownPass: boolean, catches: boolean, judged = own.length > 0) => {
           if (bandFor(level()) !== "pro") return tick("checks", why);
           const named = doneWhenCalls(tasksMd, id);
           const cases = named.length ? named : [...new Set(trusted.flatMap((x) => (x.check.kind === "value" && x.check.expr ? [x.check.expr] : [])))];
           const facts: ProFacts = { checksPass: true, ownTestsPass: ownPass, ownTestsCanFail: catches, edgeCasesTotal: cases.length,
             edgeCasesCovered: ownPass ? coveredCalls(cases, ownTestBodies(root, proj.language, own)) : 0 };
           await tick("checks", `${why}; ${scoreLine(facts)}`);
-          afterProTick(ctx, id, proScore(facts), own.length > 0);
+          afterProTick(ctx, id, proScore(facts), judged);
         };
         // Spec 2026-10-26 §7 (both must pass): from intermediate on, the learner's own test for the task adds proof.
         const own = bandFor(level()) === "beginner" ? [] : findOwnTests(root, proj.language, id);
@@ -1413,7 +1424,7 @@ export default function (pi: ExtensionAPI): void {
           : passed, [], false, false);
         const host = sandboxHost()!;
         const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, sandbox: host, entry });
-        if (ran.missing) return scored(`${passed}; your test could not run: the sandbox cannot start`, own, false, false);
+        if (ran.missing) return scored(`${passed}; your test could not run: the sandbox cannot start`, own, false, false, false);
         if (!ran.pass) {
           // Final review I3: the failing test's own name keeps one spot for its tries.
           const name = ran.failed ?? own[0].split("::")[1].split(".").at(-1)!;
@@ -1460,10 +1471,12 @@ export default function (pi: ExtensionAPI): void {
     paint();
   }
 
+  const BUILTINS = new Set(["print", "input", "len", "range", "round", "max", "min", "sum", "abs", "sorted", "int", "float", "str", "list", "dict", "set", "tuple", "map", "filter", "zip", "enumerate", "open", "isinstance", "type", "any", "all"]);
   /** Habits Task 17: the task's lines name three or more functions, or it is multi-part and its code imports a module new to this language. */
   function complexTask(root: string, md: string, id: string): boolean {
     const lines = md.split("\n").filter((l) => new RegExp(`\\b${id.replace(".", "\\.")}(\\.S\\d+)?\\b`).test(l)).join("\n");
-    const named = new Set([...lines.matchAll(/`([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]));
+    // Final review M4: built-ins in backticks (`round(x)`, `len(…)`) are not the task's functions.
+    const named = new Set([...lines.matchAll(/`([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]).filter((n) => !BUILTINS.has(n)));
     let fresh = false;
     if (profile && project) {
       const p = profile, key = `modules:${project.language}`, { entry } = projectRun(root, project.language);
@@ -1472,7 +1485,8 @@ export default function (pi: ExtensionAPI): void {
       const now = importedModules([src], project.language);
       profileWrite(() => {
         const seen = p.setting(key);
-        const known = new Set<string>(seen ? JSON.parse(seen) : []);
+        let known = new Set<string>();
+        try { known = new Set<string>(seen ? JSON.parse(seen) : []); } catch { known = new Set(); }
         fresh = seen !== null && [...now].some((m) => !known.has(m));
         p.setSetting(key, JSON.stringify([...new Set([...known, ...now])]));
       });
@@ -1625,7 +1639,7 @@ export default function (pi: ExtensionAPI): void {
     if (host && tests.length && s.solveRef) {
       const overlay = { [`stepup/solve${ext}`]: s.solveRef };
       const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, sandbox: host, entry: `stepup/solve${ext}`, overlay });
-      testsOk = ran.pass && (await canFail((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, entry: `stepup/solve${ext}`, sandbox: host, overlay })) === "caught";
+      testsOk = ran.pass && (await canFail((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, entry: `stepup/solve${ext}`, sandbox: host, overlay, only: [`stepup/solve${ext}`] })) === "caught";
     }
     let improveOk = s.improveMissing === true;
     if (!improveOk && s.improveBefore && host) {

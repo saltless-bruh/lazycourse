@@ -100,7 +100,7 @@ export function extractCode(reply: string): string {
 export function crossCheck(results: CheckResult[]): Check[] {
   // Habits Task 17: a timed check that ran on the reference gets its limit, the reference's time × 3 (at least 50 ms).
   return results.map((r) => ({ ...r.check, status: r.pass ? "trusted" : "unverified",
-    ...(r.check.kind === "timed" && r.pass ? { limitMs: Math.max(50, Math.ceil((r.ms ?? 0) * 3)) } : {}) }));
+    ...(r.check.kind === "timed" && r.pass ? { limitMs: Math.max(50, Math.ceil((r.ms ?? 0) * 3)), ...(r.got ? { expected: r.got } : {}) } : {}) }));
 }
 
 const ROUNDED = "an answer rounded down to a whole number (floor, //, integer division) passes them; use inputs whose result is not whole";

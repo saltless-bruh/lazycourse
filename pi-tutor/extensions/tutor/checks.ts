@@ -67,8 +67,9 @@ const called = (c: Check) => (c.kind !== "io" ? /^([A-Za-z_][\w.:]*)\s*\(/.exec(
 export function liveChecks(all: Check[], milestone: number): Check[] {
   const reached = all.filter((c) => c.milestone <= milestone);
   const newest = new Map<string, number>();
-  for (const c of reached) { const f = called(c); if (f) newest.set(f, Math.max(newest.get(f) ?? 0, c.milestone)); }
-  return reached.filter((c) => { const f = called(c); return !f || newest.get(f) === c.milestone; });
+  // Final review M7: only value checks retire; a timed check is kept unless a newer value check names its function.
+  for (const c of reached) { const f = c.kind === "value" ? called(c) : undefined; if (f) newest.set(f, Math.max(newest.get(f) ?? 0, c.milestone)); }
+  return reached.filter((c) => { const f = called(c); return !f || (c.kind === "timed" ? c.milestone >= (newest.get(f) ?? 0) : newest.get(f) === c.milestone); });
 }
 
 const show = (s: string) => JSON.stringify(s);

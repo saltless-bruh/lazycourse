@@ -3,6 +3,7 @@
 // there, and nothing a check writes reaches the real folder. One process per check, so an endless loop in
 // one check cannot hide the others.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { LANGS } from "./knowledge/versions.js";
 import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
@@ -36,6 +37,15 @@ const SOURCE_EXT: Record<string, RegExp> = {
 
 const DEFAULT_ENTRY: Record<string, string> = { rust: "src/main.rs", go: "src/main.go" };
 
+/** Final review I6: an entry that leaves the project folder (`../x.py`, an absolute path, a symlink out) is no entry. */
+function inRoot(root: string, entry: string): string | null {
+  let base: string;
+  try { base = realpathSync(root); } catch { base = resolve(root); }
+  let full = resolve(base, entry);
+  try { full = realpathSync(full); } catch { /* not there yet: the plain path decides */ }
+  return full.startsWith(`${base}/`) ? entry : null;
+}
+
 /** The project's `run:` command (README front matter) and the entry file named in it. */
 export function projectRun(root: string, language: string): { runCmd: string | null; entry: string | null } {
   let text = "";
@@ -50,12 +60,13 @@ export function projectRun(root: string, language: string): { runCmd: string | n
     const e = /^entry:\s*(.+?)\s*$/.exec(l);
     if (e) named = e[1];
   }
-  if (named) return { runCmd, entry: named };
+  if (named) return { runCmd, entry: inRoot(root, named) };
   const ext = SOURCE_EXT[language];
   const inRun = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
   // Spec 2026-10-22 §5.1: older Rust/Go projects (`cargo run`, `go run ./src`) start in the language's usual file.
   const fallback = DEFAULT_ENTRY[language];
-  return { runCmd, entry: inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null) };
+  const found = inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null);
+  return { runCmd, entry: found && inRoot(root, found) };
 }
 
 const PY_HARNESS = `
@@ -110,7 +121,19 @@ except _Input:
 except BaseException as e:
     out(error="%s: %s" % (type(e).__name__, e))
 else:
-    if timed: out(ms=ms); sys.exit(0)
+    if timed:
+        # Final review I1: the answer on the large input must match the hidden solution's (kept as its repr, or a
+        # sha256 of a long one), so wrong-but-fast code is not faster.
+        import hashlib
+        r = repr(got)
+        h = hashlib.sha256(r.encode()).hexdigest()
+        if expected:
+            try:
+                ok = expected[7:] == h if expected.startswith("sha256:") else same(got, eval(expected, ns))
+            except BaseException:
+                ok = False
+            if not ok: out(error="gave a different answer on the large input than the hidden solution"); sys.exit(0)
+        out(ms=ms, got=r if len(r) <= 2000 else "sha256:" + h); sys.exit(0)
     kind = "other" if isinstance(got, bool) else "int" if isinstance(got, int) else "float" if isinstance(got, float) else "other"
     out(**{"pass": same(got, want), "got": repr(got), "type": kind})
 `;
@@ -237,9 +260,10 @@ function timedResult(check: Check, r: { stdout: string; stderr: string; code: nu
   const v = valueResult(check, r);
   if (v.error !== undefined) return v;
   const line = r.stdout.split("\n").filter((l) => l.startsWith(MARK)).at(-1)!;
-  const ms = Math.round((JSON.parse(line.slice(MARK.length)) as { ms: number }).ms);
+  const o = JSON.parse(line.slice(MARK.length)) as { ms: number; got?: string };
+  const ms = Math.round(o.ms);
   const limit = check.limitMs;
-  return limit === undefined || ms <= limit ? { check, pass: true, ms }
+  return limit === undefined || ms <= limit ? { check, pass: true, ms, got: o.got }
     : { check, pass: false, ms, error: `took ${ms} ms; the limit is ${limit} ms (the reference's time × 3)` };
 }
 
@@ -290,7 +314,7 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
     }
     if (check.kind === "timed") {
       if (!i.entry || !interp || i.language !== "python") { results.push({ check, pass: false, outcome: "unfit", error: "timed checks run for Python only" }); continue; }
-      results.push(timedResult(check, await limitedRun(sb, capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", "", "timed"])), limit)));
+      results.push(timedResult(check, await limitedRun(sb, capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? "", "timed"])), limit)));
       continue;
     }
     if (!i.entry || !interp || (i.language !== "python" && i.language !== "lua")) {

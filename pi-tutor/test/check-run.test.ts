@@ -181,9 +181,22 @@ describe.skipIf(!bwrapReady)("timed checks (habits spec 2026-10-26 §8)", () => 
     expect(slow.results[0].pass).toBe(false);
     expect(slow.results[0].error).toMatch(new RegExp(`^took \\d+ ms; the limit is ${ref.limitMs} ms \\(the reference's time × 3\\)$`));
     expect(slow.results[0].ms).toBeGreaterThan(ref.limitMs!);
+    // final review I1: the reference's answer on the large input is kept, so wrong-but-fast code fails
+    expect(ref.expected).toBe("20000");
+    const cheat = await py(project({ "src/main.py": "def count_unique(items):\n    if len(items) > 1000:\n        return 0\n    return len(set(items))\n" }), [ref]);
+    expect(cheat.results[0]).toMatchObject({ pass: false, error: "gave a different answer on the large input than the hidden solution" });
   }, 120_000);
   it("a call that fails is an error, not a time", async () => {
     const r = await py(project({ "src/main.py": "def count_unique(items):\n    return 1 / 0\n" }), [timed(100)]);
     expect(r.results[0]).toMatchObject({ pass: false, error: "ZeroDivisionError: division by zero" });
   }, 60_000);
+});
+
+describe("projectRun keeps the entry inside the project (final review I6)", () => {
+  it("an entry that points outside the root is no entry", () => {
+    const root = project({ "README.md": "---\nrun: python3 src/main.py\nentry: ../outside.py\n---\n" });
+    expect(projectRun(root, "python").entry).toBeNull();
+    const ok = project({ "README.md": "---\nrun: python3 src/main.py\n---\n", "src/main.py": "" });
+    expect(projectRun(ok, "python").entry).toBe("src/main.py");
+  });
 });

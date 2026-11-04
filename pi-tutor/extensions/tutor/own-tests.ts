@@ -370,7 +370,7 @@ function calledByTests(root: string, language: string, tests: string[]): Set<str
  * (final review I2) so the budget is not spent on one. Test code is never touched. With no called function
  * found, the entry file.
  */
-function brokenCopies(root: string, language: string, tests: string[], entry: string | null, overlay: Record<string, string> = {}): [string, string][] {
+function brokenCopies(root: string, language: string, tests: string[], entry: string | null, overlay: Record<string, string> = {}, only?: string[]): [string, string][] {
   const read = (rel: string) => overlay[rel] ?? readFileSync(join(root, rel), "utf8");
   const called = calledByTests(root, language, tests);
   const notTest = (n: string) => !/^(test_|Test)/.test(n) && !/^p\d+_t\d+_/.test(n);
@@ -388,15 +388,16 @@ function brokenCopies(root: string, language: string, tests: string[], entry: st
     }
     groups.push(...byFn.values());
   };
-  for (const rel of sources(root, (n) => n.endsWith(EXT[language]))) {
-    if (isTestFile(rel, language)) continue;
+  // Final review I4: `only` keeps the broken copies to those files (the step-up's solve), so tests of other code never count.
+  for (const rel of only ?? sources(root, (n) => n.endsWith(EXT[language]))) {
+    if (!only && isTestFile(rel, language)) continue;
     let source: string;
     try { source = read(rel); } catch { continue; }
     const spans = functionSpans(source, language).filter((f) => called.has(f.name) && notTest(f.name));
     if (spans.length) { found = true; add(rel, source, spans); }
   }
   // Only when no function the test calls was found: a found one with nothing to break stays untestable.
-  if (!found && entry) {
+  if (!found && entry && (!only || only.includes(entry))) {
     try { add(entry, read(entry), null); } catch { /* no entry file */ }
   }
   const out: [string, string][] = [];
@@ -411,10 +412,10 @@ function brokenCopies(root: string, language: string, tests: string[], entry: st
  * only crashes proves nothing, since a test with no assertion "fails" on it too.
  */
 export type CanFail = "caught" | "missed" | "untestable";
-export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost; overlay?: Record<string, string> }): Promise<CanFail> {
+export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost; overlay?: Record<string, string>; only?: string[] }): Promise<CanFail> {
   if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return "untestable";
   const overlay = i.overlay ?? {};
-  const copies = brokenCopies(i.root, i.language, i.tests, i.entry ?? null, overlay);
+  const copies = brokenCopies(i.root, i.language, i.tests, i.entry ?? null, overlay, i.only);
   if (!copies.length) return "untestable";
   const sb = await sandbox(exec, i.root, i.language, i.sandbox);
   if (!sb) return "untestable";

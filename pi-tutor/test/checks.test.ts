@@ -114,5 +114,8 @@ describe("timed checks in checks.md (habits Task 17)", () => {
     expect(renderChecksMd([{ ...t, limitMs: undefined, status: "unverified" }], new Set())).toContain("- count_unique(list(range(20000))) is timed (unverified)");
     const later: Check = { task: "P2.T1", kind: "value", expr: "count_unique([1])", expected: "1", milestone: 2, status: "trusted" };
     expect(liveChecks([t, later], 2)).toEqual([later]);
+    // final review M7: a later timed check never retires a function's value checks
+    const value1: Check = { task: "P1.T1", kind: "value", expr: "count_unique([1])", expected: "1", milestone: 1, status: "trusted" };
+    expect(liveChecks([value1, { ...t, milestone: 2 }], 2)).toEqual([value1, { ...t, milestone: 2 }]);
   });
 });

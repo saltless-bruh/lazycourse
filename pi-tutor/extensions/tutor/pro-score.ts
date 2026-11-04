@@ -1,6 +1,7 @@
 // The pro score (spec 2026-10-21 §8, habits spec 2026-10-26 §8, Task 16): only facts code can check, so every
 // point re-runs the same way. The model's views on design and naming are notes with no points and no effect on
 // the level; a run of scores far from the level makes the tutor suggest a level, and the learner decides.
+import { codeMask } from "./step-up.js";
 
 export interface ProFacts { checksPass: boolean; ownTestsPass: boolean; ownTestsCanFail: boolean; edgeCasesCovered: number; edgeCasesTotal: number }
 
@@ -27,9 +28,10 @@ export function doneWhenCalls(tasksMd: string, task: string): string[] {
 
 const squash = (s: string) => s.replace(/\s+/g, "");
 
-/** How many of `calls` an own test's body makes, spaces ignored. */
+/** How many of `calls` an own test's body makes, spaces ignored; never in a comment or a string (final review I5). */
 export function coveredCalls(calls: string[], testBodies: string[]): number {
-  const bodies = testBodies.map(squash);
+  const codeOnly = (b: string) => { const m = codeMask(b, "python"); return [...b].map((ch, k) => (m[k] ? ch : " ")).join(""); };
+  const bodies = testBodies.map((b) => squash(codeOnly(b)));
   return calls.filter((c) => bodies.some((b) => b.includes(squash(c)))).length;
 }
 

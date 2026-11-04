@@ -20,6 +20,8 @@ describe("done-when edge cases", () => {
   it("are covered when an own test's body makes the same call, spaces ignored", () => {
     expect(coveredCalls(["split_amount(48, 3)", "split_amount(50, 3)"], ["    assert split_amount(48,3) == 16\n"])).toBe(1);
     expect(coveredCalls(["split_amount(48, 3)"], ["    assert split_amount(480, 3) == 160\n"])).toBe(0);
+    // final review I5: a call in a comment or a string is not a test of it
+    expect(coveredCalls(["f(0, 3)", "f(-1, 3)"], ["    assert f(48, 3) == 16  # f(0, 3) f(-1, 3)\n    print('f(0, 3)')\n"])).toBe(0);
   });
 });
 
