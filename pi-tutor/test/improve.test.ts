@@ -46,6 +46,10 @@ describe("improveResult (logic, speed, code; design is notes only)", () => {
   });
   it("timing noise is neither better nor worse; no timed check means no speed at all", () => {
     expect(improveResult(base, { ...base, ms: 830 })).toEqual({ better: [], worse: [] });
+    // full-suite flake: the same code timed again under load ran 25–40 % faster; only 2× or more counts
+    expect(improveResult(base, { ...base, ms: 500 })).toEqual({ better: [], worse: [] });
+    expect(improveResult(base, { ...base, ms: 1300 })).toEqual({ better: [], worse: [] });
+    expect(improveResult(base, { ...base, ms: 1700 })).toEqual({ better: [], worse: ["speed: 800 ms → 1700 ms"] });
     expect(improveResult({ ...base, ms: 3 }, { ...base, ms: 1 })).toEqual({ better: [], worse: [] });
     expect(improveResult({ ...base, ms: null }, { ...base, ms: 5 })).toEqual({ better: [], worse: [] });
   });

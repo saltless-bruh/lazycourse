@@ -58,15 +58,16 @@ export async function codeMetrics(exec: RunExec, i: { root: string; entry: strin
 export type Measured = Metrics & { edgePassed: number; ms: number | null };
 
 /**
- * What got better and what got worse, in words. Speed counts only past timing noise (20 % and 5 ms) and only
+ * What got better and what got worse, in words. Speed counts only past timing noise (2× and 5 ms) and only
  * when a timed check measured both; fewer lines, less nesting and fewer branches are better.
  */
 export function improveResult(before: Measured, after: Measured): { better: string[]; worse: string[] } {
   const better: string[] = [], worse: string[] = [];
   if (after.edgePassed !== before.edgePassed) (after.edgePassed > before.edgePassed ? better : worse).push(`edge cases passed: ${before.edgePassed} → ${after.edgePassed}`);
   if (before.ms !== null && after.ms !== null && Math.abs(after.ms - before.ms) >= 5) {
-    if (after.ms <= before.ms * 0.8) better.push(`speed: ${before.ms} ms → ${after.ms} ms`);
-    else if (after.ms >= before.ms * 1.25) worse.push(`speed: ${before.ms} ms → ${after.ms} ms`);
+    // The same code timed twice under load varied by 25–40 % (a full-suite flake), so only 2× either way counts.
+    if (after.ms * 2 <= before.ms) better.push(`speed: ${before.ms} ms → ${after.ms} ms`);
+    else if (after.ms >= before.ms * 2) worse.push(`speed: ${before.ms} ms → ${after.ms} ms`);
   }
   const code: [keyof Metrics, string, string][] = [["longestFunction", "longest function", " lines"], ["maxNesting", "nesting", ""], ["branches", "branches", ""]];
   for (const [k, label, unit] of code) {

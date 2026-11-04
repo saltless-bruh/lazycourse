@@ -72,6 +72,8 @@ export function piecesMatch(pieces: string[], reference: string, language: strin
 
 /** Final review I7: languages whose coding-test files can each be checked on their own (compiled ones build together). */
 export const STEP_UP_LANGUAGES = new Set(["python", "lua"]);
+/** Habits Task 17: the intermediate step-up measures code (Python ast, timed checks), so Python only for now. */
+export const ADVANCED_STEP_UP_LANGUAGES = new Set(["python"]);
 
 /** Designer's call: at least 3 of every 4 named pieces match, and at least 2 were named. */
 export function talkPassed(m: { matched: number; total: number }): boolean {
@@ -98,13 +100,16 @@ export function importedModules(sources: string[], language: string): Set<string
 }
 
 /** Each coding part passes at 3 of 4 checks (a part with none cannot pass); the talk by talkPassed. */
-export function stepUpResult(parts: { solve: Score; fix: Score; plan: Score }, talk: { matched: number; total: number }): { pass: boolean; practise: string[] } {
+/** Habits Task 17: the intermediate → advanced step-up adds `tests` (tests that can fail) and `improve` (improve it). */
+export function stepUpResult(parts: { solve: Score; fix: Score; plan: Score; tests?: Score; improve?: Score }, talk: { matched: number; total: number }): { pass: boolean; practise: string[] } {
   const ok = (s: Score) => s.total > 0 && s.passed * 4 >= s.total * 3;
   const practise = [
     ...(ok(parts.solve) ? [] : [HABIT_LABEL["looks-up"]]),
     ...(ok(parts.fix) ? [] : [HABIT_LABEL["own-fixes"]]),
     ...(ok(parts.plan) ? [] : [HABIT_LABEL["ideas-to-code"]]),
     ...(talkPassed(talk) ? [] : [HABIT_LABEL["steps-first"]]),
+    ...(!parts.tests || ok(parts.tests) ? [] : [HABIT_LABEL["tests-that-fail"]]),
+    ...(!parts.improve || ok(parts.improve) ? [] : [HABIT_LABEL["optimizes"]]),
   ];
   return { pass: practise.length === 0, practise };
 }

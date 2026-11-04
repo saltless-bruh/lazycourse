@@ -45,6 +45,28 @@ function sources(root: string, test: (name: string) => boolean): string[] {
   return out;
 }
 
+/** Python tests in one file as `file::name` (methods as `file::Class.name`), the names `keep` accepts. */
+function pythonTests(root: string, f: string, keep: (name: string) => boolean): string[] {
+  const out: string[] = [];
+  let cls: string | null = null, text = "";
+  try { text = readFileSync(join(root, f), "utf8"); } catch { return out; }
+  for (const line of text.split("\n")) {
+    const c = /^class\s+(\w+)/.exec(line);
+    if (c) { cls = c[1]; continue; }
+    if (/^[^\s#@]/.test(line)) cls = null; // final review M1: a column-0 comment or decorator keeps the class
+    const d = /^(\s*)(?:async\s+)?def\s+(test_\w+)\s*\(/.exec(line);
+    if (!d || !keep(d[2])) continue;
+    if (d[1] === "") out.push(`${f}::${d[2]}`);
+    else if (cls) out.push(`${f}::${cls}.${d[2]}`);
+  }
+  return out;
+}
+
+/** Every Python test in `rel` (the step-up's tests part, habits Task 17). */
+export function testsInFile(root: string, rel: string): string[] {
+  return pythonTests(root, rel, () => true);
+}
+
 /**
  * The task's own tests as `file::name` (Python methods as `file::Class.name`). `task` is `P1.T1`; names follow
  * the language's test style, and `P1.T1` never matches `P1.T10`.
@@ -56,18 +78,7 @@ export function findOwnTests(root: string, language: string, task: string): stri
   const snake = `p${p}_t${t}_`;
   const out: string[] = [];
   if (language === "python") {
-    for (const f of sources(root, (n) => n.endsWith(".py"))) {
-      let cls: string | null = null;
-      for (const line of readFileSync(join(root, f), "utf8").split("\n")) {
-        const c = /^class\s+(\w+)/.exec(line);
-        if (c) { cls = c[1]; continue; }
-        if (/^[^\s#@]/.test(line)) cls = null; // final review M1: a column-0 comment or decorator keeps the class
-        const d = /^(\s*)(?:async\s+)?def\s+(test_\w+)\s*\(/.exec(line);
-        if (!d || !d[2].startsWith(`test_${snake}`)) continue;
-        if (d[1] === "") out.push(`${f}::${d[2]}`);
-        else if (cls) out.push(`${f}::${cls}.${d[2]}`);
-      }
-    }
+    for (const f of sources(root, (n) => n.endsWith(".py"))) out.push(...pythonTests(root, f, (n) => n.startsWith(`test_${snake}`)));
   } else if (language === "rust") {
     for (const f of sources(root, (n) => n.endsWith(".rs")))
       for (const d of readFileSync(join(root, f), "utf8").matchAll(/#\[test\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+((?:test_)?p\d+_t\d+_\w*)\s*\(/g)) // final review M4: #[test] only
@@ -239,11 +250,15 @@ async function sandbox(exec: RunExec, root: string, language: string, host: Sand
 }
 
 /** Run the own tests on the learner's code as it is. `missing` when the sandbox cannot start. */
-export async function runOwnTests(exec: RunExec, i: { root: string; language: string; tests: string[]; sandbox: SandboxHost; entry?: string | null }): Promise<{ pass: boolean; out: string; missing?: boolean; failed?: string }> {
+/**
+ * `overlay` (habits Task 17, the step-up's tests part): files laid over the project in the throwaway copy only,
+ * so the learner's tests run against a hidden solution that never reaches the real folder.
+ */
+export async function runOwnTests(exec: RunExec, i: { root: string; language: string; tests: string[]; sandbox: SandboxHost; entry?: string | null; overlay?: Record<string, string> }): Promise<{ pass: boolean; out: string; missing?: boolean; failed?: string }> {
   if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return { pass: false, out: "no own test" };
   const sb = await sandbox(exec, i.root, i.language, i.sandbox);
   if (!sb) return { pass: false, out: "the sandbox cannot start", missing: true };
-  const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [] });
+  const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: Object.entries(i.overlay ?? {}) });
   return { pass: r.pass, out: r.out, failed: r.failed };
 }
 
@@ -329,7 +344,8 @@ function calledByTests(root: string, language: string, tests: string[]): Set<str
  * (final review I2) so the budget is not spent on one. Test code is never touched. With no called function
  * found, the entry file.
  */
-function brokenCopies(root: string, language: string, tests: string[], entry: string | null): [string, string][] {
+function brokenCopies(root: string, language: string, tests: string[], entry: string | null, overlay: Record<string, string> = {}): [string, string][] {
+  const read = (rel: string) => overlay[rel] ?? readFileSync(join(root, rel), "utf8");
   const called = calledByTests(root, language, tests);
   const notTest = (n: string) => !/^(test_|Test)/.test(n) && !/^p\d+_t\d+_/.test(n);
   const groups: [string, string][][] = [];
@@ -349,13 +365,13 @@ function brokenCopies(root: string, language: string, tests: string[], entry: st
   for (const rel of sources(root, (n) => n.endsWith(EXT[language]))) {
     if (isTestFile(rel, language)) continue;
     let source: string;
-    try { source = readFileSync(join(root, rel), "utf8"); } catch { continue; }
+    try { source = read(rel); } catch { continue; }
     const spans = functionSpans(source, language).filter((f) => called.has(f.name) && notTest(f.name));
     if (spans.length) { found = true; add(rel, source, spans); }
   }
   // Only when no function the test calls was found: a found one with nothing to break stays untestable.
   if (!found && entry) {
-    try { add(entry, readFileSync(join(root, entry), "utf8"), null); } catch { /* no entry file */ }
+    try { add(entry, read(entry), null); } catch { /* no entry file */ }
   }
   const out: [string, string][] = [];
   for (let k = 0; groups.some((g) => k < g.length); k++) for (const g of groups) if (k < g.length) out.push(g[k]);
@@ -369,16 +385,17 @@ function brokenCopies(root: string, language: string, tests: string[], entry: st
  * only crashes proves nothing, since a test with no assertion "fails" on it too.
  */
 export type CanFail = "caught" | "missed" | "untestable";
-export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost }): Promise<CanFail> {
+export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost; overlay?: Record<string, string> }): Promise<CanFail> {
   if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return "untestable";
-  const copies = brokenCopies(i.root, i.language, i.tests, i.entry ?? null);
+  const overlay = i.overlay ?? {};
+  const copies = brokenCopies(i.root, i.language, i.tests, i.entry ?? null, overlay);
   if (!copies.length) return "untestable";
   const sb = await sandbox(exec, i.root, i.language, i.sandbox);
   if (!sb) return "untestable";
   const max = i.language === "python" ? MAX_MUTANTS.python : MAX_MUTANTS.compiled;
   let missed = false;
   for (const [rel, broken] of copies.slice(0, max)) {
-    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [[rel, broken]], sec: i.language === "python" ? MUTANT_SEC.python : MUTANT_SEC.compiled });
+    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [...Object.entries(overlay).filter(([k]) => k !== rel), [rel, broken]], sec: i.language === "python" ? MUTANT_SEC.python : MUTANT_SEC.compiled });
     if (r.built && !r.pass && r.assertFailed) return "caught";
     if (r.pass) missed = true;
   }

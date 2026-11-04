@@ -24,14 +24,14 @@ import { goVersionOf } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { calledFunctions, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests } from "./own-tests.js";
+import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
-import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
+import { crossCheckOnReference, currentMilestone, extractCode, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
-import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, brokenProgram, backupStepUp, STEP_UP_LANGUAGES } from "./step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, brokenProgram, backupStepUp, STEP_UP_LANGUAGES, ADVANCED_STEP_UP_LANGUAGES } from "./step-up.js";
 import { commentPrefix } from "./scaffold.js";
 import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
@@ -1506,6 +1506,8 @@ export default function (pi: ExtensionAPI): void {
     solveChecks?: Check[]; fixChecks?: Check[]; fixMissing?: boolean;
     /** Hidden solutions, kept in the profile like a milestone's reference, never in the project. */
     solveRef?: string; fixRef?: string;
+    /** Habits Task 17, the intermediate step-up: an improve-it part (clumsy working code, measured) and a tests part. */
+    improveTask?: string; improveChecks?: Check[]; improveExtra?: Check[]; improveFunctions?: string[]; improveBefore?: Measured; improveMissing?: boolean; improveRef?: string;
   }
   let stepUpModel: ExtensionContext | null = null;
   const NEXT_BAND: Record<string, { level: number; name: string }> = { beginner: { level: 34, name: "intermediate" }, intermediate: { level: 67, name: "pro" } };
@@ -1531,16 +1533,46 @@ export default function (pi: ExtensionAPI): void {
         ui?.notify("the coding test could not be prepared: no confirmed checks (is the sandbox on? /tutor-exam sandbox on). Nothing counts against you: /tutor-step-up starts again", "warning");
         return;
       }
+      // Habits Task 17: the improve-it part — clumsy working code from the model, confirmed by the checks.
+      let improve: Partial<StepUpState> = {};
+      if (s.improveTask) {
+        const imp = await one(s.improveTask);
+        const impTrusted = trustedOnly(imp.checks);
+        const clumsy = impTrusted.length ? extractCode(await complete(systemText("step-up-clumsy"), `Language: ${lang}.\nThe task: ${s.improveTask}\nIts checks:\n${impTrusted.map((c) => `check P1.T1: ${c.expr} == ${c.expected}`).join("\n")}`)) : "";
+        const works = !!clumsy && (await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: clumsy, checks: impTrusted, root })).every((c) => c.status === "trusted");
+        if (!works) improve = { improveMissing: true };
+        else {
+          const asked = await complete(systemText("improve"), improvePrompt({ taskLine: `P1.T1 ${s.improveTask}`, checks: impTrusted.map((c) => `check P1.T1: ${c.expr} == ${c.expected}`) }));
+          const extra = trustedOnly(await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: imp.reference,
+            checks: parseChecks(asked, { language: lang, taskIds: ["P1.T1"], milestone: 1 }).checks.filter((c) => c.kind !== "io"), root }));
+          improve = { improveChecks: impTrusted, improveExtra: extra, improveFunctions: calledFunctions(impTrusted.flatMap((c) => (c.expr ? [c.expr] : []))), improveRef: imp.reference, improveClumsy: clumsy } as Partial<StepUpState>;
+        }
+      }
       const broken = await brokenProgram(fix.reference, async (src) =>
         (await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: src, checks: fixTrusted, root })).some((c) => c.status === "unverified"));
       const moved = backupStepUp(root, Date.now());
       const c = commentPrefix(`x${ext}`);
       const steps = (s.plan?.steps ?? []).map((st, i) => `${c} ${i + 1}. ${st}`).join("\n");
-      writeInRoot(root, "stepup/README.md", `# Step-up, part 2: the coding test\n\n1. \`stepup/solve${ext}\`: ${s.solveTask}${s.module ? ` You will likely need \`${s.module}\`: look it up.` : ""}\n2. \`stepup/fix${ext}\`: ${s.fixTask ?? ""} This code has a bug: find it and fix it.\n3. \`stepup/plan${ext}\`: ${s.talkTask} Build the plan you gave in the talking test.\n\n\`/tutor-step-up check\` runs the checks; \`/tutor-step-up submit\` decides.\n`);
+      const clumsy = (improve as { improveClumsy?: string }).improveClumsy;
+      delete (improve as { improveClumsy?: string }).improveClumsy;
+      let more = "";
+      if (s.improveTask) {
+        const solveFn = calledFunctions(trustedOnly(solve.checks).flatMap((c) => (c.expr ? [c.expr] : [])))[0] ?? "the solve function";
+        more += `4. \`stepup/test_solve${ext}\`: write tests for \`${solveFn}\` (functions named \`test_…\`, \`from solve import ${solveFn}\`). They run against a hidden solution: they must pass on it and must fail on a broken version of it.\n`;
+        if (clumsy) {
+          writeInRoot(root, `stepup/improve${ext}`, clumsy.endsWith("\n") ? clumsy : `${clumsy}\n`);
+          const before = await measure(root, `stepup/improve${ext}`, { checks: improve.improveChecks!, extra: improve.improveExtra!, functions: improve.improveFunctions! });
+          if (before.m && !before.failed) improve.improveBefore = before.m;
+          else improve = { improveMissing: true };
+          const timed = improve.improveExtra?.find((c) => c.kind === "timed")?.expr ?? null;
+          more += `5. \`stepup/improve${ext}\`: ${s.improveTask} This code works but is clumsy: make it better (faster, simpler, right on more edge cases) and keep it working.${before.m ? ` measured now: ${measuredLine(before.m, (improve.improveExtra ?? []).filter((c) => c.kind === "value").length, timed)}.` : ""}\n`;
+        } else more += `5. \`stepup/improve${ext}\`: no clumsy version could be confirmed, so this part counts as done.\n`;
+      }
+      writeInRoot(root, "stepup/README.md", `# Step-up, part 2: the coding test\n\n1. \`stepup/solve${ext}\`: ${s.solveTask}${s.module ? ` You will likely need \`${s.module}\`: look it up.` : ""}\n2. \`stepup/fix${ext}\`: ${s.fixTask ?? ""} This code has a bug: find it and fix it.\n3. \`stepup/plan${ext}\`: ${s.talkTask} Build the plan you gave in the talking test.\n${more}\n\`/tutor-step-up check\` runs the checks; \`/tutor-step-up submit\` decides.\n`);
       writeInRoot(root, `stepup/solve${ext}`, `${c} ${s.solveTask}\n`);
       writeInRoot(root, `stepup/fix${ext}`, broken ?? `${c} ${s.fixTask ?? ""}\n`);
       writeInRoot(root, `stepup/plan${ext}`, `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
-      saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference });
+      saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference, ...improve });
       showStepUp(`Step-up, part 2: the coding test is in stepup/ (README.md says what each file is for).${moved ? ` Your earlier stepup/ folder was moved to ${moved}.` : ""} No timer: take the time you need. /tutor-step-up check runs the checks; /tutor-step-up submit decides.`);
     } catch (e) {
       ui?.notify(`the coding test could not be prepared: ${e instanceof Error ? e.message : String(e)}; /tutor-step-up check tries again`, "warning");
@@ -1550,18 +1582,35 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Each part's trusted checks against the learner's file in stepup/. */
-  async function scoreStepUp(s: StepUpState): Promise<Record<"solve" | "fix" | "plan", { passed: number; total: number }>> {
+  async function scoreStepUp(s: StepUpState): Promise<Record<"solve" | "fix" | "plan", { passed: number; total: number }> & { tests?: { passed: number; total: number }; improve?: { passed: number; total: number } }> {
     const root = project!.path, ext = extname(projectRun(root, s.language).entry ?? "src/main.py") || ".py";
     const score = async (file: string, checks: Check[]) => {
       if (!checks.length) return { passed: 0, total: 0 };
       const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: s.language, root, entry: `stepup/${file}${ext}`, runCmd: null, checks, sandbox: sandboxHost() });
       return { passed: r.results.filter((x) => x.pass).length, total: checks.length };
     };
-    return {
+    const base = {
       solve: await score("solve", trustedOnly(s.solveChecks)),
       fix: s.fixMissing ? { passed: 1, total: 1 } : await score("fix", trustedOnly(s.fixChecks)),
       plan: await score("plan", trustedOnly(s.talkChecks)),
     };
+    if (!s.improveTask) return base;
+    // Habits Task 17: the learner's tests run against the hidden solve solution (laid over in the throwaway copy):
+    // they must pass on it and catch a broken copy of it.
+    const host = sandboxHost();
+    const tests = testsInFile(root, `stepup/test_solve${ext}`);
+    let testsOk = false;
+    if (host && tests.length && s.solveRef) {
+      const overlay = { [`stepup/solve${ext}`]: s.solveRef };
+      const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, sandbox: host, entry: `stepup/solve${ext}`, overlay });
+      testsOk = ran.pass && (await canFail((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, entry: `stepup/solve${ext}`, sandbox: host, overlay })) === "caught";
+    }
+    let improveOk = s.improveMissing === true;
+    if (!improveOk && s.improveBefore && host) {
+      const after = await measure(root, `stepup/improve${ext}`, { checks: s.improveChecks ?? [], extra: s.improveExtra ?? [], functions: s.improveFunctions ?? [] });
+      if (after.m && !after.failed && !after.missing) { const r = improveResult(s.improveBefore, after.m); improveOk = r.better.length > 0 && r.worse.length === 0; }
+    }
+    return { ...base, tests: { passed: testsOk ? 1 : 0, total: 1 }, improve: { passed: improveOk ? 1 : 0, total: 1 } };
   }
   let stepUp: StepUpState | null = null;
   function saveStepUp(s: StepUpState | null) {
@@ -1610,7 +1659,7 @@ export default function (pi: ExtensionAPI): void {
         }
         if (!s || s.stage !== "coding-ready") { ctx.ui.notify(s ? `the coding test is not ready yet (${s.stage})` : "no step-up is running: /tutor-step-up starts one", "info"); return; }
         const parts = await scoreStepUp(s);
-        const line = (["solve", "fix", "plan"] as const).map((k) => `${k} ${parts[k].passed}/${parts[k].total}`).join(" · ");
+        const line = (["solve", "fix", "plan", "tests", "improve"] as const).flatMap((k) => (parts[k] ? [`${k} ${parts[k]!.passed}/${parts[k]!.total}`] : [])).join(" · ");
         if (sub === "check") { ctx.ui.notify(line, "info"); return; }
         const r = stepUpResult(parts, s.talk ?? { matched: 0, total: 0 });
         const next = NEXT_BAND[s.band];
@@ -1631,6 +1680,7 @@ export default function (pi: ExtensionAPI): void {
       if (band === "pro") { ctx.ui.notify("you are at the top band; there is no step-up above pro", "info"); return; }
       if (exam) { ctx.ui.notify("the step-up waits until the exam is over (/tutor-submit)", "info"); return; }
       if (!STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the step-up is not ready for ${lang} yet (Python and Lua for now)`, "info"); return; }
+      if (band === "intermediate" && !ADVANCED_STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the intermediate step-up measures code and is ready for Python only for now, not ${lang}`, "info"); return; }
       let events: ReturnType<Profile["habitEvents"]> = [];
       profileWrite(() => { events = p.habitEvents(); });
       const missing = missingForStepUp(band, (h) => solidIn(events.filter((e) => e.habit === h), lang));
@@ -1650,7 +1700,9 @@ export default function (pi: ExtensionAPI): void {
           if (typeof json.talk !== "string" || typeof json.solve !== "string") throw new Error("the problems came back incomplete");
           const entry = projectRun(root, lang).entry ?? "src/main.py";
           const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
-          saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, fixTask: typeof json.fix === "string" ? json.fix : json.solve, talkRef: ref.reference, talkChecks: ref.checks });
+          const improveTask = band === "intermediate" && typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve : undefined;
+          if (band === "intermediate" && !improveTask) throw new Error("the improve-it problem came back missing");
+          saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, fixTask: typeof json.fix === "string" ? json.fix : json.solve, talkRef: ref.reference, talkChecks: ref.checks, ...(improveTask ? { improveTask } : {}) });
           showStepUp(`Step-up, part 1: the talking test.\n\n${json.talk}\n\nTalk it through in your own words: what the program needs, the steps, and which pieces you would use. No code yet.`);
         } catch (e) {
           saveStepUp(null);
