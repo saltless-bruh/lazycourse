@@ -775,25 +775,37 @@ export default function (pi: ExtensionAPI): void {
    * reply after code's checks passed, against this turn's rule. Its "no: <reason>" is handled like a failed code
    * check; an error, a timeout or an unclear answer lets the reply through, since it may only make replies stricter.
    */
-  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string): Promise<string | undefined> {
+  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, names: Set<string>): Promise<string | undefined> {
     const id = profile?.setting("checker");
     if (!id || id === "off") return undefined;
     const slash = id.indexOf("/");
+    if (slash <= 0) { checkerSkipped(`${id} is not a provider/model`); return undefined; } // final review M3
     const model = ctx.modelRegistry.find(id.slice(0, slash), id.slice(slash + 1));
     if (!model) { checkerSkipped(`no model ${id} in Pi's model list`); return undefined; }
-    const rule = `${turnInstruction(step)}${step !== "fix" ? " Do not state the fix, in code or in words." : ""}`;
+    // Final review I3: the facts the rule speaks of, and for `why` only the corrected line is held back.
+    const rule = `${turnInstruction(step)}${step === "why" ? " Do not write the corrected line." : step !== "fix" ? " Do not state the fix, in code or in words." : ""}`;
+    const spot = episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : episode?.spot ?? "";
+    const facts = [spot ? `The spot: ${spot}` : "", names.size ? `The learner's names: ${[...names].slice(0, 30).join(", ")}` : ""].filter(Boolean).join("\n");
+    // Final review M2: the reply is data inside tags, never instructions to the checker.
+    const ask = `This turn's rule: ${rule}${facts ? `\n${facts}` : ""}\n\nThe reply:\n<reply>\n${text}\n</reply>`;
     const t0 = Date.now();
+    // Final review I1: Esc stops the wait, and nothing it said afterwards counts.
+    const signal = AbortSignal.any([AbortSignal.timeout(CHECKER_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])]);
     try {
-      const r = await ctx.modelRegistry.complete(model, { systemPrompt: systemText("checker"), messages: [{ role: "user", content: [{ type: "text", text: `This turn's rule: ${rule}\n\nThe reply:\n${text}` }], timestamp: Date.now() }] }, { signal: AbortSignal.timeout(CHECKER_TIMEOUT_MS) });
-      const answer = r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join(" ").trim();
-      const no = /^\W*no\b\W*\s*(.*)$/is.exec(answer);
-      const verdict = no ? "no" : /^\W*yes\b/i.test(answer) ? "yes" : null;
-      if (verdict) pi.appendEntry("tutor_checker", { verdict, ms: Date.now() - t0 }); // live audits count what it read
-      if (no) return no[1].trim().split("\n")[0] || "it breaks this turn's rule";
-      if (!/^\W*yes\b/i.test(answer)) checkerSkipped(`an unclear answer: ${answer.slice(0, 60) || "nothing"}`);
-      return undefined;
+      const r = await ctx.modelRegistry.complete(model, { systemPrompt: systemText("checker"), messages: [{ role: "user", content: [{ type: "text", text: ask }], timestamp: Date.now() }] }, { signal });
+      // Final review I2: the API resolves its failures (stopReason "error" / "aborted"), it does not throw them.
+      if (ctx.signal?.aborted) { checkerSkipped("stopped"); return undefined; }
+      if (r.stopReason !== "stop") { checkerSkipped(r.stopReason === "aborted" ? "no answer in three minutes" : r.errorMessage || r.stopReason); return undefined; }
+      const answer = r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n").trim();
+      // Final review M1: only a first line that is "yes" or "no" (or "no: reason") is a verdict.
+      const first = (answer.split("\n")[0] ?? "").replace(/\*+/g, "").trim();
+      const v = /^\W*(yes|no)\b\W*?(?:[:—–-]\s*(.*)|\W*)$/i.exec(first);
+      if (!v) { checkerSkipped(`an unclear answer: ${first.slice(0, 60) || "nothing"}`); return undefined; }
+      const verdict = v[1].toLowerCase();
+      pi.appendEntry("tutor_checker", { verdict, ms: Date.now() - t0 }); // live audits count what it read
+      return verdict === "no" ? (v[2]?.trim() || "it breaks this turn's rule") : undefined;
     } catch (e) {
-      checkerSkipped(e instanceof Error && e.name === "TimeoutError" ? "no answer in three minutes" : e instanceof Error ? e.message : String(e));
+      checkerSkipped(ctx.signal?.aborted ? "stopped" : e instanceof Error ? e.message : String(e));
       return undefined;
     }
   }
@@ -812,7 +824,9 @@ export default function (pi: ExtensionAPI): void {
         const slash = want.indexOf("/");
         if (slash <= 0 || !ctx.modelRegistry.find(want.slice(0, slash), want.slice(slash + 1))) { ctx.ui.notify(`no model ${want} in Pi's model list (/model shows them)`, "warning"); return; }
       }
-      if (profile) { const p = profile; profileWrite(() => p.setSetting("checker", want)); }
+      if (!profile) { ctx.ui.notify("/tutor-checker needs the tutor's profile, which is not open", "warning"); return; } // final review M4
+      const p = profile;
+      profileWrite(() => p.setSetting("checker", want));
       ctx.ui.notify(want === "off" ? "no second reader: code's checks alone hold replies" : `held replies are also read by ${want} against the turn's rule; it can only make them stricter`, "info");
     },
   });
@@ -851,7 +865,7 @@ export default function (pi: ExtensionAPI): void {
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
-        reason = await askChecker(ctx, cur.step, text);
+        reason = await askChecker(ctx, cur.step, text, cur.names ?? new Set());
         if (reason) issues = ["checker"];
       }
       if (issues.length) {
