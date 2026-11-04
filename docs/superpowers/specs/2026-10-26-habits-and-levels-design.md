@@ -291,4 +291,9 @@ rejected seven replies (six prose fixes, one own-code); the two that reached glm
 minutes, each shown as "the second reader did not answer … shown unread" (side-agent note: a skipped check is
 never silent). Pi's settings unchanged. Finding: the mechanism holds (it only ever made replies stricter, the
 re-ask cap held), but glm on this endpoint is too slow to be a useful second reader; a faster checker model,
-or a longer limit, is the learner's call.
+or a longer limit, is the learner's call. Checker comparison (same scenario, author's request): deepseek-v4.1-flash
+answered yes, yes in 97–99 s with no skips but passed a hint that quoted the learner's `total * people`;
+minimax-m3.1-flash answered no (it quotes the learner's code), yes, yes in 101–131 s with no skips, but passed
+"the operation needs to separate them instead" (close to naming the fix; code's prose-fix check missed it too);
+mistral-large-4-1t-a52b is not in Pi's NVIDIA model list. Both beat glm here; minimax applies the rule as
+written, deepseek is a little faster and more lenient (two or three verdicts each: a direction, not a ranking).
