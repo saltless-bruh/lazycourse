@@ -74,14 +74,42 @@ export function findOwnTests(root: string, language: string, task: string): stri
   return out;
 }
 
+/** Whether the learner wrote any test at all (named for a task or not). */
+export function hasTests(root: string, language: string): boolean {
+  if (!OWN_TEST_LANGUAGES.has(language)) return false;
+  const [ext, re] = language === "python" ? [".py", /^\s*(?:async\s+)?def\s+test_\w*\s*\(/m]
+    : language === "rust" ? [".rs", /#\[test\]/] : ["_test.go", /^func\s+Test\w*\s*\(/m];
+  return sources(root, (n) => n.endsWith(ext)).some((f) => { try { return re.test(readFileSync(join(root, f), "utf8")); } catch { return false; } });
+}
+
+/** The name a task's own test takes, for the learner (`P1.T1` → `test_p1_t1_<what>`). */
+export function ownTestName(language: string, task: string): string {
+  const [p, t] = task.slice(1).split(".T");
+  return language === "go" ? `TestP${p}T${t}<What>` : language === "rust" ? `p${p}_t${t}_<what>` : `test_p${p}_t${t}_<what>`;
+}
+
 const PY_OWN = String.raw`
-import sys, os, json, traceback, importlib.util, unittest, inspect
+import sys, os, re, json, traceback, importlib.util, unittest, inspect
 MARK = "\x1eTUTOR\t"
 entry = sys.argv[1]
 for d in (os.getcwd(), os.path.join(os.getcwd(), "src"), os.path.dirname(os.path.abspath(entry or "."))):
     if os.path.isdir(d): sys.path.insert(0, d)
 mods = {}
+def short(text):
+    # The learner's own line: the last frame inside the project, then the error (phase 4 live run).
+    lines = text.rstrip().split("\n")
+    last = lines[-1].strip() if lines else ""
+    at = None
+    for k, l in enumerate(lines):
+        mm = re.match(r'\s*File "([^"]+)", line (\d+)', l)
+        if mm and os.path.abspath(mm.group(1)).startswith(os.getcwd() + os.sep):
+            code = lines[k + 1].strip() if k + 1 < len(lines) and not lines[k + 1].strip().startswith(("File ", "~", "^")) else ""
+            at = "%s:%s: %s" % (os.path.relpath(mm.group(1)), mm.group(2), code)
+    if not at: return last
+    err = last if last != "AssertionError" else "AssertionError"
+    return "%s (%s)" % (at, err)
 def say(spec, ok, kind="", msg=""):
+    if msg: msg = short(msg)
     print(MARK + json.dumps({"spec": spec, "ok": ok, "kind": kind, "msg": msg[-600:]}), flush=True)
 for spec in sys.argv[2:]:
     path, name = spec.split("::", 1)

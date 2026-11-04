@@ -387,6 +387,15 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(b.notes.some((n) => /ticked P2\.T2 .*your test/.test(n))).toBe(true);
     expect(await habits()).toContainEqual(["tests-that-fail", true]);
   }, 120000);
+  it("own tests (phase 4 live run): a test not named for the task still ticks on the checks, and the note says how to name it", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("40", b.ctx);
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(join(root, "tests", "test_split.py"), "from main import split_amount\n\ndef test_split():\n    assert split_amount(48, 3) == 16\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
+    expect(b.notes.at(-1)).toMatch(/no test of yours is named for P2\.T2 \(test_p2_t2_<what>\), so none was run/);
+  }, 60000);
   it("own tests (Task 14): a beginner's own test is not asked for, so a test that cannot fail does not block", async () => {
     const { b, root } = await doneProject(code("/"), two);
     mkdirSync(join(root, "tests"), { recursive: true });

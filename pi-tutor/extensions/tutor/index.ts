@@ -23,7 +23,7 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf } from "./manifest.js";
 import { liveChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
-import { canFail, findOwnTests, runOwnTests } from "./own-tests.js";
+import { canFail, findOwnTests, hasTests, ownTestName, runOwnTests } from "./own-tests.js";
 import { crossCheckOnReference, currentMilestone, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
 import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
@@ -1278,7 +1278,10 @@ export default function (pi: ExtensionAPI): void {
         const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
         // Spec 2026-10-26 §7 (both must pass): from intermediate on, the learner's own test for the task adds proof.
         const own = bandFor(level()) === "beginner" ? [] : findOwnTests(root, proj.language, id);
-        if (!own.length) return tick("checks", passed);
+        // Phase 4 live run: a weak model may never say how to name the test; code points it out.
+        if (!own.length) return tick("checks", bandFor(level()) !== "beginner" && hasTests(root, proj.language)
+          ? `${passed}; no test of yours is named for ${id} (${ownTestName(proj.language, id)}), so none was run`
+          : passed);
         const host = sandboxHost()!;
         const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, sandbox: host, entry });
         if (ran.missing) return tick("checks", `${passed}; your test could not run: the sandbox cannot start`);

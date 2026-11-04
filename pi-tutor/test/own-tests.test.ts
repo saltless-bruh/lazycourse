@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { findOwnTests, runOwnTests, canFail } from "../extensions/tutor/own-tests.js";
+import { findOwnTests, runOwnTests, canFail, hasTests } from "../extensions/tutor/own-tests.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import { realExec } from "./fake-pi.js";
 
@@ -30,6 +30,15 @@ describe("findOwnTests (spec 2026-10-26 §7)", () => {
   });
 });
 
+describe("hasTests (phase 4 live run: a test not named for the task is pointed out)", () => {
+  it("sees any test the learner wrote, in each language", () => {
+    expect(hasTests(project({ "src/main.py": SRC, "tests/test_split.py": "def test_split():\n    pass\n" }), "python")).toBe(true);
+    expect(hasTests(project({ "src/main.py": SRC }), "python")).toBe(false);
+    expect(hasTests(project({ "src/main.rs": "#[test]\nfn even() {}\n" }), "rust")).toBe(true);
+    expect(hasTests(project({ "src/a_test.go": "package main\nfunc TestEven(t *testing.T) {}\n" }), "go")).toBe(true);
+  });
+});
+
 describe.skipIf(!bwrapReady)("running own tests in the sandbox", () => {
   it("a passing and a failing own test", async () => {
     const root = project({ "src/main.py": SRC, "tests/test_split.py": GOOD });
@@ -38,7 +47,8 @@ describe.skipIf(!bwrapReady)("running own tests in the sandbox", () => {
     writeFileSync(join(root, "src/main.py"), SRC.replace("total / people", "total * people"));
     const bad = await runOwnTests(realExec, { root, language: "python", tests: findOwnTests(root, "python", "P1.T1"), sandbox: host() });
     expect(bad.pass).toBe(false);
-    expect(bad.out).toMatch(/test_p1_t1_splits_evenly/);
+    // Phase 4 live run: the learner sees the line of their test that failed, not the harness's traceback.
+    expect(bad.out).toBe("test_p1_t1_splits_evenly: tests/test_split.py:4: assert split_amount(48, 3) == 16 (AssertionError)");
   }, 60_000);
   it("canFail: a real test fails on a broken copy; an always-true test does not (habits Review Focus #5)", async () => {
     const good = project({ "src/main.py": SRC, "tests/test_split.py": GOOD });
