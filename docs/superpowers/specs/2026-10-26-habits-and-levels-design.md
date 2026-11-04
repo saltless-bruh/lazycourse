@@ -261,3 +261,20 @@ loops forever is cut at 10 s. Independent final review: when no broken copy can 
 copy only crashes), the checks tick it with a note and no habit is recorded; string literals are changed too,
 so a string task's test can be tried; only the functions the task's own test calls are broken; a failing
 Rust/Go test keeps its own name; a Rust lifetime no longer reads as a quote.
+
+**Phase 5 (2026-11-04, real LazyVim, Python, level 70, nemotron; the driver plays a pro learner).** Run 1: a
+tick with an own test scored 63, not 88 — the clumsy `count_unique` (`if x not in seen: seen.append(x)`) had
+no operator, number or string to slip, so the test was "untestable" — fixed with logic slips (not in ↔ in,
+and ↔ or, a negated condition); the notes turn came back in the five bold parts — fixed with its own reminder
+(at most three `path:line` notes) and the function lines in the request; /tutor-improve then rewritten: speed
+2526 ms → 3 ms, optimizes. Run 2: score 88 with three `src/main.py:N` notes on naming and the list-vs-set
+choice; the driver edited the file while /tutor-improve was still measuring, so the before was the new code —
+fixed: the before is measured from the text as it was typed. Run 3: 88; improve measured; "speed: 1524 ms →
+3 ms · longest function: 5 → 1 statements · nesting: 2 → 0", optimizes; Pi's settings unchanged. During the
+phase: side-agent notes (the level suggestion judged on the score's own scale, only from tasks with own
+tests; function size in statements with a step of 2; a new module counts as complex only in a multi-part
+task), a load flake (the before is re-timed next to the after, speed counts at 2×), and the /tmp test leak
+(222 sandbox caches; TMPDIR is now one folder per run, removed at the end). Independent final review: a timed
+check now keeps the hidden solution's answer on the large input; metrics follow helper functions; one
+optimizes success per task and project; the step-up's tests part breaks only solve; done-when coverage
+ignores comments and strings; an entry outside the project is no entry.
