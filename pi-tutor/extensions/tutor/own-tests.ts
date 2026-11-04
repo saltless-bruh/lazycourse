@@ -208,22 +208,85 @@ export async function runOwnTests(exec: RunExec, i: { root: string; language: st
   return { pass: r.pass, out: r.out };
 }
 
+/** Functions defined in `source`: name and the span of its body, so a planted bug lands where a test looks. */
+function functionSpans(source: string, language: string): { name: string; at: number; end: number }[] {
+  const out: { name: string; at: number; end: number }[] = [];
+  if (language === "python") {
+    const lines = source.split("\n");
+    const starts: number[] = [];
+    let pos = 0;
+    for (const l of lines) { starts.push(pos); pos += l.length + 1; }
+    lines.forEach((line, k) => {
+      const d = /^(\s*)(?:async\s+)?def\s+(\w+)/.exec(line);
+      if (!d) return;
+      let j = k + 1;
+      while (j < lines.length && (!lines[j].trim() || lines[j].length - lines[j].trimStart().length > d[1].length)) j++;
+      out.push({ name: d[2], at: starts[k], end: j < lines.length ? starts[j] : source.length });
+    });
+    return out;
+  }
+  const head = language === "rust" ? /\bfn\s+(\w+)[^{;]*\{/g : /^func\s+(?:\([^)]*\)\s*)?(\w+)[^{]*\{/gm;
+  for (const m of source.matchAll(head)) {
+    let depth = 0, k = m.index! + m[0].length - 1;
+    for (; k < source.length; k++) { if (source[k] === "{") depth++; else if (source[k] === "}" && --depth === 0) break; }
+    out.push({ name: m[1], at: m.index!, end: k + 1 });
+  }
+  return out;
+}
+
+const isTestFile = (rel: string, language: string) =>
+  language === "go" ? rel.endsWith("_test.go") : language === "python" ? /(^|\/)tests?\/|(^|\/)test_[^/]*\.py$|_test\.py$/.test(rel) : false;
+const EXT: Record<string, string> = { python: ".py", rust: ".rs", go: ".go" };
+
 /**
- * Whether the own tests can fail: some broken copy of `entry` (one planted slip each) makes one of them fail an
- * assertion. A copy that only crashes, or does not build, proves nothing, since a test with no assertion
- * "fails" on it too.
+ * Broken copies to try, as (file, text) pairs: one planted slip each, inside the functions the own tests call,
+ * wherever in the project they are defined (side-agent note: the entry file's first slips missed a function
+ * lower down or in another module). Test code is never touched. With no called function found, the entry file.
  */
-export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry: string; sandbox: SandboxHost }): Promise<boolean> {
+function brokenCopies(root: string, language: string, tests: string[], entry: string | null): [string, string][] {
+  const testFiles = [...new Set(tests.map((t) => t.split("::")[0]))];
+  const called = new Set<string>();
+  for (const f of testFiles) {
+    let text = "";
+    try { text = readFileSync(join(root, f), "utf8"); } catch { continue; }
+    for (const m of text.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) called.add(m[1]);
+  }
+  const notTest = (n: string) => !/^(test_|Test)/.test(n) && !/^p\d+_t\d+_/.test(n);
+  const out: [string, string][] = [];
+  const add = (rel: string, source: string, keep: (at: number) => boolean) => {
+    const guarded = testSpans(source, language);
+    for (const m of fixMutants(source, 1000)) {
+      const at = firstDiff(source, m);
+      if (!guarded.some(([a, b]) => at >= a && at < b) && keep(at)) out.push([rel, m]);
+    }
+  };
+  for (const rel of sources(root, (n) => n.endsWith(EXT[language]))) {
+    if (isTestFile(rel, language)) continue;
+    let source: string;
+    try { source = readFileSync(join(root, rel), "utf8"); } catch { continue; }
+    const spans = functionSpans(source, language).filter((f) => called.has(f.name) && notTest(f.name));
+    if (spans.length) add(rel, source, (at) => spans.some((f) => at >= f.at && at < f.end));
+  }
+  if (!out.length && entry) {
+    try { add(entry, readFileSync(join(root, entry), "utf8"), () => true); } catch { /* no entry file */ }
+  }
+  return out;
+}
+
+/**
+ * Whether the own tests can fail: some broken copy of the code they call (one planted slip each) makes one of
+ * them fail an assertion. A copy that only crashes, or does not build, proves nothing, since a test with no
+ * assertion "fails" on it too.
+ */
+export async function canFail(exec: RunExec, i: { root: string; language: string; tests: string[]; entry?: string | null; sandbox: SandboxHost }): Promise<boolean> {
   if (!i.tests.length || !OWN_TEST_LANGUAGES.has(i.language)) return false;
-  let source: string;
-  try { source = readFileSync(join(i.root, i.entry), "utf8"); } catch { return false; }
+  const copies = brokenCopies(i.root, i.language, i.tests, i.entry ?? null);
+  if (!copies.length) return false;
   const sb = await sandbox(exec, i.root, i.language, i.sandbox);
   if (!sb) return false;
   const max = i.language === "python" ? MAX_MUTANTS.python : MAX_MUTANTS.compiled;
-  const tests = testSpans(source, i.language);
-  const inTest = (m: string) => { const at = firstDiff(source, m); return tests.some(([a, b]) => at >= a && at < b); };
-  for (const broken of fixMutants(source).filter((m) => !inTest(m)).slice(0, max)) {
-    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry, files: [[i.entry, broken]] });
+  for (const [rel, broken] of copies.slice(0, max)) {
+    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [[rel, broken]] });
     if (r.built && !r.pass && r.assertFailed) return true;
   }
   return false;

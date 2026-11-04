@@ -137,7 +137,7 @@ function codeMask(source: string): boolean[] {
  * Bugs to plant for the step-up's fix part (phase 3 live check: `return items[0]` has no operator to slip):
  * the one-character operator slips, plus off-by-one integers and indexes, flipped booleans and ==/!=.
  */
-export function fixMutants(source: string): string[] {
+export function fixMutants(source: string, slipMax = 8): string[] {
   const code = codeMask(source), out: string[] = [];
   const add = (at: number, len: number, by: string) => {
     for (let k = at; k < at + len; k++) if (!code[k]) return;
@@ -146,7 +146,7 @@ export function fixMutants(source: string): string[] {
   for (const m of source.matchAll(/(?<![\w.])\d+(?![\w.])/g)) add(m.index!, m[0].length, String(Number(m[0]) + 1));
   for (const m of source.matchAll(/\b(True|False|true|false)\b/g)) add(m.index!, m[0].length, { True: "False", False: "True", true: "false", false: "true" }[m[0]]!);
   for (const m of source.matchAll(/==|!=|~=/g)) add(m.index!, 2, m[0] === "==" ? (source.includes("~=") ? "~=" : "!=") : "==");
-  return [...new Set([...slipMutants(source), ...out])];
+  return [...new Set([...slipMutants(source, slipMax), ...out])];
 }
 
 /** Final review C1: an existing stepup/ folder (a learner's earlier work) is moved aside, never overwritten. */

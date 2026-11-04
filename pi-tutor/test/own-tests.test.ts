@@ -48,6 +48,14 @@ describe.skipIf(!bwrapReady)("running own tests in the sandbox", () => {
     expect(readFileSync(join(good, "src/main.py"), "utf8")).toBe(SRC);
     expect(readdirSync(good).sort()).toEqual(["src", "tests"]);
   }, 120_000);
+  it("canFail plants bugs in the function the test calls: low in the file, or in another module (side-agent note)", async () => {
+    const busy = "def tip(total):\n" + Array.from({ length: 20 }, (_, k) => `    total = total * 1 + ${k} - ${k}\n`).join("") + "    return total\n\n\n";
+    const low = project({ "src/main.py": busy + SRC, "tests/test_split.py": GOOD });
+    expect(await canFail(realExec, { root: low, language: "python", tests: findOwnTests(low, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe(true);
+    const other = project({ "src/main.py": busy + "from money import split_amount\n", "src/money.py": SRC, "tests/test_split.py": GOOD });
+    expect(await canFail(realExec, { root: other, language: "python", tests: findOwnTests(other, "python", "P1.T1"), entry: "src/main.py", sandbox: host() })).toBe(true);
+    expect(readFileSync(join(other, "src/money.py"), "utf8")).toBe(SRC);
+  }, 120_000);
   it.skipIf(spawnSync("go", ["version"]).status !== 0)("Go: go test runs the own test; it can fail on a broken copy, a test with no check cannot", async () => {
     const main = "package main\n\nfunc Split(total, people float64) float64 {\n\treturn total / people\n}\n\nfunc main() {}\n";
     const good = "package main\n\nimport \"testing\"\n\nfunc TestP1T1Even(t *testing.T) {\n\tif Split(48, 3) != 16 {\n\t\tt.Errorf(\"got %v\", Split(48, 3))\n\t}\n}\n";

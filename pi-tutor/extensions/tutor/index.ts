@@ -1290,7 +1290,7 @@ export default function (pi: ExtensionAPI): void {
           paint();
           return;
         }
-        const able = entry ? await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host }) : false;
+        const able = await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host });
         recordHabit("tests-that-fail", able, `test:${id}`);
         if (!able) { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
         return tick("checks", `${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`);
