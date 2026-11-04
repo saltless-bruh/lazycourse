@@ -31,9 +31,11 @@ describe("the score line shows every point", () => {
 });
 
 describe("levelSuggestion (spec 2026-10-21 §8: the tutor suggests, the learner decides)", () => {
-  it("suggests a higher level after three scores well above it, a lower one after three well below, else nothing", () => {
+  // Side-agent note: the score (0–100 facts) is not on the level's scale; it is judged on its own.
+  it("three scores averaging 90+ suggest 10 higher, 40 or less 10 lower, at any pro level", () => {
     expect(levelSuggestion([100, 95, 100], 70)).toBe(80);
-    expect(levelSuggestion([40, 25, 30], 75)).toBe(65);
+    expect(levelSuggestion([100, 95, 100], 92)).toBe(100);
+    expect(levelSuggestion([40, 25, 50], 75)).toBe(65);
     expect(levelSuggestion([100, 95], 70)).toBeNull();
     expect(levelSuggestion([80, 75, 70], 70)).toBeNull();
     expect(levelSuggestion([100, 100, 100], 100)).toBeNull();

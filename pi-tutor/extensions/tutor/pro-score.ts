@@ -34,13 +34,15 @@ export function coveredCalls(calls: string[], testBodies: string[]): number {
 }
 
 /**
- * After three scores, a level to suggest: their average 15 or more above the level → 10 higher; 30 or more below
- * → 10 lower; otherwise none. Never above 100 or below 0. The learner decides; the tutor never moves the level.
+ * After three scores, a level to suggest. The score counts facts out of 100 and is not on the level's scale
+ * (side-agent note: comparing them told a pro without tests to drop, and could never say "higher" above 85),
+ * so it is judged on its own: an average of 90 or more → 10 higher; 40 or less → 10 lower; else none. Only
+ * tasks with the learner's own tests are passed in. The learner decides; the tutor never moves the level.
  */
 export function levelSuggestion(lastScores: number[], level: number): number | null {
   if (lastScores.length < 3) return null;
   const recent = lastScores.slice(-3);
   const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-  const to = avg >= level + 15 ? Math.min(100, level + 10) : avg <= level - 30 ? Math.max(0, level - 10) : level;
+  const to = avg >= 90 ? Math.min(100, level + 10) : avg <= 40 ? Math.max(0, level - 10) : level;
   return to === level ? null : to;
 }

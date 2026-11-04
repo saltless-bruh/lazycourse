@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { writeFileSync, mkdtempSync, readFileSync, mkdirSync, symlinkSync, existsSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, mkdirSync, symlinkSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
@@ -397,6 +397,13 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(notes()).toHaveLength(1);
     expect(b.notes.some((n) => /your last 3 pro scores average 9\d; \/tutor-level 80 if you want harder work/.test(n))).toBe(true);
     expect(levelEntries()).toBe(levelsBefore); // the tutor suggests; it never moves the level
+    // Side-agent note: tasks ticked without an own test are not judged for a level (25 is no sign of a weak pro).
+    rmSync(join(root, "tests"), { recursive: true, force: true });
+    const st2 = (() => { const q = Profile.open(process.env.PI_TUTOR_PROFILE!); try { return q.setting("proscores:python"); } finally { q.close(); } })();
+    await b.commands["tutor-done"].handler("P2.T5", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/pro score 25\/100/);
+    const q = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    try { expect(q.setting("proscores:python")).toBe(st2); } finally { q.close(); }
   }, 180000);
   it("own tests (Task 14): a test that cannot fail does not tick; a failing own test is a try; a good one ticks", async () => {
     const { b, root } = await doneProject(code("/"), two);

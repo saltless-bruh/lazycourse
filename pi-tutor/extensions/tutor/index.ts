@@ -1296,7 +1296,7 @@ export default function (pi: ExtensionAPI): void {
           const facts: ProFacts = { checksPass: true, ownTestsPass: ownPass, ownTestsCanFail: catches, edgeCasesTotal: cases.length,
             edgeCasesCovered: ownPass ? coveredCalls(cases, ownTestBodies(root, proj.language, own)) : 0 };
           await tick("checks", `${why}; ${scoreLine(facts)}`);
-          afterProTick(ctx, id, proScore(facts));
+          afterProTick(ctx, id, proScore(facts), own.length > 0);
         };
         // Spec 2026-10-26 §7 (both must pass): from intermediate on, the learner's own test for the task adds proof.
         const own = bandFor(level()) === "beginner" ? [] : findOwnTests(root, proj.language, id);
@@ -1646,11 +1646,13 @@ export default function (pi: ExtensionAPI): void {
    * (the learner decides; the tutor never moves it); and, unless /tutor-notes off, ask the tutor for notes on
    * design and naming that carry no points.
    */
-  function afterProTick(ctx: ExtensionContext, id: string, score: number) {
+  function afterProTick(ctx: ExtensionContext, id: string, score: number, judged: boolean) {
     if (!profile || !project) return;
     try { if (!openTaskIds(readFileSync(join(project.path, "spec", "tasks.md"), "utf8")).every((t) => t !== id)) return; } catch { return; }
     const p = profile, key = `proscores:${project.language}`;
     let scores: number[] = [];
+    // Side-agent note: a task ticked without an own test is not judged for a level.
+    if (!judged) { notesAfter(ctx, id, score); return; }
     profileWrite(() => { try { scores = JSON.parse(p.setting(key) ?? "[]"); } catch { scores = []; } scores = [...scores, score].slice(-5); });
     const to = levelSuggestion(scores, level());
     if (to !== null) {
@@ -1659,7 +1661,10 @@ export default function (pi: ExtensionAPI): void {
       scores = [];
     }
     profileWrite(() => p.setSetting(key, JSON.stringify(scores)));
-    if (p.setting("pro-notes") === "off") return;
+    notesAfter(ctx, id, score);
+  }
+  function notesAfter(ctx: ExtensionContext, id: string, score: number) {
+    if (profile?.setting("pro-notes") === "off") return;
     customWhenIdle(ctx, "tutor_notes", `[tutor] ${id} is ticked; code scored it ${score}/100 from its checks and the learner's tests. `
       + `Give at most three notes on design or naming in the code for ${id}, each starting with path:line and one sentence long. `
       + "Notes carry no points and do not change the level. No code and no fix; if nothing is worth a note, say so in one line.");
