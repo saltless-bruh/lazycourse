@@ -476,6 +476,20 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T2");
     expect(await habits()).toContainEqual(["complex", true]);
   }, 60000);
+  it("complex (side-agent note): a new module counts only in a multi-part task, so a one-liner using math is not complex", async () => {
+    const c = (task: string, expr: string, expected: string) => ({ task, kind: "value", expr, expected, milestone: 1, status: "trusted" });
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
+      [c("P2.T2", "split_amount(50, 4)", "12.5"), c("P2.T3", "area(1)", "3.141592653589793"), c("P2.T4", "dumps_sorted({'b': 1, 'a': 2})", "'{\"a\": 2, \"b\": 1}'")]);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 write `split_amount(total, people)`\n- [ ] P2.T3 write `area(r)`, a circle's area\n- [ ] P2.T4 write `sort_keys(d)` and `dumps_sorted(d)` that use it\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx); // the first tick learns which modules are known
+    writeFileSync(join(root, "src", "main.py"), "import math\n\ndef area(r):\n    return math.pi * r * r\n");
+    await b.commands["tutor-done"].handler("P2.T3", b.ctx);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [x] P2.T3");
+    expect((await habits()).map(([h]) => h)).not.toContain("complex");
+    writeFileSync(join(root, "src", "main.py"), "import json\n\ndef sort_keys(d):\n    return dict(sorted(d.items()))\n\ndef dumps_sorted(d):\n    return json.dumps(sort_keys(d))\n");
+    await b.commands["tutor-done"].handler("P2.T4", b.ctx);
+    expect(await habits()).toContainEqual(["complex", true]);
+  }, 90000);
   it("pro score (Task 16): a tick at 67+ shows the score's facts and asks the tutor for notes; /tutor-notes off stops them; three high scores suggest a level", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("70", b.ctx);

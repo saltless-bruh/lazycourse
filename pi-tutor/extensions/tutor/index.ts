@@ -1460,7 +1460,7 @@ export default function (pi: ExtensionAPI): void {
     paint();
   }
 
-  /** Habits Task 17: the task's lines name three or more functions, or its code imports a module new to this language. */
+  /** Habits Task 17: the task's lines name three or more functions, or it is multi-part and its code imports a module new to this language. */
   function complexTask(root: string, md: string, id: string): boolean {
     const lines = md.split("\n").filter((l) => new RegExp(`\\b${id.replace(".", "\\.")}(\\.S\\d+)?\\b`).test(l)).join("\n");
     const named = new Set([...lines.matchAll(/`([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]));
@@ -1477,7 +1477,10 @@ export default function (pi: ExtensionAPI): void {
         p.setSetting(key, JSON.stringify([...new Set([...known, ...now])]));
       });
     }
-    return named.size >= 3 || fresh;
+    // Side-agent note: a module new to the learner counts only in a multi-part task (two or more functions named,
+    // or subtasks); otherwise the first one-liner with `math`, then `random`, … would each count as complex.
+    const parts = named.size >= 2 || new RegExp(`\\b${id.replace(".", "\\.")}\\.S\\d+\\b`).test(md);
+    return named.size >= 3 || (fresh && parts);
   }
 
   /** Tick `id` and its open subtasks in spec/tasks.md, record how, refresh spec/checks.md, close its check episode. */
