@@ -22,7 +22,11 @@ Re-verify every line when bumping versions.
 ## Pi extension API (src/core/extensions/types.ts)
 - `export default function (pi: ExtensionAPI)`
 - `pi.on("session_start", (event, ctx) => …)` with `ctx.cwd`, `ctx.hasUI`, `ctx.ui`
-- `pi.on("session_shutdown", …)`
+- `pi.on("session_shutdown", …)`. On `/new`, `/resume` and `/reload` Pi builds a new runtime and loads the
+  extension again (agent-session-runtime.js `newSession` → `createRuntime`); the old runtime is disposed and every
+  `pi.*` call of the old load then throws its stale message (1.3.0 extensions/loader.js:112-115 `assertActive`).
+  A background job of the old load (checks, improve-it) therefore cannot finish: session_shutdown aborts it and the
+  new load starts the checks job again (Phase 8 review I2).
 - `pi.registerCommand(name, { description, handler(args, ctx) })`
 - `pi.appendEntry(customType, data)`
 - `pi.sendUserMessage(text, { deliverAs: "followUp" })`: always triggers a turn; `deliverAs` is

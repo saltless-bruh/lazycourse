@@ -162,16 +162,19 @@ function modelComplete(ctx: ExtensionContext, label: () => string): Complete {
   return (system, user) => withProgress(ctx, label(), (signal) => rawComplete(ctx, signal)(system, user));
 }
 
-/**
- * Project paths whose plan job (spec Q22) or checks job (spec 2026-10-21 §7) is running in this process. Module
- * level, not per load: Pi loads the extension again on /new and /resume while an older job runs on (Phase 8 A2).
- */
-const specRunning = new Set<string>();
-const checksRunning = new Set<string>();
-/** Phase 8 B2: project path → the task whose improve-it checks are being written in the background. */
-const improvePreparing = new Map<string, string>();
-
 export default function (pi: ExtensionAPI): void {
+  /** Project paths whose plan job (spec Q22) or checks job (spec 2026-10-21 §7) runs in this load. */
+  const specRunning = new Set<string>();
+  const checksRunning = new Set<string>();
+  /** Phase 8 B2: project path → the task whose improve-it checks are being written in the background. */
+  const improvePreparing = new Map<string, string>();
+  /**
+   * Phase 8 A2 + review I2: on /new and /resume Pi loads the extension again and makes this load's `pi.*` throw
+   * ("ctx is stale"), so a checks or improve-it job left running here would only fail later, after its model call.
+   * session_shutdown stops them; the new load starts the checks job again at its session_start.
+   */
+  const jobs = new AbortController();
+  const jobSignal = () => AbortSignal.any([AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS), jobs.signal]);
   // pi-tutor is installed globally; only the Pi that nvim-tutor starts is the tutor.
   if (process.env.PI_TUTOR !== "1") return;
   const state: TutorState = { state: "idle", connected: false };
@@ -535,6 +538,7 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async () => {
     closing = true;
+    jobs.abort(); // Phase 8 review I2: this load's background jobs end with it
     // Pane check #2: /new and /reload build a new extension; jobs still running in this one stay silent.
     generation++;
     if (tick) clearInterval(tick);
@@ -1482,7 +1486,7 @@ export default function (pi: ExtensionAPI): void {
       improvePreparing.set(root, id);
       void (async () => {
         try {
-          const text = await rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS))(systemText("improve"),
+          const text = await rawComplete(frozen, jobSignal())(systemText("improve"),
             improvePrompt({ taskLine: line, checks: checks.map((c) => c.kind === "value" ? `check ${c.task}: ${c.expr} == ${c.expected}` : `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}`) }));
           const parsed = parseChecks(text, { language: "python", taskIds: [id], milestone: checks[0].milestone }).checks.filter((c) => c.kind !== "io");
           const extra = (await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: "python", entry, runCmd: null, reference, checks: parsed, root }))
@@ -2280,7 +2284,7 @@ export default function (pi: ExtensionAPI): void {
       try {
         for (const k of todo) {
           const m = await writeMilestoneChecks({
-            complete: rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(),
+            complete: rawComplete(frozen, jobSignal()), exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(),
             language: proj.language, tasksMd, milestone: k, entry, runCmd, root: proj.path,
           });
           // Examples rows saved before this milestone had a reference are kept, cross-checked on the new one.
