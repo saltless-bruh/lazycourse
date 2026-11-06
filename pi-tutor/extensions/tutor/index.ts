@@ -22,7 +22,7 @@ import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
 import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
-import { goVersionOf } from "./manifest.js";
+import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { calledFunctions, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
@@ -1640,11 +1640,27 @@ export default function (pi: ExtensionAPI): void {
 
   /** Spec §6.3 part 2: the coding test's three parts, written into stepup/ with their checks and hidden solutions. */
   let codingPreparing = false;
+  /**
+   * Habits Task 24b: where a step-up part lives. Python and Lua: one file each in stepup/. Rust and Go: a folder
+   * each (its own crate or module, with its entry), so the compiled harness builds and checks one part at a time.
+   */
+  function stepUpPart(language: string, part: string, ext: string): { dir: string; entry: string; path: string; manifest: { rel: string; text: string } | null; stub: (task: string) => string } {
+    if (language === "rust" || language === "go") {
+      const entry = language === "rust" ? "src/main.rs" : "main.go", dir = `stepup/${part}`;
+      const stub = (task: string) => (language === "rust" ? `// ${task}\n\nfn main() {}\n` : `package main\n\n// ${task}\n\nfunc main() {}\n`);
+      return { dir, entry, path: `${dir}/${entry}`, manifest: manifestFor(language, part), stub };
+    }
+    const c = commentPrefix(`x${ext}`);
+    return { dir: "stepup", entry: `${part}${ext}`, path: `stepup/${part}${ext}`, manifest: null, stub: (task) => `${c} ${task}\n` };
+  }
+
   async function prepareCoding() {
     const s = stepUp, frozen = stepUpModel;
     if (!s || !project || !frozen || codingPreparing) return;
     codingPreparing = true;
-    const root = project.path, lang = s.language, entry = projectRun(root, lang).entry ?? "src/main.py", ext = extname(entry) || ".py";
+    const root = project.path, lang = s.language, projectEntry = projectRun(root, lang).entry ?? "src/main.py", ext = extname(projectEntry) || ".py";
+    // Habits Task 24b: a compiled part's reference builds as that part's own entry.
+    const entry = lang === "rust" || lang === "go" ? stepUpPart(lang, "solve", ext).entry : projectEntry;
     const exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
     try {
       const complete = rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS));
@@ -1693,10 +1709,13 @@ export default function (pi: ExtensionAPI): void {
           more += `5. \`stepup/improve${ext}\`: ${s.improveTask} This code works but is clumsy: make it better (faster, simpler, right on more edge cases) and keep it working.${before.m ? ` measured now: ${measuredLine(before.m, (improve.improveExtra ?? []).filter((c) => c.kind === "value").length, timed)}.` : ""}\n`;
         } else more += `5. \`stepup/improve${ext}\`: no clumsy version could be confirmed, so this part counts as done.\n`;
       }
-      writeInRoot(root, "stepup/README.md", `# Step-up, part 2: the coding test\n\n1. \`stepup/solve${ext}\`: ${s.solveTask}${s.module ? ` You will likely need \`${s.module}\`: look it up.` : ""}\n2. \`stepup/fix${ext}\`: ${s.fixTask ?? ""} This code has a bug: find it and fix it.\n3. \`stepup/plan${ext}\`: ${s.talkTask} Build the plan you gave in the talking test.\n${more}\n\`/tutor-step-up check\` runs the checks; \`/tutor-step-up submit\` decides.\n`);
-      writeInRoot(root, `stepup/solve${ext}`, `${c} ${s.solveTask}\n`);
-      writeInRoot(root, `stepup/fix${ext}`, broken ?? `${c} ${s.fixTask ?? ""}\n`);
-      writeInRoot(root, `stepup/plan${ext}`, `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
+      const [solveP, fixP, planP] = (["solve", "fix", "plan"] as const).map((k) => stepUpPart(lang, k, ext));
+      for (const part of [solveP, fixP, planP]) if (part.manifest) writeInRoot(root, `${part.dir}/${part.manifest.rel}`, part.manifest.text);
+      writeInRoot(root, "stepup/README.md", `# Step-up, part 2: the coding test\n\n1. \`${solveP.path}\`: ${s.solveTask}${s.module ? ` You will likely need \`${s.module}\`: look it up.` : ""}\n2. \`${fixP.path}\`: ${s.fixTask ?? ""} This code has a bug: find it and fix it.\n3. \`${planP.path}\`: ${s.talkTask} Build the plan you gave in the talking test.\n${more}\n\`/tutor-step-up check\` runs the checks; \`/tutor-step-up submit\` decides.\n`);
+      writeInRoot(root, solveP.path, solveP.stub(s.solveTask));
+      writeInRoot(root, fixP.path, broken ?? fixP.stub(s.fixTask ?? ""));
+      const planText = planP.stub(s.talkTask);
+      writeInRoot(root, planP.path, lang === "rust" || lang === "go" ? planText.replace(`// ${s.talkTask}\n`, `// ${s.talkTask}\n// Your plan:\n${steps}\n`) : `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
       saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference, ...improve });
       showStepUp(`Step-up, part 2: the coding test is in stepup/ (README.md says what each file is for).${moved ? ` Your earlier stepup/ folder was moved to ${moved}.` : ""} No timer: take the time you need. /tutor-step-up check runs the checks; /tutor-step-up submit decides.`);
     } catch (e) {
@@ -1711,7 +1730,8 @@ export default function (pi: ExtensionAPI): void {
     const root = project!.path, ext = extname(projectRun(root, s.language).entry ?? "src/main.py") || ".py";
     const score = async (file: string, checks: Check[]) => {
       if (!checks.length) return { passed: 0, total: 0 };
-      const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: s.language, root, entry: `stepup/${file}${ext}`, runCmd: null, checks, sandbox: sandboxHost() });
+      const part = stepUpPart(s.language, file, ext); // habits Task 24b: a compiled part is checked in its own folder
+      const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: s.language, root: part.dir === "stepup" ? root : join(root, part.dir), entry: part.dir === "stepup" ? part.path : part.entry, runCmd: null, checks, sandbox: sandboxHost() });
       return { passed: r.results.filter((x) => x.pass).length, total: checks.length };
     };
     const base = {
@@ -1804,7 +1824,7 @@ export default function (pi: ExtensionAPI): void {
       if (wait > 0) { ctx.ui.notify(`the step-up can be taken again after ${wait} more task(s)`, "info"); return; }
       if (band === "pro") { ctx.ui.notify("you are at the top band; there is no step-up above pro", "info"); return; }
       if (exam) { ctx.ui.notify("the step-up waits until the exam is over (/tutor-submit)", "info"); return; }
-      if (!STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the step-up is not ready for ${lang} yet (Python and Lua for now)`, "info"); return; }
+      if (!STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the step-up is not ready for ${lang} yet (Python, Lua, Rust and Go for now)`, "info"); return; }
       if (band === "intermediate" && !ADVANCED_STEP_UP_LANGUAGES.has(lang)) { ctx.ui.notify(`the intermediate step-up measures code and is ready for Python only for now, not ${lang}`, "info"); return; }
       let events: ReturnType<Profile["habitEvents"]> = [];
       profileWrite(() => { events = p.habitEvents(); });

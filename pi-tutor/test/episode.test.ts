@@ -380,6 +380,48 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("submit", b.ctx);
     expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 67/);
   }, 180000);
+  // Habits Task 24b: the step-up for Rust and Go, each part in its own crate / module folder.
+  for (const lang of ["rust", "go"] as const) it.skipIf(!tool(lang === "rust" ? "cargo" : "go", lang === "rust" ? ["--version"] : ["version"]))(`the step-up in ${lang}: each part in its own folder, checked one at a time`, async () => {
+    const R = lang === "rust";
+    const { b, root } = await doneProject(R ? "fn main() {}\n" : "package main\n\nfunc main() {}\n", [], lang);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: lang, project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const fence = (code: string) => "```" + lang + "\n" + code + "```";
+    const TALK = R ? "fn count_even(xs: &[i32]) -> usize {\n    xs.iter().filter(|x| *x % 2 == 0).count()\n}\n\nfn main() {}\n"
+      : "package main\n\nimport \"strings\"\n\nfunc CountWords(s string) int {\n\treturn len(strings.Fields(s))\n}\n\nfunc main() {}\n";
+    const SOLVE = R ? "use std::collections::HashSet;\n\nfn distinct(xs: &[i32]) -> usize {\n    xs.iter().collect::<HashSet<_>>().len()\n}\n\nfn main() {}\n"
+      : "package main\n\nimport \"strings\"\n\nfunc Shout(s string) string {\n\treturn strings.ToUpper(s)\n}\n\nfunc main() {}\n";
+    const FIX = R ? "fn total(xs: &[i32]) -> i32 {\n    let mut s = 0;\n    for x in xs {\n        s = s + x;\n    }\n    s\n}\n\nfn main() {}\n"
+      : "package main\n\nfunc Total(xs []int) int {\n\ts := 0\n\tfor _, x := range xs {\n\t\ts = s + x\n\t}\n\treturn s\n}\n\nfunc main() {}\n";
+    const replies = [
+      JSON.stringify(R ? { talk: "Write `fn count_even(xs: &[i32]) -> usize` returning how many items are even.", solve: "Write `fn distinct(xs: &[i32]) -> usize` returning how many different values there are.", fix: "Write `fn total(xs: &[i32]) -> i32` returning the sum." }
+        : { talk: "Write `func CountWords(s string) int` returning how many words s has.", solve: "Write `func Shout(s string) string` returning s in capitals.", fix: "Write `func Total(xs []int) int` returning the sum." }),
+      R ? "check P1.T1: count_even(&[1, 2, 4]) == 2" : "check P1.T1: CountWords(\"a b  c\") == 3", fence(TALK),
+      R ? "check P1.T1: distinct(&[1, 1, 2]) == 2" : 'check P1.T1: Shout("hi") == "HI"', fence(SOLVE),
+      R ? "check P1.T1: total(&[1, 2, 3]) == 6" : "check P1.T1: Total([]int{1, 2, 3}) == 6", fence(FIX),
+    ];
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] });
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 120000);
+    await turn(b.events, b.ctx, R ? "1. go through the numbers\n2. keep the even ones\n3. count them\npieces: iter, filter, count" : "1. split the text into words\n2. count them\npieces: fields, len", judged("none"));
+    await until(() => existsSync(join(root, "stepup", "README.md")), 240000);
+    const file = (part: string) => join(root, "stepup", part, R ? "src/main.rs" : "main.go");
+    expect(existsSync(join(root, "stepup", "fix", R ? "Cargo.toml" : "go.mod"))).toBe(true);
+    expect(readFileSync(file("fix"), "utf8")).toMatch(/s = s - x/);
+    expect(readFileSync(join(root, "stepup", "README.md"), "utf8")).toMatch(R ? /stepup\/solve\/src\/main\.rs/ : /stepup\/solve\/main\.go/);
+    writeFileSync(file("solve"), SOLVE);
+    writeFileSync(file("fix"), FIX);
+    writeFileSync(file("plan"), TALK);
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/solve 1\/1 · fix 1\/1 · plan 1\/1/);
+    await b.commands["tutor-step-up"].handler("submit", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 34/);
+  }, 600000);
   it("final review I2: a coding test whose setup stopped is prepared again by check", async () => {
     const { b, root } = await doneProject(code("/"), two);
     const { Profile } = await import("../extensions/tutor/profile.js");

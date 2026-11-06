@@ -46,11 +46,24 @@ const ALIASES: Record<string, Record<string, string[]>> = {
   },
 };
 
+function withoutMain(src: string, language: string): string {
+  const m = (language === "rust" ? /\bfn\s+main\s*\(/ : /^func\s+main\s*\(/m).exec(src);
+  if (!m) return src;
+  let depth = 0, opened = false;
+  for (let i = m.index; i < src.length; i++) {
+    if (src[i] === "{") { depth++; opened = true; }
+    else if (src[i] === "}" && opened && --depth === 0) return src.slice(0, m.index) + src.slice(i + 1);
+  }
+  return src.slice(0, m.index);
+}
+
 /** The pieces of the hidden solution: what it calls (its own functions left out) and its main keywords. */
 export function referencePieces(reference: string, language: string): string[] {
   // Final review I3: what only runs the file as a program (print/input under __main__) is not part of the solution.
   const main = reference.search(/^if __name__ == ["']__main__["']\s*:/m);
   if (main >= 0) reference = reference.slice(0, main);
+  // Habits Task 24b: Rust's `fn main` and Go's `func main` only run the program, like Python's __main__ block.
+  if (language === "rust" || language === "go") reference = withoutMain(reference, language);
   const own = new Set([...reference.matchAll(/\b(?:def|fn|func|function)\s+([A-Za-z_]\w*)/g)].map((m) => m[1].toLowerCase()));
   const calls = [...reference.matchAll(/([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1].toLowerCase()).filter((n) => !own.has(n));
   // A method named without a call is a piece too (`max(words, key=words.count)`).
@@ -71,7 +84,7 @@ export function piecesMatch(pieces: string[], reference: string, language: strin
 }
 
 /** Final review I7: languages whose coding-test files can each be checked on their own (compiled ones build together). */
-export const STEP_UP_LANGUAGES = new Set(["python", "lua"]);
+export const STEP_UP_LANGUAGES = new Set(["python", "lua", "rust", "go"]); // habits Task 24b: Rust and Go, a folder per part
 /** Habits Task 17: the intermediate step-up measures code (Python ast, timed checks), so Python only for now. */
 export const ADVANCED_STEP_UP_LANGUAGES = new Set(["python"]);
 

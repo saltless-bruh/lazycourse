@@ -113,7 +113,8 @@ describe("final review (phase 3)", () => {
     expect(referencePieces(ref, "python")).not.toContain("input");
   });
   it("I7: the step-up runs only where the coding test's files can be checked one by one", () => {
-    expect([...STEP_UP_LANGUAGES].sort()).toEqual(["lua", "python"]);
+    // habits Task 24b: Rust and Go qualify since each part became its own crate or module folder.
+    expect([...STEP_UP_LANGUAGES].sort()).toEqual(["go", "lua", "python", "rust"]);
   });
 });
 
@@ -126,5 +127,16 @@ describe("backupStepUp (final review C1: never overwrite the learner's step-up w
     expect(backupStepUp(root, 1000)).toBe("stepup.before-1000");
     expect(existsSync(join(root, "stepup"))).toBe(false);
     expect(readFileSync(join(root, "stepup.before-1000", "solve.py"), "utf8")).toBe("mine\n");
+  });
+});
+
+describe("referencePieces for Rust and Go (habits Task 24b)", () => {
+  it("what only runs the program (fn main / func main) is not part of the solution", () => {
+    const rs = "fn top(xs: &[i32]) -> i32 {\n    *xs.iter().max().unwrap()\n}\n\nfn main() {\n    let v = vec![1];\n    println!(\"{}\", v.len());\n}\n";
+    expect(referencePieces(rs, "rust")).toEqual(expect.arrayContaining(["iter", "max", "unwrap"]));
+    expect(referencePieces(rs, "rust")).not.toContain("len");
+    const go = "package main\n\nimport \"strings\"\n\nfunc Shout(s string) string {\n\treturn strings.ToUpper(s)\n}\n\nfunc main() {\n\tfmt.Println(len(\"x\"))\n}\n";
+    expect(referencePieces(go, "go")).toContain("toupper");
+    expect(referencePieces(go, "go")).not.toContain("println");
   });
 });
