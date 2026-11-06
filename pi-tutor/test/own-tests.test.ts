@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { findOwnTests, runOwnTests, canFail, hasTests, testSpans } from "../extensions/tutor/own-tests.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
+import type { RunExec } from "../extensions/tutor/exam/layout.js";
 import { realExec } from "./fake-pi.js";
 
 const bwrapReady = spawnSync("bwrap", ["--ro-bind", "/", "/", "--unshare-all", "true"]).status === 0 && spawnSync("python3", ["--version"]).status === 0;
@@ -151,5 +152,16 @@ describe("testSpans (Phase 8 A11)", () => {
     expect(spans.some(([a, b]) => src.indexOf("fn helper") >= a && src.indexOf("fn helper") < b)).toBe(false);
     const two = "#[cfg(test)]\nmod a { #[test] fn t() {} }\nfn mid() {}\n#[cfg(test)]\nmod b { }\n";
     expect(testSpans(two, "rust").map(([a, b]) => two.slice(a, b))).toEqual(["#[cfg(test)]\nmod a { #[test] fn t() {} }", "#[cfg(test)]\nmod b { }"]);
+  });
+});
+
+describe("canFail run limit (Phase 8 B3)", () => {
+  it("a Rust/Go broken copy's test run gets 10 s of its own; the build keeps the long limit", async () => {
+    const scripts: string[] = [];
+    const exec: RunExec = async (c, a) => { if (c === "bwrap") scripts.push(a.join(" ")); return { stdout: "test result: ok. 1 passed", stderr: "", code: 0, killed: false }; };
+    const rs = project({ "Cargo.toml": "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2021\"\n", "src/main.rs": "fn half(x: i32) -> i32 { x / 2 }\nfn main() {}\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn p1_t1_half() { assert_eq!(half(4), 2); }\n}\n" });
+    expect(await canFail(exec, { root: rs, language: "rust", tests: ["src/main.rs::p1_t1_half"], entry: "src/main.rs", sandbox: host() })).toBe("missed");
+    const run = scripts.find((s) => s.includes("cargo test --offline --quiet --"))!;
+    expect(run).toMatch(/timeout -k 5 60 .*cargo test --offline --no-run.*timeout -k 2 10 cargo test --offline --quiet --/s);
   });
 });

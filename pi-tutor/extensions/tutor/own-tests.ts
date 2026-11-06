@@ -21,6 +21,8 @@ const LIMIT_SEC = 60;
 // Final review: a planted slip can loop forever (`i + 1` → `i - 1`); a Python copy gets 10 s, not 60, so
 // /tutor-done, which holds the lock, is not stuck for minutes. Rust and Go copies must build, so they keep 60.
 const MUTANT_SEC = { python: 10, compiled: LIMIT_SEC };
+/** Phase 8 B3: a Rust/Go broken copy's test run, after its build: a copy that loops is cut at this, not at 60 s. */
+const MUTANT_RUN_SEC = 10;
 const MAX_MUTANTS = { python: 12, compiled: 6 };
 const MARK = "\x1eTUTOR\t";
 
@@ -176,7 +178,7 @@ function withFiles(files: [string, string][], argv: string[]): string[] {
   return ["sh", "-c", script, "sh", ...files.flat(), "--", ...argv];
 }
 
-async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests: string[]; entry: string | null; files: [string, string][]; sec?: number }): Promise<OneRun> {
+async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests: string[]; entry: string | null; files: [string, string][]; sec?: number; runSec?: number }): Promise<OneRun> {
   const names = i.tests.map((t) => t.split("::")[1]);
   if (i.language === "python") {
     const r = await limited(sb, withFiles(i.files, [LANGS.python.command, "-c", PY_OWN, i.entry ?? "", ...i.tests]), i.sec);
@@ -193,15 +195,18 @@ async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests
   const files = [...i.files];
   if (manifest && !existsIn(i.root, manifest.rel)) files.unshift([manifest.rel, manifest.text]);
   const dirs = [...new Set(i.tests.map((t) => t.split("::")[0].replace(/\/?[^/]*$/, "") || "."))];
+  // Phase 8 B3: the test run after the build gets its own, shorter limit when `runSec` is given.
+  const cut = i.runSec && sb.limited ? `timeout -k 2 ${i.runSec} ` : "";
+  const slow = 'c=$?; [ $c = 124 ] || [ $c = 137 ] && echo "\x1eSLOW"; exit $c';
   const script = i.language === "rust"
-    ? 'cargo test --offline --no-run --quiet 2>&1 || { echo "\x1eBUILD"; exit 1; }; cargo test --offline --quiet -- "$@" 2>&1'
-    : 'for d in $DIRS; do go test -c -vet=off -o /tmp/.own.test "./$d" 2>&1 || { echo "\x1eBUILD"; exit 1; }; /tmp/.own.test -test.v -test.run "^($RUN)$" 2>&1 || exit 1; done';
+    ? `cargo test --offline --no-run --quiet 2>&1 || { echo "\x1eBUILD"; exit 1; }; ${cut}cargo test --offline --quiet -- "$@" 2>&1 || { ${slow}; }`
+    : `for d in $DIRS; do go test -c -vet=off -o /tmp/.own.test "./$d" 2>&1 || { echo "\x1eBUILD"; exit 1; }; ${cut}/tmp/.own.test -test.v -test.run "^($RUN)$" 2>&1 || { ${slow}; }; done`;
   const argv = i.language === "rust"
     ? ["sh", "-c", script, "sh", ...names]
     : ["env", `DIRS=${dirs.join(" ")}`, `RUN=${names.join("|")}`, "sh", "-c", script];
   const r = await limited(sb, withFiles(files, argv), i.sec);
   const text = r.stdout + r.stderr;
-  if (r.killed) return { pass: false, out: "your test took too long (an endless loop?)", assertFailed: false, built: true };
+  if (r.killed || text.includes("\x1eSLOW")) return { pass: false, out: "your test took too long (an endless loop?)", assertFailed: false, built: true };
   if (text.includes("\x1eBUILD")) return { pass: false, out: tail(text.replace("\x1eBUILD", "")), assertFailed: false, built: false };
   const ran = i.language === "rust" ? /test result: ok\. [1-9]/.test(text) : names.every((n) => text.includes(`--- PASS: ${n}`));
   const pass = r.code === 0 && ran;
@@ -433,7 +438,7 @@ export async function canFail(exec: RunExec, i: { root: string; language: string
   const max = i.language === "python" ? MAX_MUTANTS.python : MAX_MUTANTS.compiled;
   let missed = false;
   for (const [rel, broken] of copies.slice(0, max)) {
-    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [...Object.entries(overlay).filter(([k]) => k !== rel), [rel, broken]], sec: i.language === "python" ? MUTANT_SEC.python : MUTANT_SEC.compiled });
+    const r = await runOnce(sb, { root: i.root, language: i.language, tests: i.tests, entry: i.entry ?? null, files: [...Object.entries(overlay).filter(([k]) => k !== rel), [rel, broken]], sec: i.language === "python" ? MUTANT_SEC.python : MUTANT_SEC.compiled, runSec: MUTANT_RUN_SEC });
     if (r.built && !r.pass && r.assertFailed) return "caught";
     if (r.pass) missed = true;
   }
