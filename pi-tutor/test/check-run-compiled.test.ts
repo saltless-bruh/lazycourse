@@ -153,3 +153,22 @@ describe.skipIf(!bwrapReady)("Rust/Go harness minors (habits Task 21)", () => {
     expect(r.error).toMatch(/^main\.go:4: undefined: q/);
   }, 300_000);
 });
+
+// Phase 8 review I1: the Rust build folder is kept per project folder, and cargo trusts mtimes; a broken copy laid
+// over in one run (mtime "now") must never be reused for the learner's older file on disk in the next.
+describe.skipIf(!bwrapReady || !has("cargo", ["--version"]))("Rust build cache and overlays", () => {
+  it("a run after an overlaid broken copy builds the file on disk again", async () => {
+    const { runChecks } = await import("../extensions/tutor/check-run.js");
+    const { runOwnTests } = await import("../extensions/tutor/own-tests.js");
+    const util = (op: string) => `pub fn half(x: i32) -> i32 { x ${op} 2 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn p1_t1_half() { assert_eq!(half(4), 2); }\n}\n`;
+    const root = project({ "Cargo.toml": CARGO, "src/main.rs": "mod util;\nfn main() { println!(\"{}\", util::half(4)); }\n", "src/util.rs": util("/") });
+    const h = { ...host(), cacheDir: mkdtempSync(join(tmpdir(), "rs-cache-")) };
+    const io = () => runChecks(realExec, { language: "rust", root, entry: "src/main.rs", runCmd: "cargo run", checks: [{ task: "P1.T1", kind: "io", stdin: "", contains: "2", milestone: 1, status: "trusted" }], sandbox: h });
+    expect((await io()).results[0].pass).toBe(true);
+    const broken = await runOwnTests(realExec, { root, language: "rust", tests: ["src/util.rs::p1_t1_half"], sandbox: h, entry: "src/main.rs", overlay: { "src/util.rs": util("*") } });
+    expect(broken.pass).toBe(false); // the broken copy was built and tested
+    expect((await io()).results[0]).toMatchObject({ pass: true, got: expect.stringContaining("2") });
+    const own = await runOwnTests(realExec, { root, language: "rust", tests: ["src/util.rs::p1_t1_half"], sandbox: h, entry: "src/main.rs" });
+    expect(own).toMatchObject({ pass: true }); // the test build of the file on disk, not the broken copy's
+  }, 240_000);
+});

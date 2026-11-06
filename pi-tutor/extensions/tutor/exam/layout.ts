@@ -1,7 +1,7 @@
 // Exam folders (spec 2026-10-13 §6, M8 D2): each is a small project of its own, so its tests run
 // inside any parent project. The model writes the stub and the tests; the rest is ours.
 import { realpathSync } from "node:fs";
-import { CAP_TOOLS, SANDBOX_MISSING, bwrapLauncher, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
+import { CAP_TOOLS, SANDBOX_MISSING, bwrapLauncher, freshRust, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./sandbox.js";
 
 export type RunExec = (command: string, args: string[], options: { cwd: string; timeout: number }) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>;
 /** `version`: a cheap command that fails when the toolchain is not installed (final review I1: pi.exec never rejects). */
@@ -101,7 +101,7 @@ export async function runExamTests(exec: RunExec, language: string, dir: string,
     return { code: 1, out: SANDBOX_MISSING, killed: false, broken: false, missing: SANDBOX_MISSING };
   }
   const launch = prefix ? await bwrapLauncher(exec) : null;
-  const run = (c: string, a: string[], timeout: number) => { if (!prefix || !launch) return exec(c, a, { cwd: dir, timeout }); const [lc, la] = launch([...prefix, c, ...a]); return exec(lc, la, { cwd: dir, timeout }); };
+  const run = (c: string, a: string[], timeout: number) => { if (!prefix || !launch) return exec(c, a, { cwd: dir, timeout }); const [lc, la] = launch([...prefix, ...freshRust(language, [c, ...a])]); return exec(lc, la, { cwd: dir, timeout }); };
   const tool = await run(l.version[0], l.version[1], 10_000);
   if (tool.code !== 0) {
     const missing = sb

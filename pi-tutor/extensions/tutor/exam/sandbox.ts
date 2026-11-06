@@ -97,6 +97,16 @@ export async function bwrapLauncher(exec: Exec): Promise<(argv: string[]) => [st
   return (argv) => (scoped ? ["systemd-run", [...SCOPE, "bwrap", ...argv]] : ["bwrap", argv]);
 }
 
+/**
+ * Phase 8 review I1: cargo judges freshness by mtime, and files laid over in the throwaway copy (a broken copy, the
+ * harness) are newer than the learner's file on disk, so a kept build folder could serve a broken copy's build for
+ * the file on disk. Every Rust run touches the folder's `.rs` files first, in the throwaway copy only: the local crate
+ * rebuilds (incrementally), dependencies stay cached.
+ */
+export function freshRust(language: string, argv: string[]): string[] {
+  return language === "rust" ? ["sh", "-c", 'find . -name "*.rs" -type f -exec touch {} + 2>/dev/null; exec "$@"', "sh", ...argv] : argv;
+}
+
 const TARGET_KEEP = 8, TARGET_DAYS = 14;
 
 /**
