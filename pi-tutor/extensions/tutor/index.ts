@@ -1066,7 +1066,8 @@ export default function (pi: ExtensionAPI): void {
   const lastTry = new Map<string, TryOutcome>();      // task id → its last graded outcome
   const lastRunText = new Map<string, string>();      // file → its text at the last run
   const missedErrors = new Set<string>();             // errors a reads-errors miss was already recorded for
-  const askedBefore = new Map<string, string[]>();    // task → the learner's questions on it
+  const askedBefore = new Map<string, string[]>();
+  const missedTest = new Map<string, string>();       // task → the own-test text whose miss is already recorded    // task → the learner's questions on it
   let pendingQuestion: string | null = null;           // the task a question was just asked about
   function recordHabit(habit: HabitId, ok: boolean | null, evidence: string) {
     if (ok === null || !project || !profile) return;
@@ -1595,7 +1596,10 @@ export default function (pi: ExtensionAPI): void {
         const able = await canFail((c, a, o) => pi.exec(c, a, o), { root, language: proj.language, tests: own, entry, sandbox: host });
         // Final review I1: with nothing in the code that a broken copy could try it on, the checks prove the task.
         if (able === "untestable") return scored(`${passed}; your test passes; no broken version of the code it calls could be made to try it on`, own, true, false);
-        recordHabit("tests-that-fail", able === "caught", `test:${id}`);
+        // Phase 8 C: the same test that cannot fail, run again, is no new evidence; a changed test is.
+        const bodies = ownTestBodies(root, proj.language, own).join("\n");
+        if (able === "caught" || missedTest.get(id) !== bodies) recordHabit("tests-that-fail", able === "caught", `test:${id}`);
+        if (able === "missed") missedTest.set(id, bodies); else missedTest.delete(id);
         if (able === "missed") { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
         return scored(`${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`, own, true, true);
       }

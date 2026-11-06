@@ -759,6 +759,32 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(b.notes.some((n) => /ticked P2\.T2 .*your test/.test(n))).toBe(true);
     expect(await habits()).toContainEqual(["tests-that-fail", true]);
   }, 120000);
+  it("Phase 8 C: retrying the same test that cannot fail is one miss; a changed test is new evidence", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("40", b.ctx);
+    mkdirSync(join(root, "tests"), { recursive: true });
+    const weak = (n: string) => `from main import split_amount\n\ndef test_p2_t2_runs():\n    split_amount(${n}, 3)\n`;
+    writeFileSync(join(root, "tests", "test_split.py"), weak("48"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect((await habits()).filter(([k]) => k === "tests-that-fail")).toEqual([["tests-that-fail", false]]);
+    writeFileSync(join(root, "tests", "test_split.py"), weak("50"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect((await habits()).filter(([k]) => k === "tests-that-fail")).toEqual([["tests-that-fail", false], ["tests-that-fail", false]]);
+  }, 120000);
+  it("Phase 8 C: `anyway` ticks without running an own test; the sandbox off makes it self-checked; neither is a habit", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("40", b.ctx);
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(join(root, "tests", "test_split.py"), "from main import split_amount\n\ndef test_p2_t2_runs():\n    split_amount(48, 3)\n");
+    await b.commands["tutor-done"].handler("P2.T2 anyway", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(ticked by you\)/);
+    await b.commands["tutor-exam"].handler("sandbox off", b.ctx);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [ ] P2.T2 split the bill\n- [ ] P2.T3 print\n");
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(self-checked: /);
+    expect((await habits()).map(([h]) => h)).not.toContain("tests-that-fail");
+  }, 120000);
   it("own tests (phase 4 live run): a test not named for the task still ticks on the checks, and the note says how to name it", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("40", b.ctx);
