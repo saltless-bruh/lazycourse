@@ -10,10 +10,12 @@ const SKIP_DIRS = new Set(["target", "node_modules", "__pycache__", ".git", ".py
 const MAX_FILES = 12, MAX_LINES = 400, MAX_BYTES = 64 * 1024;
 
 /** The learner's text files in the exam folder (not ours, no build output, nothing linked from outside). */
-export function learnerFiles(dir: string, language: string): LearnerFile[] {
+export function learnerFiles(dir: string, language: string, projectRoot?: string): LearnerFile[] {
   const lay = layout(language)!;
   const ours = new Set(["brief.md", "grade.md", lay.tests, ...lay.extras.map(([p]) => p), "Cargo.lock", "go.sum"]);
   const root = realpathSync(dir);
+  // Phase 8 D (M8 minor): an exam/ folder that is a link out of the project is never read.
+  if (projectRoot !== undefined && !root.startsWith(`${realpathSync(projectRoot)}${sep}`)) throw new Error(`${dir} resolves outside the project`);
   const out: LearnerFile[] = [];
   const walk = (d: string, depth: number) => {
     for (const name of readdirSync(d).sort()) {

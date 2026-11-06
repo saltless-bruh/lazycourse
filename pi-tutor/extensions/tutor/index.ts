@@ -984,7 +984,7 @@ export default function (pi: ExtensionAPI): void {
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
   const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
-  const LEARNER_ONLY = new Set(["tutor_stepup"]);
+  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
     const last = new Map<string, number>();
@@ -1189,7 +1189,13 @@ export default function (pi: ExtensionAPI): void {
         ctx.ui.notify("running the example tests…", "info");
         const r = await runExamTests((c, a2, o) => pi.exec(c, a2, o), exam.language, join(project.path, exam.dir), { sandbox: sandboxHost() });
         if (r.missing) { ctx.ui.notify(r.missing, "warning"); return; }
-        ctx.ui.notify(r.killed ? "examples timed out after 120 s: a loop that never ends?" : r.code === 0 ? "all examples pass; :TutorSubmit when you are ready" : `examples fail (exit ${r.code}): ${r.out.split("\n").slice(-6).join("\n")}`, r.code === 0 ? "info" : "warning");
+        ctx.ui.notify(r.killed ? "examples timed out after 120 s: a loop that never ends?" : r.code === 0 ? "all examples pass; :TutorSubmit when you are ready" : `examples fail (exit ${r.code}): the output is below`, r.code === 0 ? "info" : "warning");
+        // Phase 8 D (M8 minor): the last 30 lines, as grade.md shows them; the toast held 6 (only the summary).
+        if (r.code !== 0 && !r.killed) {
+          const out = r.out.split("\n").slice(-30).join("\n");
+          const fence = "`".repeat(Math.max(3, ...[...out.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+          pi.sendMessage({ customType: "tutor_exam_check", content: `${fence}\n${out}\n${fence}`, display: true }, { triggerTurn: false });
+        }
         return;
       }
       if (exam) { ctx.ui.notify(`exam ${exam.id} is running: /tutor-submit, or /tutor-exam off to abandon it`, "warning"); return; }
@@ -1256,7 +1262,8 @@ export default function (pi: ExtensionAPI): void {
       // At the end: grade.md shows the last 30 lines of the output.
       const test = editNote ? { ...runTest, out: `${runTest.out}\n\n${editNote}` } : runTest;
       if (test.missing) { ctx.ui.notify(`${test.missing} The exam stays open.`, "warning"); return; }
-      const files = learnerFiles(dir, e.language);
+      let files: ReturnType<typeof learnerFiles>;
+      try { files = learnerFiles(dir, e.language, proj.path); } catch (err) { ctx.ui.notify(`${err instanceof Error ? err.message : String(err)}; the exam stays open`, "error"); return; }
       const minutes = Math.round((Date.now() - e.started) / 6000) / 10;
       let grade: Grade;
       try {

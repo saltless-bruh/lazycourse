@@ -58,3 +58,13 @@ describe("score and grade.md (D3)", () => {
     expect(renderGrade(G, { id: "01-x", score: 60, minutes: 5, limit: 20, test: killed })).toContain("The example tests timed out after 120 s");
   });
 });
+
+describe("learnerFiles and a linked exam folder (Phase 8 D, M8 minor)", () => {
+  it("reads nothing when the exam folder resolves outside the project", () => {
+    const project = mkdtempSync(join(tmpdir(), "lf-proj-")), outside = mkdtempSync(join(tmpdir(), "lf-out-"));
+    writeFileSync(join(outside, "secret.py"), "TOKEN = 1\n");
+    mkdirSync(join(project, "exam"));
+    symlinkSync(outside, join(project, "exam", "01-x"));
+    expect(() => learnerFiles(join(project, "exam", "01-x"), "python", project)).toThrow(/outside the project/);
+  });
+});

@@ -1142,6 +1142,11 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     await b.commands["tutor-exam"].handler("small", b.ctx);
     await b.commands["tutor-exam"].handler("check", b.ctx);
     expect(b.notes.at(-1)).toMatch(/examples fail \(exit 1\)/);
+    // Phase 8 D (M8 minor): the output is shown like grade.md (its last 30 lines), so the failure itself shows, not only the summary
+    const shown = b.messages.at(-1) as { message: { customType: string; content: string; display: boolean } };
+    expect(shown.message).toMatchObject({ customType: "tutor_exam_check", display: true });
+    expect(shown.message.content).toMatch(/NotImplementedError|Traceback|FAIL/);
+    expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...shown.message, timestamp: 1 }] })).toMatchObject({ messages: [] });
     await b.commands["tutor-exam"].handler("off", b.ctx);
     expect(b.entries.filter((x) => x.type === "tutor_exam").at(-1)?.data).toMatchObject({ abandoned: expect.any(Number) });
     expect(b.widgets["tutor"]?.[0]).not.toMatch(/exam/);
