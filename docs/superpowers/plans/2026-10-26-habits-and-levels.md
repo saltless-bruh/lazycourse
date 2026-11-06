@@ -212,4 +212,11 @@ Line map without a final newline (always append `"\n"` before the harness); Go e
 ### Task 24: Older minors and housekeeping
 Phase 1 (teaching turns) M1, M4–M7; the exam, sandbox and onboarding minors listed in project memory, each with a failing test or a ledger ruling that it stands; `test/exam-layout.test.ts` `realHost()` cache removed after each test; the Neovim test's unhandled `write after end` fixed. Commit per group.
 
+### Task 24b: The step-up for Rust and Go
+Phase 3 final review I7 deferred it here (STEP_UP_LANGUAGES is Python and Lua). Each part gets its own folder
+(`stepup/solve/`, `stepup/fix/`, `stepup/plan/`, each a small crate or Go module with the part's entry), so
+the compiled harness builds and checks one part at a time; the talking test, the fix part's planted slip and
+scoring are the same as Python's. The intermediate step-up's tests and improve parts stay Python only (they
+measure Python code). Tests in `episode.test.ts` with real cargo and go. Commit `feat: the step-up for Rust and Go`.
+
 ### Task 25: Phase 7 live check, docs, merge.
