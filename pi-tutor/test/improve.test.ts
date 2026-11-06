@@ -22,6 +22,16 @@ describe.skipIf(!bwrapReady)("codeMetrics", () => {
     expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() }))
       .toEqual({ longestFunction: 6, maxNesting: 3, branches: 4 });
   }, 60_000);
+  it("Phase 8 A10: a helper in another project file the checked function imports is measured too", async () => {
+    const NESTED = "def walk(xs):\n    n = 0\n    for x in xs:\n        if x:\n            n += 1\n    return n\n";
+    const at = (files: Record<string, string>) => codeMetrics(realExec, { root: project(files), entry: "src/main.py", sandbox: host(), functions: ["count"] });
+    const want = { longestFunction: 5, maxNesting: 2, branches: 2 };
+    expect(await at({ "src/main.py": "from helpers import walk\n\ndef count(xs):\n    return walk(xs)\n", "src/helpers.py": NESTED })).toEqual(want);
+    expect(await at({ "src/main.py": "import util.walking as w\n\ndef count(xs):\n    return w.walk(xs)\n", "src/util/walking.py": NESTED })).toEqual(want);
+    expect(await at({ "src/main.py": "from .helpers import walk\n\ndef count(xs):\n    return walk(xs)\n", "src/helpers.py": NESTED })).toEqual(want);
+    // an import of the standard library is not the learner's code
+    expect(await at({ "src/main.py": "from statistics import mean\n\ndef count(xs):\n    return mean(xs)\n" })).toEqual({ longestFunction: 1, maxNesting: 0, branches: 0 });
+  }, 60_000);
   it("an elif chain is one level, not a staircase", async () => {
     const src = "def grade(n):\n    if n > 90:\n        return 'A'\n    elif n > 80:\n        return 'B'\n    elif n > 70:\n        return 'C'\n    return 'D'\n";
     expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() }))

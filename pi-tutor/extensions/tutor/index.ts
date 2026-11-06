@@ -24,7 +24,7 @@ import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel,
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
-import { calledFunctions, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
+import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
@@ -1340,13 +1340,15 @@ export default function (pi: ExtensionAPI): void {
    * model writes edge-case checks and one timed large-input check, kept only when the hidden reference passes
    * them; the task's own checks must still pass. Better on something and worse on nothing is the optimizes habit.
    */
-  interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured; beforeSource?: string }
+  /** `beforeSource`: the entry's text (saved before Phase 8) or every Python file of the project (A10). */
+  interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured; beforeSource?: string | Record<string, string> }
   const improveKey = (root: string) => `improve:${root}`;
-  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string, asOf?: string) {
+  async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string | Record<string, string>, asOf?: string | Record<string, string>) {
+    const files = (t: string | Record<string, string>) => (typeof t === "string" ? { [entry]: t } : t);
     const host = sandboxHost()!, exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
     // Phase 5 live run: `asOf` measures that exact text (laid over in the throwaway copy), so an edit made while
     // /tutor-improve is still working never mixes into the before.
-    const asOver = asOf !== undefined ? { [entry]: asOf } : undefined;
+    const asOver = asOf !== undefined ? files(asOf) : undefined;
     const r = await runChecks(exec, { language: "python", root, entry, runCmd: projectRun(root, "python").runCmd, checks: [...st.checks, ...st.extra], sandbox: host, overlay: asOver });
     const own = r.results.slice(0, st.checks.length), extra = r.results.slice(st.checks.length);
     const metrics = await codeMetrics(exec, { root, entry, sandbox: host, functions: st.functions, overlay: asOver });
@@ -1359,7 +1361,7 @@ export default function (pi: ExtensionAPI): void {
         (await runChecks(exec, { language: "python", root, entry, runCmd: null, checks: [{ ...timed.check, limitMs: undefined }], sandbox: host, overlay })).results[0]?.ms ?? null;
       const runs: { base: number[]; now: number[] } = { base: [], now: [ms] };
       for (let k = 0; k < 2; k++) {
-        const b = await once({ [entry]: baseline }); if (b !== null) runs.base.push(b);
+        const b = await once(files(baseline)); if (b !== null) runs.base.push(b);
         if (k === 0) { const n = await once(); if (n !== null) runs.now.push(n); }
       }
       ms = Math.min(...runs.now);
@@ -1425,8 +1427,8 @@ export default function (pi: ExtensionAPI): void {
       const ms = Object.entries(cs.milestones).find(([, m]) => m.checks.some((c) => c.task === id));
       const reference = ms?.[1].reference ?? "";
       if (!checks.length || !reference) { ctx.ui.notify(`${id} has no trusted checks to keep it working, so it cannot be improved here`, "info"); return; }
-      let beforeSource: string;
-      try { beforeSource = readFileSync(join(root, entry), "utf8"); } catch { ctx.ui.notify(`cannot read ${entry}`, "warning"); return; }
+      const beforeSource = pythonSources(root);
+      if (beforeSource[entry] === undefined) { ctx.ui.notify(`cannot read ${entry}`, "warning"); return; }
       const line = tasksMd.split("\n").find((l) => l.includes(` ${id} `)) ?? id;
       ctx.ui.notify(`writing edge-case and timing checks for ${id}…`, "info");
       const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;

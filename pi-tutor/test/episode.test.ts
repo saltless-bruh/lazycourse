@@ -533,6 +533,20 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
   }, 60000);
+  it("Phase 8 A10: an improvement made in a helper file is measured, and the before is timed with the helper as it was", async () => {
+    const SLOW = "def unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return seen\n";
+    const { b, root } = await doneProject("from helpers import unique\n\ndef count_unique(items):\n    return len(unique(items))\n", [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    writeFileSync(join(root, "src", "helpers.py"), SLOW);
+    await b.commands["tutor-level"].handler("70", b.ctx);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items: `count_unique(items)`\n- [ ] P2.T3 print\n");
+    b.replies.push("check P2.T2: count_unique([]) == 0\ntimed P2.T2: count_unique(list(range(20000)))");
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/measured now: longest function 5 statements · nesting 2 · branches 2/);
+    writeFileSync(join(root, "src", "helpers.py"), "def unique(items):\n    return list(dict.fromkeys(items))\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: speed: \d+ ms → \d+ ms · longest function: 5 → 1 statements/);
+  }, 120000);
   it("improve it (Task 17): /tutor-improve measures a ticked task before and after; better and nothing worse is the optimizes habit", async () => {
     const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
     const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
