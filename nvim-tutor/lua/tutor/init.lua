@@ -223,8 +223,12 @@ function M.setup(user_opts)
     complete = function() return { "auto", "show", "hide" } end })
   cmd("TutorExam", slash("/tutor-exam"), { nargs = "*",
     complete = function() return { "small", "medium", "check", "off", "sandbox" } end })
+  -- Habits Task 22: a completion function's list is not filtered by Neovim; keep what starts with the typed word.
   cmd("TutorDone", slash("/tutor-done"), { nargs = "*",
-    complete = function() return vim.list_extend(M.open_tasks(opts.cwd), { "anyway" }) end })
+    complete = function(lead)
+      return vim.tbl_filter(function(w) return vim.startswith(w, lead) end, vim.list_extend(M.open_tasks(opts.cwd), { "anyway" }))
+    end })
+  cmd("TutorFix", slash("/tutor-fix"), {})
   cmd("TutorSubmit", slash("/tutor-submit"), {})
   cmd("TutorProgress", slash("/tutor-progress"), { nargs = "?" })
   cmd("TutorStepUp", slash("/tutor-step-up"), { nargs = "?", complete = function() return { "check", "submit" } end })

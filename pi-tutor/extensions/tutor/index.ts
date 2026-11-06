@@ -1510,6 +1510,8 @@ export default function (pi: ExtensionAPI): void {
         if (able === "missed") { ui?.notify(`${id} not yet: your test passes even on a broken version of your code, so it cannot catch a bug; make it check what ${id} should give`, "warning"); return; }
         return scored(`${passed}; your test ${own.map((t) => t.split("::")[1]).join(", ")} passes and catches a broken version`, own, true, true);
       }
+      // Habits Task 22: checks.md shows the checks that just ran (it was only written on a tick).
+      writeChecksMd(root, state, current);
       failedCheck(id, failed[0]);
     }),
   });

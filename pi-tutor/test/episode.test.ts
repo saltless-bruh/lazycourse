@@ -554,6 +554,13 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     const q = Profile.open(process.env.PI_TUTOR_PROFILE!);
     try { expect(q.setting("proscores:python")).toBe(st2); } finally { q.close(); }
   }, 180000);
+  it("habits Task 22: a failed /tutor-done writes spec/checks.md again, so it shows the checks that ran", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    expect(existsSync(join(root, "spec", "checks.md"))).toBe(false);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 not yet/);
+    expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("split_amount(50, 3) == 16.666666666666668");
+  }, 60000);
   it("own tests (Task 14): a test that cannot fail does not tick; a failing own test is a try; a good one ticks", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("40", b.ctx);
