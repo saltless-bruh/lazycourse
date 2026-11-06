@@ -112,6 +112,14 @@ describe("M2 review fixes", () => {
     ];
     const r = (await events["context"]({ type: "context", messages }, {})) as { messages: typeof messages };
     expect(r.messages.map((m) => (m as { content: unknown }).content)).toEqual(["a", [{ type: "text", text: "b" }], "keep", "snap5", "c"]);
+  });  it("Phase 8 B6: the step-up's messages are for the learner; the model never reads them (it gets its own rule)", async () => {
+    const { events } = await boot();
+    const messages = [
+      { role: "custom", customType: "tutor_stepup", content: "Now your plan: numbered steps…", display: true, timestamp: 1 },
+      { role: "user", content: "1. split", timestamp: 2 },
+    ];
+    const r = (await events["context"]({ type: "context", messages }, {})) as { messages: typeof messages };
+    expect(r.messages.map((m) => (m as { content: unknown }).content)).toEqual(["1. split"]);
   });
 });
 

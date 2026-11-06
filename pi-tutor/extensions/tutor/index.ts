@@ -984,12 +984,14 @@ export default function (pi: ExtensionAPI): void {
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
   const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
+  const LEARNER_ONLY = new Set(["tutor_stepup"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
     const last = new Map<string, number>();
     msgs.forEach((m, i) => { if (m.role === "custom" && NEWEST_ONLY.has(m.customType)) last.set(m.customType, i); });
-    if (!last.size) return;
-    const pruned = msgs.filter((m, i) => !(m.role === "custom" && NEWEST_ONLY.has(m.customType) && last.get(m.customType) !== i));
+    // Phase 8 B6: the step-up's messages (the problem, "Now your plan", the result) are the learner's to read; the
+    // model gets its own [step-up] rule in the turn context and must not answer them.
+    const pruned = msgs.filter((m, i) => !(m.role === "custom" && ((NEWEST_ONLY.has(m.customType) && last.get(m.customType) !== i) || LEARNER_ONLY.has(m.customType))));
     return pruned.length === msgs.length ? undefined : { messages: pruned };
   });
 
