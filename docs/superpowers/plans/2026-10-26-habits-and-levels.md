@@ -220,3 +220,41 @@ scoring are the same as Python's. The intermediate step-up's tests and improve p
 measure Python code). Tests in `episode.test.ts` with real cargo and go. Commit `feat: the step-up for Rust and Go`.
 
 ### Task 25: Phase 7 live check, docs, merge.
+
+## Phase 8 — the open list (branch `habits-p8`)
+
+Added 2026-11-06 at the author's request ("merge phase 7 first, then do A to D"): every minor still open after
+Phase 7, from the ledger and the project memory, each fixed with a failing test first or ruled to stand.
+
+- **A (wrong result or a block):** a `run:` with no file (`go run .`, `npm start`, `python -m`) finds its entry
+  and its reference folder gets `package.json`; the checks job runs once after `/new` and saves its result; a
+  program's own "syntax error" text is no typo; the Lua harness works on 5.1/LuaJIT; a JS class instance matches
+  the literal of its fields; brackets in JS templates, Go raw strings and Lua long strings are text; only
+  check-solved ticks count down the retake; the improve part is asked twice, then the coding test is not set up
+  (never a free pass); an intermediate step-up saved without its tests/improve parts starts again; improve-it
+  measures and times helpers in other files; Rust `#[cfg(test)]` protects only the item it marks; a question
+  naming another task is that task's; the fix during an exam is the learner's own; a right-click ask never moves
+  the recipe; numbered questions are not Steps; `f(x) = y` is an Example; one recipe step per reply.
+- **B (slow or awkward):** Rust keeps a build folder per project folder (894 ms → ~300 ms), pruned (gone, 14 days,
+  newest 8); `/tutor-improve` writes its checks in the background; a looping Rust/Go broken copy is cut 10 s into
+  its run; a message typed while the second reader waits gets the fallback, not a rewrite; step-up messages stay
+  out of the model's context; `/tutor-progress` says "solid in another language" and lists habits for a language
+  with no level; the level-move reason names the habit that turned solid last; habit replay is one pass.
+- **C (tests):** a can't-fail own test retried unchanged is one miss; `anyway` and sandbox-off with own tests tested.
+- **D (early milestones, re-checked):** M1b–M6b were fixed in M6c (its "Not fixed" rulings stand). Fixed now:
+  grading uses the requirements and brief as written; a JS/TS test about a SyntaxError is not a broken test file;
+  no write through a dangling symlink; no tick written when Neovim cannot report unsaved edits; a linked exam
+  folder is never read; `:TutorExam check` shows 30 lines; exam ids cut at a word; no empty concept groups;
+  sandbox runs get kernel limits (systemd scope); the missing-sandbox note names the system; pytest never
+  collects exam tests; a run `setup()` stopped is not reported; a hide error lets `close()`/`setup()` finish;
+  the widget clips by grapheme; pi-tui is a peer dependency; doc comments sit on their code.
+
+Rulings (stand): B5 idle nudges in a recipe — already paused (habits Task 6a). M8 "no idiom checks counts as full
+20" — the M8 plan chose it (D3 and its test). Pending ticks memory-only, unittest exit 5, stale handles after `/new`
+— gone (phase 2 ticking; "Ran 0 tests" is a broken run; shutdown clears timers). The shared Go build cache stays
+shared — a per-folder cache costs ~7 s and 66 MB on every throwaway reference folder, and everything that could
+read a planted entry runs in the sandbox. `/tutor-exam sandbox <word>` keeps the usage (a typo starts no model
+call); the usage says `/tutor-exam small sandbox …` for such a topic. Two Pis on one Neovim and `setup()`
+restarting Pi stand (M6c). `~/.config/nvim/lua/plugins/tutor.lua` is the author's file.
+
+### Task 26: Phase 8 review, live check, docs, merge.
