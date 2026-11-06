@@ -1628,7 +1628,8 @@ export default function (pi: ExtensionAPI): void {
     if (onTask(episode?.spot)) closeEp(how === "checks" ? "run_passed" : "superseded");
     for (const k of [...spotMemory.keys()]) if (onTask(k)) spotMemory.delete(k);
     ui?.notify(`ticked ${id} (${why})`, "info");
-    if (profile && project) { const p = profile, key = `stepup-wait:${project.language}`; profileWrite(() => { const w = Number(p.setting(key) ?? "0") || 0; if (w > 0) p.setSetting(key, String(w - 1)); }); }
+    // Phase 8 A7: only a task its checks solved counts toward a retake; `anyway` and self-checked ticks do not.
+    if (how === "checks" && profile && project) { const p = profile, key = `stepup-wait:${project.language}`; profileWrite(() => { const w = Number(p.setting(key) ?? "0") || 0; if (w > 0) p.setSetting(key, String(w - 1)); }); }
     settleLevel(tickHanded);
     if (workflow?.task === id) { pi.appendEntry("tutor_workflow", { ...workflow, done: Date.now() }); workflow = null; }
     autoRecipe(session);

@@ -496,6 +496,11 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(b.notes.some((n) => /habits are solid: \/tutor-step-up/.test(n))).toBe(false); // final review M9: no offer while waiting
     await b.commands["tutor-step-up"].handler("", b.ctx);
     expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
+    // Phase 8 A7: a tick no check passed (`anyway`, self-checked) is no solved task, so the wait stays.
+    await b.commands["tutor-done"].handler("P2.T3 anyway", b.ctx);
+    expect(b.notes.some((n) => /ticked P2\.T3/.test(n))).toBe(true);
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/after 1 more task\(s\)/);
   }, 60000);
   it("improve it (Task 17): /tutor-improve measures a ticked task before and after; better and nothing worse is the optimizes habit", async () => {
     const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
