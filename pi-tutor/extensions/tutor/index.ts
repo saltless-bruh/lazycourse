@@ -749,6 +749,7 @@ export default function (pi: ExtensionAPI): void {
    * Pi delivers without a new before_agent_start — phase 3 live check).
    */
   function learnerMessage(prompt: string) {
+    recipeMovedByCode = false; // Phase 8 review I4: one judgment cycle per learner message, judged or not
     // Final review I6/M10: during the talking test a message is the step-up's (not a recipe step, not chat
     // evidence); a right-click question stays a question.
     const talking = stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask");
@@ -806,7 +807,8 @@ export default function (pi: ExtensionAPI): void {
     if (m.role !== "user" || !run || pendingSteers === 0) return;
     pendingSteers--;
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-    run = { ...run, prompt: text, judged: false };
+    // Phase 8 review I3: a held reply that got the fallback marked the run rejected; the reply to this message is new.
+    run = { ...run, prompt: text, judged: false, rejected: false, reasks: 0 };
     learnerMessage(text);
   });
 

@@ -1712,6 +1712,11 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       expect(step()).toBe(1);
       await turn(b.events, b.ctx, "P1.T1 is the tip box", stepDone);
       expect(step()).toBe(2);
+      // review I4: a code-moved step whose reply carries no judgment does not swallow the next reply's step_done
+      await turn(b.events, b.ctx, "total: float, people: int → float", assistant("ok, no fence"));
+      expect(step()).toBe(3);
+      await turn(b.events, b.ctx, "I am not sure what the examples should be", stepDone);
+      expect(step()).toBe(4);
     });
     it("final review M10: a plan sent as the first message of the talking test is taken as the plan", async () => {
       mkdir(pjoin(dir, "spec"));
@@ -2257,6 +2262,11 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     expect(calls).toHaveLength(1);
     expect(textOf(good)).not.toBe(REWRITE_TEXT);
     expect(textOf(good)).not.toContain("Swap the star");
+    // review I3: the run goes on to the typed message, and that reply is judged (the fallback's rejected flag is not carried)
+    await b.events["message_start"]({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "oh wait, I see it" }], timestamp: 2 } }, b.ctx);
+    const before = b.entries.filter((e) => e.type === "tutor_judgment").length;
+    await b.events["turn_end"]({ type: "turn_end", message: judged("none") }, b.ctx);
+    expect(b.entries.filter((e) => e.type === "tutor_judgment").length).toBe(before + 1);
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
     await settle();
     expect(b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite")).toHaveLength(0);
