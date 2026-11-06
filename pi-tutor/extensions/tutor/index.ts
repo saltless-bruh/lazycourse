@@ -1641,7 +1641,8 @@ export default function (pi: ExtensionAPI): void {
     writeChecksMd(root, state, currentMilestone(r.text, lesson));
     // Only passing checks solve it; a self-checked or `anyway` tick gives the episode up (final review I2).
     const onTask = (spot?: string | null) => !!spot && (spot.startsWith(`check:${id}:`) || spot.startsWith(`test:${id}:`));
-    const handed = how === "checks" && onTask(episode?.spot) ? stepFor(episode, { exam: false }) === "fix" : null;
+    // Phase 8 A13: during an exam the tutor never reaches the fix step, so nothing was handed.
+    const handed = how === "checks" && onTask(episode?.spot) ? stepFor(episode, { exam: exam !== null }) === "fix" : null;
     if (handed !== null && episode) recordHabit("own-fixes", ownFixEvent(handed ? "fix-step" : "checks"), episode.id);
     if (how === "checks") fixStepStreak = handed ? fixStepStreak + 1 : 0;
     // Final review I8: without a check run there is nothing to say about the idea.

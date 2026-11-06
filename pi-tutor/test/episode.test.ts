@@ -246,6 +246,19 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(await habits()).toContainEqual(["right-question", true]);
   }, 60000);
+  it("Phase 8 A13: during an exam the tutor never shows the fix, so a project task fixed then is the learner's own fix", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    p.setSetting(`exam:${root}`, JSON.stringify({ id: "01-x", dir: "exam/01-x", language: "python", topic: null, size: "small", started: Date.now(), limit: 20, concepts: [] }));
+    p.close();
+    await b.events["session_start"]({ type: "session_start", reason: "resume" }, b.ctx);
+    for (const op of ["*", "+", "-", "%", "**"]) { writeFileSync(join(root, "src", "main.py"), code(op)); await b.commands["tutor-done"].handler("P2.T2", b.ctx); }
+    writeFileSync(join(root, "src", "main.py"), code("/"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.some((n) => /ticked P2\.T2/.test(n))).toBe(true);
+    expect((await habits()).filter(([k]) => k === "own-fixes")).toEqual([["own-fixes", true]]);
+  }, 90000);
   it("Phase 8 A12: a question about another open task is not credited to this task's next try", async () => {
     const { b, root } = await doneProject(code("*"), two);
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
