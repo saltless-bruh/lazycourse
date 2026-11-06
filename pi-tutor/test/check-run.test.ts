@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -237,4 +237,22 @@ describe.skipIf(!bwrapReady || !has("node"))("JavaScript and TypeScript function
     const nan = await js(project({ "src/main.js": "export const half = (x) => x / 2\nexport default function splitAmount(t, p) { return t / p }\n" }), [value("half(NaN)", "NaN"), value("splitAmount(50, 4)", "12.5")]);
     expect(nan.results.map((x) => x.pass)).toEqual([true, true]);
   }, 60_000);
+});
+
+// Phase 8 A4: a `lua` that is Lua 5.1 or LuaJIT (setfenv, loadstring, other error wording) gets the same results.
+describe.skipIf(!bwrapReady || !has("luajit", "-v"))("runChecks: Lua 5.1 / LuaJIT", () => {
+  const jit = () => {
+    const bin = mkdtempSync(join(tmpdir(), "luajit-bin-"));
+    copyFileSync(spawnSync("sh", ["-c", "command -v luajit"]).stdout.toString().trim(), join(bin, "lua"));
+    chmodSync(join(bin, "lua"), 0o755);
+    return { ...host(), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } };
+  };
+  const run = (root: string, checks: Check[]) => runChecks(realExec, { language: "lua", root, entry: "src/main.lua", runCmd: "lua src/main.lua", checks, sandbox: jit() });
+  it("a file that does not parse says why; a missing function is named; a module table works", async () => {
+    const broken = (await run(project({ "src/main.lua": "local M = {}\nfunction M.tip(x) return x * + end\nreturn M\n" }), [value("M.tip(10)", "2")])).results[0];
+    expect(broken.error).toMatch(/^your file stopped while loading: .*unexpected symbol/);
+    const r = (await run(project({ "src/main.lua": "local M = {}\nfunction M.half(x) return x / 2 end\nreturn M\n" }), [value("half(4)", "2"), value("tip_rate(true)", "0.2")])).results;
+    expect(r[0].pass).toBe(true);
+    expect(r[1]).toMatchObject({ pass: false, error: "tip_rate is not defined yet" });
+  }, 30_000);
 });

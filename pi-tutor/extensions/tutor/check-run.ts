@@ -225,7 +225,8 @@ local env = setmetatable({}, { __index = _G })
 env.io = setmetatable({ read = function() error(INPUT, 0) end, lines = function() error(INPUT, 0) end }, { __index = io })
 local function loadin(src, name, scope, file)
   if setfenv then
-    local f, e = (file and loadfile(src) or loadstring(src, name))
+    local f, e
+    if file then f, e = loadfile(src) else f, e = loadstring(src, name) end
     if f then setfenv(f, scope) end
     return f, e
   end
@@ -300,7 +301,8 @@ end
 if got == INPUT then out({ error = "it waited for typed input; a check types nothing" }) return end
 -- A file that did not load explains any failure (final review I1: \`M.tip(10)\` fails on a nil M, not a missing name).
 if stopped then out({ error = missing("") }) return end
-local name = tostring(got):match("attempt to call a nil value %(%a+ '([%w_]+)'%)")
+-- Lua 5.4 says "attempt to call a nil value (global 'f')", 5.1 and LuaJIT "attempt to call global 'f' (a nil value)".
+local name = tostring(got):match("attempt to call a nil value %(%a+ '([%w_]+)'%)") or tostring(got):match("attempt to call %a+ '([%w_]+)' %(a nil value%)")
 out({ error = name and missing(name) or tostring(got) })
 `;
 
