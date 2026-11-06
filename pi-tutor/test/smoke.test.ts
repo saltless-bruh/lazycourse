@@ -1054,6 +1054,27 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     expect(b.notes.at(-1)).toMatch(/exam 01-word-frequency: 20 minutes/);
     expect(b.widgets["tutor"]?.[0]).toMatch(/^tutor {2}exam 01 (20:00|19:5\d) left/); // Task 6
   }, 30_000);
+  it("Phase 8 D (M8 minor): requirement ids come from the exam as written, not the brief the learner can edit", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    const dir = pjoin(cwd, "exam", "01-word-frequency");
+    wfile(pjoin(dir, "brief.md"), "# my notes, the requirements deleted\n");
+    wfile(pjoin(dir, "solution.py"), "def count_words(text):\n    out = {}\n    for w in text.split():\n        out[w] = out.get(w, 0) + 1\n    return out\n");
+    b.replies.push(JSON.stringify({
+      requirements: [{ id: "R1", met: true, evidence: "solution.py:4 — counts each word" }, { id: "R2", met: false, evidence: "solution.py:3 — words are not lowercased" }],
+      idioms: [], next_fixes: ["a", "b", "c"], in_short: "Counting works.",
+    }));
+    let graderSaw = "";
+    const reg = (b.ctx as unknown as { modelRegistry: { complete: (...a: unknown[]) => Promise<unknown> } }).modelRegistry, inner = reg.complete;
+    reg.complete = async (...a: unknown[]) => { graderSaw = JSON.stringify(a[1]); return inner(...a); };
+    await b.commands["tutor-submit"].handler("", b.ctx);
+    expect(readFileSync(pjoin(dir, "grade.md"), "utf8")).toMatch(/\*\*60\/100\*\*/);
+    expect(graderSaw).toContain("R1");
+    expect(graderSaw).not.toContain("my notes, the requirements deleted");
+  }, 30_000);
   it("refuses outside a recorded project, for a language with no exams, and while one runs", async () => {
     const out = await boot();
     await out.commands["tutor-exam"].handler("", out.ctx);

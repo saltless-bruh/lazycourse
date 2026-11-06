@@ -245,3 +245,14 @@ describe("exam tests inside the sandbox (plan 2026-10-16)", () => {
     expect(r.missing).toMatch(/could not run cargo inside the exam sandbox/);
   });
 });
+
+describe("JS/TS broken tests (Phase 8 D, M8 minor)", () => {
+  it("only a file that does not load is broken; a test about a SyntaxError is a test", () => {
+    const load = "file:///x/examples.exam.js:2\ntest(\"r1\", () => { let x = ; });\n                           ^\n\nSyntaxError: Unexpected token ';'\n    at compileSourceTextModule (node:internal/modules/esm/utils:355:16)\n";
+    const inTest = "✖ r1 x (1ms)\n  SyntaxError: Unexpected end of JSON input\n      at JSON.parse (<anonymous>)\nℹ fail 1\n";
+    for (const lang of ["javascript", "typescript"]) {
+      expect(layout(lang)!.broken(load), lang).toBe(true);
+      expect(layout(lang)!.broken(inTest), lang).toBe(false);
+    }
+  });
+});

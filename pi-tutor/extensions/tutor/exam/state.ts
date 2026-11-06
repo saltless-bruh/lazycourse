@@ -2,7 +2,11 @@ import type { ExamSize } from "./make.js";
 
 // The exam in progress (spec 2026-10-13 §6): a `tutor_exam` session entry, restored on resume.
 /** `tests` (M8 minor M3): the exam's tests file as it was written, so a grade never runs the learner's edits of it. */
-export interface ExamState { id: string; dir: string; language: string; topic: string | null; size: ExamSize; started: number; limit: number; concepts: string[]; submitted?: number; abandoned?: number; score?: number; tests?: string }
+export interface ExamState { id: string; dir: string; language: string; topic: string | null; size: ExamSize; started: number; limit: number; concepts: string[]; submitted?: number; abandoned?: number; score?: number; tests?: string;
+  /** Phase 8 D: the requirement ids as the exam was written (brief.md is the learner's to edit). */
+  ids?: string[];
+  /** The brief as written, for the grader. */
+  brief?: string }
 
 /** The last `tutor_exam` entry on the branch, if it is still open (not submitted or abandoned). */
 export function restoreExam(branch: unknown[]): ExamState | null {

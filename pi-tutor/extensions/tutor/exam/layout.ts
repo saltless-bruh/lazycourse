@@ -47,13 +47,14 @@ const LAYOUTS: Record<string, Layout> = {
     // Final review I5: not *.test.ts, so the project's own `node --test` never runs exam tests.
     stub: "solution.ts", tests: "examples.exam.ts", extras: [["package.json", `{ "type": "module" }\n`]],
     command: ["node", ["--test", "examples.exam.ts"]], version: ["node", ["--version"]],
-    broken: (o) => /SyntaxError|ERR_MODULE_NOT_FOUND|ERR_UNKNOWN_FILE_EXTENSION|ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX/.test(o),
+    // Phase 8 D: a file that does not load prints SyntaxError at the start of a line; inside a failing test it is indented.
+    broken: (o) => /^SyntaxError|ERR_MODULE_NOT_FOUND|ERR_UNKNOWN_FILE_EXTENSION|ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX/m.test(o),
     naming: "stub: solution.ts with exported functions that throw new Error(\"write …\"); erasable TypeScript only (no enum, namespace, parameter properties). tests: examples.exam.ts with node:test and node:assert/strict, `import { … } from \"./solution.ts\"`, one test(\"r<n> <what>\", …) per requirement.",
   },
   javascript: {
     stub: "solution.js", tests: "examples.exam.js", extras: [["package.json", `{ "type": "module" }\n`]],
     command: ["node", ["--test", "examples.exam.js"]], version: ["node", ["--version"]],
-    broken: (o) => /SyntaxError|ERR_MODULE_NOT_FOUND/.test(o),
+    broken: (o) => /^SyntaxError|ERR_MODULE_NOT_FOUND/m.test(o),
     naming: "stub: solution.js (an ES module) with exported functions that throw new Error(\"write …\"). tests: examples.exam.js with node:test and node:assert/strict, `import { … } from \"./solution.js\"`, one test(\"r<n> <what>\", …) per requirement.",
   },
   lua: {

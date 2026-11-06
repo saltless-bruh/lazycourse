@@ -1212,9 +1212,10 @@ export default function (pi: ExtensionAPI): void {
           language: lang, root: proj.path, vocab, size: a.size, topic: a.topic, sandbox: sandboxHost(),
         });
         setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
-        let tests: string | undefined;
+        let tests: string | undefined, brief: string | undefined;
         try { tests = readFileSync(join(proj.path, made.dir, lay.tests), "utf8"); } catch { tests = undefined; }
-        exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts, ...(tests !== undefined ? { tests } : {}) };
+        try { brief = readFileSync(join(proj.path, made.dir, "brief.md"), "utf8"); } catch { brief = undefined; }
+        exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts, ids: made.spec.requirements.map((r) => r.id), ...(tests !== undefined ? { tests } : {}), ...(brief !== undefined ? { brief } : {}) };
         saveExam(exam);
         examClock();
         paint();
@@ -1237,8 +1238,10 @@ export default function (pi: ExtensionAPI): void {
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
       const e = exam, proj = project, p = profile, dir = join(proj.path, e.dir);
       let brief: string;
-      try { brief = readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
-      const ids = briefIds(brief);
+      try { brief = e.brief ?? readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
+      // Phase 8 D: the ids the exam was written with; an exam saved before then reads them from the brief.
+      const ids = e.ids?.length ? e.ids : briefIds(brief);
+      if (!ids.length) { ctx.ui.notify(`${e.dir}/brief.md lists no requirements (- **R1** …), so the exam cannot be graded; /tutor-exam off and start a new one`, "error"); return; }
       ctx.ui.notify("running the example tests…", "info");
       // M8 minor M3: tests the learner edited never grade. In the sandbox the tests as written are laid over the
       // throwaway copy; without it the grade says it ran the edited ones.
