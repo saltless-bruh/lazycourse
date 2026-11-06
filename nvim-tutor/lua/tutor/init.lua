@@ -2,6 +2,8 @@ local term = require("tutor.term")
 
 local M = {}
 M.state = { term = nil, run_job = nil }
+-- Run jobs setup() stopped: their exit is not reported (Phase 8 D).
+local stopped = {}
 M._notify_override = nil
 local opts = {}
 
@@ -115,6 +117,8 @@ function M.run(kind)
     on_exit = function(id, code)
       -- An older run's exit (one setup() stopped) must not clear a newer run.
       if M.state.run_job == id then M.state.run_job = nil end
+      -- Phase 8 D (M6c parked): a run setup() stopped (exit 143) is no failed run of the learner's.
+      if stopped[id] then stopped[id] = nil return end
       local payload = { kind = "run_output", cmd = payload_cmd, code = code,
         stdout = table.concat(out, "\n"), stderr = table.concat(err, "\n") }
       if not M.notify_tutor(payload) then
@@ -198,10 +202,14 @@ function M.setup(user_opts)
   check_version()
   -- PI_TUTOR=1 tells pi-tutor this Pi is the tutor; plain `pi` elsewhere stays untouched.
   -- setup() again (e.g. a config reload) must not leave the old Pi running in a hidden buffer.
-  if M.state.term then M.state.term:close() end
+  if M.state.term then
+    -- Phase 8 D (M6c parked): an error closing the old pane is shown; setup() still makes the new one.
+    local ok, err = pcall(M.state.term.close, M.state.term)
+    if not ok then vim.notify("[tutor] closing the old pane: " .. tostring(err), vim.log.levels.WARN) end
+  end
   M.state.term = term.new({ cmd = M.build_cmd(opts.pi_cmd), cwd = opts.cwd, width = opts.width, env = { PI_TUTOR = "1" } })
   -- A pending run is stopped, not orphaned: its exit would otherwise land after a newer run started.
-  if M.state.run_job then pcall(vim.fn.jobstop, M.state.run_job) end
+  if M.state.run_job then stopped[M.state.run_job] = true pcall(vim.fn.jobstop, M.state.run_job) end
   M.state.run_job = nil
   local cmd = vim.api.nvim_create_user_command
   cmd("Tutor", function() M.state.term:toggle() end, {})

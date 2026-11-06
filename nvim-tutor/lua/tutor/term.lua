@@ -101,9 +101,13 @@ end
 --- Stop the job, close the pane and wipe its buffer (used when setup() runs again).
 function Term:close()
   if self.job then vim.fn.jobstop(self.job); self.job = nil end
-  self:hide()
-  if self.buf and vim.api.nvim_buf_is_valid(self.buf) then vim.api.nvim_buf_delete(self.buf, { force = true }) end
+  -- Phase 8 D (M6c parked): an unexpected hide error must not leave the buffer behind (setup() then made a second
+  -- pane); the cleanup finishes first, then the error is raised.
+  local ok, err = pcall(self.hide, self)
+  self.win = nil
+  if self.buf and vim.api.nvim_buf_is_valid(self.buf) then pcall(vim.api.nvim_buf_delete, self.buf, { force = true }) end
   self.buf = nil
+  if not ok then error(err, 0) end
 end
 
 function Term:toggle()

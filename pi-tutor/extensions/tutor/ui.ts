@@ -25,7 +25,8 @@ function clip(s: string, max = MAX): string {
   const flat = s.replace(/[ \t]*[\r\n]+[ \t]*|\t/g, " "); // line breaks and tabs only: line 1 keeps "tutor  "
   if (visibleWidth(flat) <= max) return flat;
   let out = "", w = 0;
-  for (const ch of flat) {
+  // Phase 8 D (M6c parked): by grapheme cluster, so a joined emoji (👨‍👩‍👧) is kept or cut whole.
+  for (const { segment: ch } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(flat)) {
     const cw = visibleWidth(ch);
     if (w + cw > max - 1) break;
     out += ch; w += cw;

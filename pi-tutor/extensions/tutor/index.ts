@@ -192,11 +192,11 @@ export default function (pi: ExtensionAPI): void {
    * The agent run in flight (before_agent_start → turn_end…): the learner message it answers and
    * whether a judgment was already applied. One judgment per run: a model that "calls" tutor-judgment
    * and then writes the fence must not count twice.
+   * - `episodeId`: the episode a ladder-role run answers, `null` when it started without one (M6c M6).
+   * - `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end).
+   * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
+   * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  /** `episodeId`: the episode a ladder-role run answers, `null` when it started without one (M6c M6). */
-  /** `lang`: the language at the prompt; the judgment's tags use it (M7 minor: not the language at turn_end). */
-  /** `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role. */
-  /** `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with. */
   let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
@@ -320,8 +320,7 @@ export default function (pi: ExtensionAPI): void {
    * Spec 2026-10-21 §5: a failed run is a graded try on its spot. A syntax error in the run's own output makes
    * it a typo run (author 2026-10-21): no attempt, no nudge. The same spot again with changed code climbs; unchanged
    * code does not; a new spot starts a new episode. The nudge comes only when the count went up.
-   */
-  /**
+   *
    * Live check 2026-10-21: a different error in between (a typo) must not throw away the count on the spot the
    * learner returns to. Counts per spot live until a run passes.
    */
@@ -369,11 +368,6 @@ export default function (pi: ExtensionAPI): void {
 
 
   /**
-   * Spec §5: a closed episode is mirrored to the profile. Only inside a recorded project, and under
-   * the project's language: the buffer filetype (state.language) is display-only — right after the
-   * switch it is `markdown` (spec/tasks.md).
-   */
-  /**
    * Profile writes run from Neovim notifications and the tick, outside any Pi handler: an uncaught
    * SQLITE_BUSY or I/O error there would crash Pi, so it becomes a warning instead.
    */
@@ -389,6 +383,11 @@ export default function (pi: ExtensionAPI): void {
     profileWrite(() => { const p = Profile.open(); try { use(p); } finally { p.close(); } });
   }
 
+  /**
+   * Spec §5: a closed episode is mirrored to the profile. Only inside a recorded project, and under
+   * the project's language: the buffer filetype (state.language) is display-only — right after the
+   * switch it is `markdown` (spec/tasks.md).
+   */
   function mirror(closed: Episode) {
     if (!profile || !project || closed.closed === undefined) return;
     const score = attemptScore(closed);
@@ -1375,16 +1374,11 @@ export default function (pi: ExtensionAPI): void {
 
   // Spec 2026-10-21 §5: at pro the fix comes only when the learner asks for it.
   /**
-   * Spec 2026-10-21 §7: `/tutor-done [task] [anyway]` ticks a task from evidence. Its trusted checks run in the
-   * sandbox: all pass → ticked; one fails → a graded try on that check's spot. Unverified checks never block;
-   * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
-   */
-  /**
    * Habits Task 17 ("improve it", spec 2026-10-26 §8): working code made better, measured before → after. The
    * model writes edge-case checks and one timed large-input check, kept only when the hidden reference passes
    * them; the task's own checks must still pass. Better on something and worse on nothing is the optimizes habit.
+   * `beforeSource`: the entry's text (saved before Phase 8) or every Python file of the project (Phase 8 A10).
    */
-  /** `beforeSource`: the entry's text (saved before Phase 8) or every Python file of the project (A10). */
   interface ImproveState { task: string; checks: Check[]; extra: Check[]; functions: string[]; before: Measured; beforeSource?: string | Record<string, string> }
   const improveKey = (root: string) => `improve:${root}`;
   async function measure(root: string, entry: string, st: { checks: Check[]; extra: Check[]; functions: string[] }, baseline?: string | Record<string, string>, asOf?: string | Record<string, string>) {
@@ -1522,6 +1516,11 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * Spec 2026-10-21 §7: `/tutor-done [task] [anyway]` ticks a task from evidence. Its trusted checks run in the
+   * sandbox: all pass → ticked; one fails → a graded try on that check's spot. Unverified checks never block;
+   * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
+   */
   pi.registerCommand("tutor-done", {
     description: "Tick a task when its checks pass: /tutor-done [task id] [anyway]",
     handler: (args, ctx) => exclusive(ctx, async () => {
@@ -1740,10 +1739,6 @@ export default function (pi: ExtensionAPI): void {
   /** Spec §6.3 part 2: the coding test's three parts, written into stepup/ with their checks and hidden solutions. */
   let codingPreparing = false;
   /**
-   * Habits Task 24b: where a step-up part lives. Python and Lua: one file each in stepup/. Rust and Go: a folder
-   * each (its own crate or module, with its entry), so the compiled harness builds and checks one part at a time.
-   */
-  /**
    * Final review I1: a part's manifest is the project's own (its `go` line, its Rust edition and dependencies),
    * renamed, since the hidden solution and its checks were confirmed with the project's manifest.
    */
@@ -1758,6 +1753,10 @@ export default function (pi: ExtensionAPI): void {
     return { rel: fresh.rel, text: /^\[workspace\]/m.test(renamed) ? renamed : `${renamed.trimEnd()}\n\n[workspace]\n` };
   }
 
+  /**
+   * Habits Task 24b: where a step-up part lives. Python and Lua: one file each in stepup/. Rust and Go: a folder
+   * each (its own crate or module, with its entry), so the compiled harness builds and checks one part at a time.
+   */
   function stepUpPart(language: string, part: string, ext: string): { dir: string; entry: string; path: string; manifest: { rel: string; text: string } | null; stub: (task: string) => string } {
     if (language === "rust" || language === "go") {
       const entry = language === "rust" ? "src/main.rs" : "main.go", dir = `stepup/${part}`;

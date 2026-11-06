@@ -185,4 +185,16 @@ describe("tutor.term minors (M6c)", function()
     assert.is_false(t:is_running())
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
   end)
+  it("Phase 8 D (M6c parked): an unexpected error while hiding still stops the job and wipes the buffer", function()
+    local t = new()
+    t:show()
+    local buf = t:bufnr()
+    local real = vim.api.nvim_win_close
+    vim.api.nvim_win_close = function() error("E999: boom", 0) end
+    local ok = pcall(function() t:close() end)
+    vim.api.nvim_win_close = real
+    assert.is_false(t:is_running())
+    assert.is_false(vim.api.nvim_buf_is_valid(buf))
+    assert.is_false(ok) -- the error is still raised, after the cleanup
+  end)
 end)

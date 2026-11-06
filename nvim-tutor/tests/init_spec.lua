@@ -420,6 +420,30 @@ describe("tutor.init", function()
     vim.fn.jobstop(second)
   end)
 
+  it("Phase 8 D (M6c parked): a run setup() stopped is not reported to the tutor as a failed run", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    local o = { pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 5" } }
+    tutor.setup(o)
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("TutorRun")
+    local first = tutor.state.run_job
+    tutor.setup(o)
+    vim.fn.jobwait({ first }, 1000)
+    vim.wait(300)
+    assert.same({}, sent)
+  end)
+
+  it("Phase 8 D (M6c parked): setup() still makes its pane when closing the old one raises", function()
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false })
+    tutor.state.term.close = function() error("E999: boom", 0) end
+    local old = tutor.state.term
+    assert.has_no.errors(function() tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false }) end)
+    assert.are_not.equal(old, tutor.state.term)
+  end)
+
   it("setup twice stops the first pane's job (M1b #8)", function()
     local tutor = require("tutor")
     vim.cmd("Tutor")

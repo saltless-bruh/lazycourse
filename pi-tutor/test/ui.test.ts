@@ -37,6 +37,16 @@ describe("renderWidget", () => {
     expect(visibleWidth(w[1])).toBeLessThanOrEqual(44);
     expect(w[1].endsWith("…")).toBe(true);
   });
+  it("Phase 8 D (M6c parked): clipping never splits a joined emoji (ZWJ) into its parts", () => {
+    const fam = "👨\u200d👩\u200d👧";
+    for (let pad = 30; pad < 44; pad++) {
+      const w = renderWidget({ state: `${"x".repeat(pad)}${fam}${fam}${fam}${fam}${fam} end`, connected: true })[1];
+      const body = w.replace(/…$/, "");
+      // a cut ends only after a whole emoji: never on a joiner or a lone part of the family
+      expect(body.endsWith("\u200d") || /👨$|👨\u200d👩$/.test(body), `pad ${pad}: ${body}`).toBe(false);
+      expect(visibleWidth(w)).toBeLessThanOrEqual(44);
+    }
+  });
   it("an exam label leads line 1, so clipping never hides the timer (M8)", () => {
     const [l1] = renderWidget({ exam: "exam 01 19:59 left", role: "architect", language: "typescript", level: 50, attempt: 2, state: "idle", connected: true });
     expect(l1.startsWith("tutor  exam 01 19:59 left · ")).toBe(true);
