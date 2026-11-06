@@ -48,6 +48,6 @@ describe("examplesToChecks: the learner's Examples rows become value checks", ()
     ]);
   });
   it("gives nothing for a language without value checks", () => {
-    expect(examplesToChecks("splitAmount(50, 3) → 16.67", "P1.T1", "typescript", 1)).toEqual([]);
+    expect(examplesToChecks("splitAmount(50, 3) → 16.67", "P1.T1", "c", 1)).toEqual([]); // habits Task 23: JS/TS have function checks now
   });
 });

@@ -200,3 +200,26 @@ describe("projectRun keeps the entry inside the project (final review I6)", () =
     expect(projectRun(ok, "python").entry).toBe("src/main.py");
   });
 });
+
+// Habits Task 23: function checks for JavaScript and TypeScript, through a Node harness in the sandbox.
+describe.skipIf(!bwrapReady || !has("node"))("JavaScript and TypeScript function checks", () => {
+  const js = (root: string, checks: Check[], entry = "src/main.js", language = "javascript") =>
+    runChecks(realExec, { language, root, entry, runCmd: `node ${entry}`, checks, sandbox: host() });
+  it("an exported function is called; numbers compare within a tolerance, arrays and objects element by element", async () => {
+    const root = project({ "src/main.js": "export function splitAmount(t, p) { return t / p }\nexport const pair = (a) => [a, { n: a / 3 }]\n" });
+    const r = await js(root, [value("splitAmount(50, 3)", "16.666666666666668"), value("splitAmount(50, 4)", "13"), value("pair(1)", "[1, { n: 0.3333333333333333 }]")]);
+    expect(r.results.map((x) => x.pass)).toEqual([true, false, true]);
+    expect(r.results[1]).toMatchObject({ got: "12.5" });
+  }, 60_000);
+  it("TypeScript runs as it is (Node strips the types); an async function's promise is awaited", async () => {
+    const root = project({ "src/main.ts": "export async function total(xs: number[]): Promise<number> {\n  return xs.reduce((a, b) => a + b, 0)\n}\n" });
+    const r = await js(root, [value("total([1, 2, 3])", "6")], "src/main.ts", "typescript");
+    expect(r.results[0]).toMatchObject({ pass: true });
+  }, 60_000);
+  it("a function that is not exported says so; a file that stops while loading says why", async () => {
+    const hidden = await js(project({ "src/main.js": "function splitAmount(t, p) { return t / p }\n" }), [value("splitAmount(50, 4)", "12.5")]);
+    expect(hidden.results[0]).toMatchObject({ pass: false, error: "splitAmount is not exported yet (export function splitAmount(…))" });
+    const broken = await js(project({ "src/main.js": "export function f() { return 1 }\nthrow new Error('boom')\n" }), [value("f()", "1")]);
+    expect(broken.results[0].error).toMatch(/^your file stopped while loading: Error: boom/);
+  }, 60_000);
+});

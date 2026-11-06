@@ -62,10 +62,16 @@ export function currentMilestone(tasksMd: string, lesson: LessonState | null): n
 }
 
 // Spec 2026-10-22 §5.2: compiled languages need the value written as the language writes it.
-const VALUE_EXAMPLE: Record<string, string> = { rust: "split_amount(50.0, 3) == 16.67", go: "splitAmount(50, 3) == 16.67" };
+const VALUE_EXAMPLE: Record<string, string> = { rust: "split_amount(50.0, 3) == 16.67", go: "splitAmount(50, 3) == 16.67",
+  javascript: "splitAmount(50, 3) == 16.666666666666668", typescript: "splitAmount(50, 3) == 16.666666666666668" };
+// Habits Task 23: a JS/TS file is imported by the check harness, so it exports what it is checked on and starts
+// its program only when run directly.
+const JS_MODULE = "The file is an ES module: export every function the tasks name (`export function splitAmount(…)`), and start the program only when the file is run directly: `import { fileURLToPath } from \"node:url\"` and `if (process.argv[1] === fileURLToPath(import.meta.url)) main()`.";
 const BUILDS_AS: Record<string, string> = {
   rust: "The file is the crate root (src/main.rs) of the project's Cargo.toml: it must build with `cargo build` and keep `fn main`.",
   go: "The file is `package main` in the folder `go run` builds: it must build with the project's go.mod and keep `func main`.",
+  javascript: JS_MODULE,
+  typescript: `${JS_MODULE} Node runs it as it is (it strips the types), so use only type annotations, no enums or namespaces.`,
 };
 
 export function checksPrompt(i: { language: string; tasksMd: string; milestone: number }): string {

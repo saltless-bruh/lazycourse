@@ -16,7 +16,7 @@ export interface Check {
 }
 
 /** Languages whose functions a check can call directly (phase 2; Rust and Go: spec 2026-10-22); the rest get typed input → output only. */
-export const VALUE_LANGUAGES = new Set(["python", "lua", "rust", "go"]);
+export const VALUE_LANGUAGES = new Set(["python", "lua", "rust", "go", "javascript", "typescript"]);
 
 const VALUE = /^check\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*(.+)$/;
 /** Languages a timed check can time (habits Task 17: Python first). */

@@ -38,12 +38,12 @@ describe("milestones", () => {
 });
 
 describe("prompts (spec §7 cross-check)", () => {
-  it("the checks prompt carries the milestone's tasks and the line forms; outside Python and Lua, run lines only", () => {
+  it("the checks prompt carries the milestone's tasks and the line forms; without function checks (C), run lines only", () => {
     const p = checksPrompt({ language: "python", tasksMd: TASKS, milestone: 1 });
     expect(p).toContain("P1.T1 Write `split_amount(total, people)`");
     expect(p).not.toContain("P2.T1");
     expect(p).toContain("check <task id>: <expression> == <expected value>");
-    expect(checksPrompt({ language: "typescript", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
+    expect(checksPrompt({ language: "c", tasksMd: TASKS, milestone: 1 })).toMatch(/write only run lines/i);
   });
   it("asks for inputs that tell a near miss apart: 48 / 3 let `//` tick a task in the phase 2 live check", () => {
     const p = systemText("checks");
@@ -57,6 +57,11 @@ describe("prompts (spec §7 cross-check)", () => {
     expect(checksPrompt({ language: "go", tasksMd: TASKS, milestone: 1 })).toContain("splitAmount(50, 3) == 16.67");
     expect(referencePrompt({ language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go" })).toMatch(/package main/);
     expect(referencePrompt({ language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs" })).toMatch(/crate root/);
+    // Habits Task 23: JS/TS references export what the tasks name and start only when run directly.
+    for (const language of ["javascript", "typescript"]) {
+      expect(referencePrompt({ language, tasksMd: TASKS, milestone: 1, entry: "src/main.js" })).toMatch(/ES module: export every function the tasks name.*only when the file is run directly/s);
+      expect(checksPrompt({ language, tasksMd: TASKS, milestone: 1 })).toMatch(/check <task id>: <expression> == <expected value>[\s\S]*for example: check P1\.T1: splitAmount\(50, 3\) == 16\.666666666666668/);
+    }
   });
   it("the reference never sees a done-when or its expected values", () => {
     const p = referencePrompt({ language: "python", tasksMd: TASKS, milestone: 2, entry: "src/main.py" });
@@ -209,4 +214,13 @@ describe("writeMilestoneChecks without a sandbox (spec §11a)", () => {
     expect(m.checks).toHaveLength(1);
     expect(asked[1]).toContain("Sure! Here are checks:");
   });
+});
+
+describe.skipIf(!bwrapReady || spawnSync("node", ["--version"]).status !== 0)("JavaScript checks against a real reference (habits Task 23)", () => {
+  it("a check the JS reference agrees with is trusted, one it contradicts is unverified", async () => {
+    const replies = ["check P1.T1: splitAmount(50, 4) == 12.5\ncheck P1.T1: splitAmount(50, 4) == 13",
+      "```js\nimport { fileURLToPath } from 'node:url'\nexport function splitAmount(total, people) { return total / people }\nif (process.argv[1] === fileURLToPath(import.meta.url)) console.log(splitAmount(50, 4))\n```"];
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "javascript", tasksMd: TASKS, milestone: 1, entry: "src/main.js", runCmd: "node src/main.js" });
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
+  }, 60_000);
 });

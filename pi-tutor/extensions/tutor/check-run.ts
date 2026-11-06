@@ -138,6 +138,49 @@ else:
     out(**{"pass": same(got, want), "got": repr(got), "type": kind})
 `;
 
+// Habits Task 23: JavaScript and TypeScript (Node strips the types). The entry is imported; its exports (and a
+// default-exported object's) are the names a check's expression and expected value are evaluated with.
+const NODE_HARNESS = String.raw`
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { isDeepStrictEqual, inspect } from "node:util";
+const MARK = "\x1eTUTOR\t";
+const [entry, expr, expected] = process.argv.slice(1);
+const out = (o) => process.stdout.write("\n" + MARK + JSON.stringify(o) + "\n");
+let mod = {}, stopped = null;
+try { mod = await import(pathToFileURL(resolve(entry)).href); }
+catch (e) { stopped = "your file stopped while loading: " + (e && e.name) + ": " + (e && e.message); }
+const scope = { ...(mod.default && typeof mod.default === "object" ? mod.default : {}), ...mod };
+delete scope.default;
+// A CommonJS file's namespace has a "module.exports" key: only names a parameter can take are in scope.
+const names = Object.keys(scope).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k));
+const run = (src) => new Function(...names, "return (" + src + ");")(...names.map((k) => scope[k]));
+const near = (a, b) => {
+  if (typeof a === "number" && typeof b === "number") return a === b || Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => near(x, b[i]));
+  if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b) && Object.getPrototypeOf(a) === Object.prototype) {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    return ka.length === kb.length && ka.every((k) => k in b && near(a[k], b[k]));
+  }
+  return isDeepStrictEqual(a, b);
+};
+const missing = (e) => {
+  const name = /^(\w+) is not defined/.exec(e.message)?.[1];
+  return stopped ?? (name ? name + " is not exported yet (export function " + name + "(…))" : e.message);
+};
+let want;
+try { want = run(expected); }
+catch (e) { out({ error: e instanceof ReferenceError && stopped ? stopped : "the check's expected value does not work: " + e.name + ": " + e.message }); process.exit(0); }
+try {
+  let got = run(expr);
+  if (got && typeof got.then === "function") got = await got;
+  out({ pass: near(got, want), got: inspect(got, { depth: 4, breakLength: Infinity }), type: typeof got === "number" ? "float" : "other" });
+} catch (e) {
+  out({ error: e instanceof ReferenceError ? missing(e) : (e && e.name) + ": " + (e && e.message) });
+}
+process.exit(0);
+`;
+
 const LUA_HARNESS = `
 local MARK = "\\30TUTOR\\t"
 local INPUT = {}
@@ -292,7 +335,8 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
   if (!i.sandbox) return { results: [], missing: CHECKS_SANDBOX_OFF };
   const interp = LANGS[i.language]?.command;
   const runTool = i.runCmd?.split(/\s+/)[0];
-  const sb = await sandboxFor(exec, i.root, i.language, [interp, runTool].filter((t): t is string => !!t), i.sandbox);
+  const node = i.language === "javascript" || i.language === "typescript" ? ["node"] : [];
+  const sb = await sandboxFor(exec, i.root, i.language, [interp, runTool, ...node].filter((t): t is string => !!t), i.sandbox);
   if ("missing" in sb) return { results: [], missing: sb.missing };
   const limit = i.limitSec ?? CHECK_LIMIT_SEC;
   const results: CheckResult[] = [];
@@ -315,6 +359,11 @@ export async function runChecks(exec: RunExec, i: { language: string; root: stri
     if (check.kind === "timed") {
       if (!i.entry || !interp || i.language !== "python") { results.push({ check, pass: false, outcome: "unfit", error: "timed checks run for Python only" }); continue; }
       results.push(timedResult(check, await limitedRun(sb, capped(withOverlay(over, [interp, "-c", PY_HARNESS, i.entry, check.expr ?? "", check.expected ?? "", "timed"])), limit)));
+      continue;
+    }
+    if (i.language === "javascript" || i.language === "typescript") {
+      if (!i.entry) { results.push({ check, pass: false, error: "no entry file to load: name it in README.md's `run:` command" }); continue; }
+      results.push(valueResult(check, await limitedRun(sb, capped(withOverlay(over, ["node", "--input-type=module", "-e", NODE_HARNESS, "--", i.entry, check.expr ?? "", check.expected ?? ""])), limit)));
       continue;
     }
     if (!i.entry || !interp || (i.language !== "python" && i.language !== "lua")) {

@@ -26,8 +26,9 @@ describe("parseChecks (spec 2026-10-21 §7: strict form)", () => {
     expect(parseChecks("check P2.T2: split_amount(50.0, 3) == 16.67", { language: "rust", taskIds: ids, milestone: 2 }).checks[0]).toMatchObject({ kind: "value", expr: "split_amount(50.0, 3)", expected: "16.67" });
     expect(parseChecks("check P2.T2: splitAmount(50, 3) == 16.67", { language: "go", taskIds: ids, milestone: 2 }).checks[0]).toMatchObject({ kind: "value", expr: "splitAmount(50, 3)" });
   });
-  it("Review Focus #5: value lines are rejected outside Python and Lua; io lines are kept", () => {
-    const r = parseChecks('check P2.T2: tipAmount(40, 0.2) == 8.0\nrun P2.T3: stdin "48\\n" -> stdout contains "16"', { language: "typescript", taskIds: ids, milestone: 2 });
+  // Habits Task 23: every supported language now has function checks; C stands for one that does not.
+  it("Review Focus #5: value lines are rejected in a language without function checks; io lines are kept", () => {
+    const r = parseChecks('check P2.T2: tipAmount(40, 0.2) == 8.0\nrun P2.T3: stdin "48\\n" -> stdout contains "16"', { language: "c", taskIds: ids, milestone: 2 });
     expect(r.checks.map((c) => c.kind)).toEqual(["io"]);
     expect(r.rejected).toEqual(["check P2.T2: tipAmount(40, 0.2) == 8.0"]);
   });
@@ -125,5 +126,13 @@ describe("parseChecks rejects an expected value with an unclosed bracket (Rust/G
     const r = parseChecks("check P1.T1: f(1) == [1, 2\ncheck P1.T1: f(2) == (3, 4\ncheck P1.T1: f(3) == [1, (2, 3)]", { language: "python", taskIds: ["P1.T1"], milestone: 1 });
     expect(r.checks.map((c) => c.expected)).toEqual(["[1, (2, 3)]"]);
     expect(r.rejected).toEqual(["check P1.T1: f(1) == [1, 2", "check P1.T1: f(2) == (3, 4"]);
+  });
+});
+
+describe("check lines for JavaScript and TypeScript (habits Task 23)", () => {
+  it("parse as function checks", () => {
+    for (const language of ["javascript", "typescript"])
+      expect(parseChecks("check P1.T1: splitAmount(50, 4) == 12.5", { language, taskIds: ["P1.T1"], milestone: 1 }).checks)
+        .toEqual([{ task: "P1.T1", kind: "value", expr: "splitAmount(50, 4)", expected: "12.5", milestone: 1, status: "unverified" }]);
   });
 });
