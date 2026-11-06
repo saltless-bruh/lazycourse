@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -52,6 +52,15 @@ describe("projectRun", () => {
     expect(projectRun(project({ "README.md": "---\nrun: python3 -m bills\n---\n", "bills/__main__.py": "" }), "python").entry).toBe("bills/__main__.py");
     expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": "{oops" }), "javascript").entry).toBeNull();
     expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": JSON.stringify({ main: "../out.js" }) }), "javascript").entry).toBeNull();
+    // review M5: flags are not folders, and a leading ./ is dropped
+    expect(projectRun(project({ "README.md": "---\nrun: go run -race .\n---\n", "main.go": "package main\n" }), "go").entry).toBe("main.go");
+    expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": JSON.stringify({ scripts: { start: "node ./src/index.js" } }), "src/index.js": "" }), "javascript").entry).toBe("src/index.js");
+  });
+  it("Phase 8 review M4: a package.json that links out of the project is not read", () => {
+    const outside = project({ "package.json": JSON.stringify({ main: "src/app.js" }) });
+    const root = project({ "README.md": "---\nrun: npm start\n---\n", "src/app.js": "" });
+    symlinkSync(join(outside, "package.json"), join(root, "package.json"));
+    expect(projectRun(root, "javascript").entry).toBeNull();
   });
 });
 

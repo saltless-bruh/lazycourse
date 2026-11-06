@@ -76,10 +76,11 @@ export function projectRun(root: string, language: string): { runCmd: string | n
  */
 function impliedEntry(root: string, runCmd: string | null, ext: RegExp | undefined): string | null {
   if (!runCmd || !ext) return null;
-  const there = (f: string) => (existsSync(join(root, f)) ? f : null);
+  const there = (f: string) => { const rel = f.replace(/^\.\//, ""); return existsSync(join(root, rel)) ? rel : null; };
   const words = runCmd.trim().split(/\s+/);
   if (words[0] === "go" && words[1] === "run") {
-    const dir = (words[2] ?? ".").replace(/^\.\/?/, "").replace(/\/$/, "");
+    // Phase 8 review M5: flags (-race, -tags=x) are not the folder
+    const dir = (words.slice(2).find((w) => !w.startsWith("-")) ?? ".").replace(/^\.\/?/, "").replace(/\/$/, "");
     return there(dir ? `${dir}/main.go` : "main.go");
   }
   const m = words.indexOf("-m");
@@ -89,6 +90,8 @@ function impliedEntry(root: string, runCmd: string | null, ext: RegExp | undefin
   }
   if (/^(npm|pnpm|yarn)$/.test(words[0]) && /^(start|run)$/.test(words[1] ?? "")) {
     let pkg: { main?: unknown; scripts?: Record<string, unknown> };
+    // Phase 8 review M4: a package.json that links out of the project is not read
+    if (!inRoot(root, "package.json")) return null;
     try { pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")); } catch { return null; }
     const script = pkg.scripts?.[words[1] === "run" ? words[2] ?? "" : "start"];
     const named = typeof script === "string" ? script.split(/\s+/).find((w) => ext.test(w)) : undefined;

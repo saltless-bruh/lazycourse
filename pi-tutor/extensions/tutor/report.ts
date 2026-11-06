@@ -11,7 +11,9 @@ const avg = (xs: number[]) => Math.round((xs.reduce((a, b) => a + b, 0) / xs.len
 export function cutSlug(s: string, n: number): string {
   if (s.length <= n) return s;
   const at = s.slice(0, n + 1).lastIndexOf("-");
-  return (at > 0 ? s.slice(0, at) : s.slice(0, n)).replace(/-+$/, "");
+  const word = at > 0 ? s.slice(0, at) : "";
+  // Phase 8 review M6: a cut that leaves only the exam's number keeps the long word's start instead
+  return (word && !/^\d+$/.test(word) ? word : s.slice(0, n)).replace(/-+$/, "");
 }
 
 /** "label: a, b, c" wrapped at W with a two-space hanging indent; nothing for no items (Phase 8 D). */

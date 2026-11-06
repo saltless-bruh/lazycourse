@@ -122,7 +122,9 @@ function pruneCargoTargets(root: string, current: string) {
     const dir = join(root, n);
     if (dir === current) continue;
     let at = 0, src = "";
-    try { at = statSync(join(dir, ".used")).mtimeMs; src = readFileSync(join(dir, ".used"), "utf8"); } catch { /* not ours to keep */ }
+    try { at = statSync(join(dir, ".used")).mtimeMs; src = readFileSync(join(dir, ".used"), "utf8"); } catch { /* not marked */ }
+    // Phase 8 review M8: an unmarked folder made in the last minute is another run's, about to be marked
+    if (!src) { try { if (now - statSync(dir).mtimeMs < 60_000) continue; } catch { continue; } }
     if (!src || !exists(src) || now - at > TARGET_DAYS * 86400_000) rmSync(dir, { recursive: true, force: true });
     else live.push({ dir, at });
   }

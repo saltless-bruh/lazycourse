@@ -126,6 +126,11 @@ describe("exam sandbox: the bwrap arguments (plan S3, S5, S6)", () => {
     expect(existsSync(oldT)).toBe(false);
     expect(kept.filter((t) => existsSync(t))).toHaveLength(8);
     expect(existsSync(kept.at(-1)!)).toBe(true);
+    // review M8: a folder another run just made (no .used yet) is left alone
+    const fresh = join(h.cacheDir, "cargo-target", "0000000000000000");
+    mkdirSync(fresh);
+    target(live(99));
+    expect(existsSync(fresh)).toBe(true);
   });
 });
 

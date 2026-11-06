@@ -165,3 +165,13 @@ describe("canFail run limit (Phase 8 B3)", () => {
     expect(run).toMatch(/timeout -k 5 60 .*cargo test --offline --no-run.*timeout -k 2 10 cargo test --offline --quiet --/s);
   });
 });
+
+describe("testSpans and char literals (Phase 8 review M2)", () => {
+  it("a '}' or '{' char literal inside the test module does not end its span", () => {
+    const src = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn p1_t1_x() { assert!(is_closer('}') == false); }\n    fn helper() -> i32 { 1 }\n}\n\nfn after() {}\n";
+    const [[a, b]] = testSpans(src, "rust");
+    expect(src.slice(a, b).endsWith("fn helper() -> i32 { 1 }\n}")).toBe(true);
+    const life = "#[cfg(test)]\nmod t { fn f<'a>(x: &'a str) -> &'a str { x } }\nfn z() {}\n";
+    expect(life.slice(...testSpans(life, "rust")[0])).toBe("#[cfg(test)]\nmod t { fn f<'a>(x: &'a str) -> &'a str { x } }");
+  });
+});

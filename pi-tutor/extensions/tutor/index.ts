@@ -1071,8 +1071,8 @@ export default function (pi: ExtensionAPI): void {
   const lastTry = new Map<string, TryOutcome>();      // task id → its last graded outcome
   const lastRunText = new Map<string, string>();      // file → its text at the last run
   const missedErrors = new Set<string>();             // errors a reads-errors miss was already recorded for
-  const askedBefore = new Map<string, string[]>();
-  const missedTest = new Map<string, string>();       // task → the own-test text whose miss is already recorded    // task → the learner's questions on it
+  const askedBefore = new Map<string, string[]>();    // task → the learner's questions on it
+  const missedTest = new Map<string, string>();       // task → the own-test text whose miss is already recorded
   let pendingQuestion: string | null = null;           // the task a question was just asked about
   function recordHabit(habit: HabitId, ok: boolean | null, evidence: string) {
     if (ok === null || !project || !profile) return;
@@ -1422,7 +1422,7 @@ export default function (pi: ExtensionAPI): void {
       let st: ImproveState | null = null;
       profileWrite(() => { try { st = JSON.parse(p.setting(improveKey(root)) ?? "null"); } catch { st = null; } });
       const running = st as ImproveState | null;
-      const preparing = improvePreparing.get(root);
+      const preparing = improvePreparing.get(root)?.split("#")[0];
       if (arg === "off") {
         profileWrite(() => p.setSetting(improveKey(root), ""));
         improvePreparing.delete(root);
@@ -1483,7 +1483,8 @@ export default function (pi: ExtensionAPI): void {
       ctx.ui.notify(`writing edge-case and timing checks for ${id} in the background…`, "info");
       const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext, mine = generation;
       const say = (text: string, level: "info" | "warning") => { if (generation === mine) ui?.notify(text, level); };
-      improvePreparing.set(root, id);
+      const job = `${id}#${Date.now()}#${Math.random()}`; // Phase 8 review M3: this job, not just its task
+      improvePreparing.set(root, job);
       void (async () => {
         try {
           const text = await rawComplete(frozen, jobSignal())(systemText("improve"),
@@ -1493,7 +1494,7 @@ export default function (pi: ExtensionAPI): void {
             .filter((c) => c.status === "trusted");
           const functions = calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : [])));
           const before = await measure(root, entry, { checks, extra, functions }, undefined, beforeSource);
-          if (improvePreparing.get(root) !== id) return; // dropped with /tutor-improve off
+          if (improvePreparing.get(root) !== job) return; // dropped with /tutor-improve off (or started again)
           if (before.missing || !before.m) { say(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
           if (before.failed) { say(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
           const next: ImproveState = { task: id, checks, extra, functions, before: before.m, beforeSource };
@@ -1505,7 +1506,7 @@ export default function (pi: ExtensionAPI): void {
         } catch (e) {
           say(`the improve-it checks for ${id} could not be written: ${e instanceof Error ? e.message : String(e)}; /tutor-improve ${id} tries again`, "warning");
         } finally {
-          if (improvePreparing.get(root) === id) improvePreparing.delete(root);
+          if (improvePreparing.get(root) === job) improvePreparing.delete(root);
         }
       })();
     }),

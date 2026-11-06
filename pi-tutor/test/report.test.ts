@@ -47,3 +47,11 @@ describe("progressReport tidy (Phase 8 D, M8 minors)", () => {
     expect(r).toMatch(/- 03-count-words-in 70 · 10 min/);
   });
 });
+
+describe("cutSlug (Phase 8 review M6)", () => {
+  it("never cuts an id down to its number", async () => {
+    const { cutSlug } = await import("../extensions/tutor/report.js");
+    expect(cutSlug("03-supercalifragilistic", 18)).toBe("03-supercalifragil");
+    expect(cutSlug("03-count-words-in-a-title", 18)).toBe("03-count-words-in");
+  });
+});

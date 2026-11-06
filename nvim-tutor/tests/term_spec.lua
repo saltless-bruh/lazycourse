@@ -197,4 +197,17 @@ describe("tutor.term minors (M6c)", function()
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
     assert.is_false(ok) -- the error is still raised, after the cleanup
   end)
+  it("Phase 8 review M1: close() under textlock runs whole, later: the pane and its buffer both go", function()
+    local t = new()
+    t:show()
+    local buf, win = t:bufnr(), t.win
+    local real, del = term.textlocked, vim.api.nvim_buf_delete
+    term.textlocked = function() return true end
+    vim.api.nvim_buf_delete = function() error("E565: Not allowed to change text or change window", 0) end
+    t:close()
+    term.textlocked, vim.api.nvim_buf_delete = real, del
+    vim.wait(500, function() return not vim.api.nvim_buf_is_valid(buf) end)
+    assert.is_false(vim.api.nvim_buf_is_valid(buf))
+    assert.is_false(vim.api.nvim_win_is_valid(win))
+  end)
 end)

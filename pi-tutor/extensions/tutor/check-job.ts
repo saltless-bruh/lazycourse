@@ -1,7 +1,7 @@
 // The check job (spec 2026-10-21 §7): per milestone, the model writes checks, and in a separate request that
 // never sees them or the tasks' "done when", a reference solution. The checks run against the reference in the
 // sandbox: agree → trusted, disagree → unverified. The reference is stored in the profile, never in the project.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseChecks, VALUE_LANGUAGES, type Check, type TickHow } from "./checks.js";
@@ -120,7 +120,11 @@ export function referenceFolder(d: { language: string; entry: string; reference:
   const dir = mkdtempSync(join(tmpdir(), "lazycourse-ref-"));
   mkdirSync(dirname(join(dir, d.entry)), { recursive: true });
   writeFileSync(join(dir, d.entry), d.reference);
-  const fromRoot = (rel: string): string | null => { try { return d.root ? readFileSync(join(d.root, rel), "utf8") : null; } catch { return null; } };
+  // Phase 8 review M4: only a file inside the project (after realpath) is copied into the folder the sandbox reads
+  const fromRoot = (rel: string): string | null => {
+    if (!d.root) return null;
+    try { const base = realpathSync(d.root), full = realpathSync(join(d.root, rel)); return full.startsWith(`${base}/`) ? readFileSync(full, "utf8") : null; } catch { return null; }
+  };
   const manifest = manifestFor(d.language, "project");
   if (manifest) writeFileSync(join(dir, manifest.rel), fromRoot(manifest.rel) ?? manifest.text);
   const pkg = d.language === "javascript" || d.language === "typescript" ? fromRoot("package.json") : null;

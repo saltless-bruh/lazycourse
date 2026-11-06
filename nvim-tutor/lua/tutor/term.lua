@@ -100,6 +100,8 @@ end
 
 --- Stop the job, close the pane and wipe its buffer (used when setup() runs again).
 function Term:close()
+  -- Phase 8 review M1: under textlock the whole close runs later; half of it now left a dead pane open.
+  if deferred(self, "close") then return end
   if self.job then vim.fn.jobstop(self.job); self.job = nil end
   -- Phase 8 D (M6c parked): an unexpected hide error must not leave the buffer behind (setup() then made a second
   -- pane); the cleanup finishes first, then the error is raised.

@@ -40,6 +40,8 @@ export function blockEnd(source: string, start: number): number {
     const ch = source[i], next = source[i + 1];
     if (ch === "/" && next === "/") { i = source.indexOf("\n", i); if (i < 0) break; continue; }
     if (ch === "/" && next === "*") { i = source.indexOf("*/", i + 2) + 1; if (i <= 0) break; continue; }
+    // Phase 8 review M2: a Rust char or byte literal ('}', b'{', '\'') is no brace; a lifetime ('a) has no closing quote.
+    if (ch === "'") { const lit = /^'(?:\\.[^']{0,8}|[^\\'\n])'/.exec(source.slice(i)); if (lit) { i += lit[0].length - 1; continue; } }
     if (ch === '"' || ch === "`") {
       for (i++; i < source.length && source[i] !== ch; i++) if (source[i] === "\\" && ch === '"') i++;
       continue;
