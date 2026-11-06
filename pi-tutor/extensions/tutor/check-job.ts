@@ -112,19 +112,27 @@ export function crossCheck(results: CheckResult[]): Check[] {
 const ROUNDED = "an answer rounded down to a whole number (floor, //, integer division) passes them; use inputs whose result is not whole";
 const SLIP = "an answer with one character changed (`*` for `/`, `<` for `<=`) passes them; use inputs at the edges";
 
+/**
+ * A throwaway folder the reference runs in: the reference at the entry, the project's Cargo.toml / go.mod (or
+ * the minimal one), and its package.json, which `npm start` reads (Phase 8 A1). The caller removes it.
+ */
+export function referenceFolder(d: { language: string; entry: string; reference: string; root?: string }): string {
+  const dir = mkdtempSync(join(tmpdir(), "lazycourse-ref-"));
+  mkdirSync(dirname(join(dir, d.entry)), { recursive: true });
+  writeFileSync(join(dir, d.entry), d.reference);
+  const fromRoot = (rel: string): string | null => { try { return d.root ? readFileSync(join(d.root, rel), "utf8") : null; } catch { return null; } };
+  const manifest = manifestFor(d.language, "project");
+  if (manifest) writeFileSync(join(dir, manifest.rel), fromRoot(manifest.rel) ?? manifest.text);
+  const pkg = d.language === "javascript" || d.language === "typescript" ? fromRoot("package.json") : null;
+  if (pkg !== null && d.entry !== "package.json") writeFileSync(join(dir, "package.json"), pkg);
+  return dir;
+}
+
 /** Spec 2026-10-26 §5.1: extra checks (the learner's Examples rows) cross-checked on the stored reference. */
 export async function crossCheckOnReference(d: { exec: RunExec; sandbox: SandboxHost | null; language: string; entry: string | null; runCmd: string | null; reference: string; checks: Check[]; root?: string }): Promise<Check[]> {
   if (!d.sandbox || !d.entry || !d.reference || d.checks.length === 0) return d.checks;
-  const dir = mkdtempSync(join(tmpdir(), "lazycourse-ref-"));
+  const dir = referenceFolder({ language: d.language, entry: d.entry, reference: d.reference, root: d.root });
   try {
-    mkdirSync(dirname(join(dir, d.entry)), { recursive: true });
-    writeFileSync(join(dir, d.entry), d.reference);
-    const manifest = manifestFor(d.language, "project");
-    if (manifest) {
-      let text = manifest.text;
-      try { if (d.root) text = readFileSync(join(d.root, manifest.rel), "utf8"); } catch { /* none yet: the minimal one */ }
-      writeFileSync(join(dir, manifest.rel), text);
-    }
     const r = await runChecks(d.exec, { language: d.language, root: dir, entry: d.entry, runCmd: d.runCmd, checks: d.checks, sandbox: d.sandbox });
     return r.missing ? d.checks : crossCheck(r.results);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -146,16 +154,8 @@ export async function writeMilestoneChecks(d: {
   const entry = d.entry ?? "main";
   const reference = extractCode(await d.complete(systemText("reference"), referencePrompt({ language: d.language, tasksMd: d.tasksMd, milestone: d.milestone, entry })));
   if (!d.sandbox || !d.entry || parsed.checks.length === 0) return { checks: parsed.checks, reference, ran: false };
-  const dir = mkdtempSync(join(tmpdir(), "lazycourse-ref-"));
+  const dir = referenceFolder({ language: d.language, entry: d.entry, reference: reference, root: d.root });
   try {
-    mkdirSync(dirname(join(dir, d.entry)), { recursive: true });
-    writeFileSync(join(dir, d.entry), reference);
-    const manifest = manifestFor(d.language, "project");
-    if (manifest) {
-      let text = manifest.text;
-      try { if (d.root) text = readFileSync(join(d.root, manifest.rel), "utf8"); } catch { /* none yet: the minimal one */ }
-      writeFileSync(join(dir, manifest.rel), text);
-    }
     const entryPath = join(dir, d.entry);
     const run = (checks: Check[]) => runChecks(d.exec, { language: d.language, root: dir, entry: d.entry, runCmd: d.runCmd, checks, sandbox: d.sandbox });
     const r = await run(parsed.checks);

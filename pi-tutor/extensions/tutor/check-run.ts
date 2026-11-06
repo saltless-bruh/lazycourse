@@ -3,7 +3,7 @@
 // there, and nothing a check writes reaches the real folder. One process per check, so an endless loop in
 // one check cannot hide the others.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { LANGS } from "./knowledge/versions.js";
 import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
@@ -65,8 +65,37 @@ export function projectRun(root: string, language: string): { runCmd: string | n
   const inRun = runCmd && ext ? runCmd.split(/\s+/).slice(1).find((w) => ext.test(w)) ?? null : null;
   // Spec 2026-10-22 §5.1: older Rust/Go projects (`cargo run`, `go run ./src`) start in the language's usual file.
   const fallback = DEFAULT_ENTRY[language];
-  const found = inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null);
+  const found = inRun ?? (fallback && existsSync(`${root}/${fallback}`) ? fallback : null) ?? impliedEntry(root, runCmd, ext);
   return { runCmd, entry: found && inRoot(root, found) };
+}
+
+/**
+ * Phase 8 A1: a run command that names no source file still runs one — `go run .` the folder's main.go,
+ * `npm start` the file in package.json's start script or its main, `python -m pkg` pkg.py or pkg/__main__.py.
+ * Without this the checks were never cross-checked and every tick said "self-checked".
+ */
+function impliedEntry(root: string, runCmd: string | null, ext: RegExp | undefined): string | null {
+  if (!runCmd || !ext) return null;
+  const there = (f: string) => (existsSync(join(root, f)) ? f : null);
+  const words = runCmd.trim().split(/\s+/);
+  if (words[0] === "go" && words[1] === "run") {
+    const dir = (words[2] ?? ".").replace(/^\.\/?/, "").replace(/\/$/, "");
+    return there(dir ? `${dir}/main.go` : "main.go");
+  }
+  const m = words.indexOf("-m");
+  if (/^python/.test(words[0]) && m > 0 && words[m + 1]) {
+    const mod = words[m + 1].replace(/\./g, "/");
+    return there(`${mod}.py`) ?? there(`${mod}/__main__.py`);
+  }
+  if (/^(npm|pnpm|yarn)$/.test(words[0]) && /^(start|run)$/.test(words[1] ?? "")) {
+    let pkg: { main?: unknown; scripts?: Record<string, unknown> };
+    try { pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")); } catch { return null; }
+    const script = pkg.scripts?.[words[1] === "run" ? words[2] ?? "" : "start"];
+    const named = typeof script === "string" ? script.split(/\s+/).find((w) => ext.test(w)) : undefined;
+    const main = typeof pkg.main === "string" ? pkg.main : undefined;
+    return (named && there(named)) ?? (main && there(main)) ?? null;
+  }
+  return null;
 }
 
 const PY_HARNESS = `

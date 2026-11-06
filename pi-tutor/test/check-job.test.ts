@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { crossCheckOnReference, checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, currentMilestone, writeMilestoneChecks, readChecksState } from "../extensions/tutor/check-job.js";
+import { referenceFolder, crossCheckOnReference, checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, currentMilestone, writeMilestoneChecks, readChecksState } from "../extensions/tutor/check-job.js";
 import type { Check } from "../extensions/tutor/checks.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import { realExec } from "./fake-pi.js";
@@ -223,4 +223,20 @@ describe.skipIf(!bwrapReady || spawnSync("node", ["--version"]).status !== 0)("J
     const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "javascript", tasksMd: TASKS, milestone: 1, entry: "src/main.js", runCmd: "node src/main.js" });
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
   }, 60_000);
+});
+
+describe("referenceFolder (Phase 8 A1)", () => {
+  it("holds the reference at the entry, the project's manifest, and package.json for npm start", () => {
+    const root = mkdtempSync(join(tmpdir(), "lc-ref-root-"));
+    writeFileSync(join(root, "package.json"), '{"scripts":{"start":"node src/app.js"}}');
+    const dir = referenceFolder({ language: "javascript", entry: "src/app.js", reference: "export const a = 1\n", root });
+    try {
+      expect(readFileSync(join(dir, "src/app.js"), "utf8")).toBe("export const a = 1\n");
+      expect(readFileSync(join(dir, "package.json"), "utf8")).toContain("src/app.js");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    mkdirSync(join(root, "x"));
+    writeFileSync(join(root, "Cargo.toml"), "[package]\nname = \"mine\"\n");
+    const rs = referenceFolder({ language: "rust", entry: "src/main.rs", reference: "fn main() {}\n", root });
+    try { expect(readFileSync(join(rs, "Cargo.toml"), "utf8")).toContain("mine"); } finally { rmSync(rs, { recursive: true, force: true }); }
+  });
 });

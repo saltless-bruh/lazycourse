@@ -44,6 +44,15 @@ describe("projectRun", () => {
     expect(projectRun(project({ "README.md": "---\nrun: go run ./src\n---\n", "src/main.go": "package main\n" }), "go").entry).toBe("src/main.go");
     expect(projectRun(project({ "README.md": "---\nrun: cargo run\n---\n" }), "rust").entry).toBeNull();
   });
+  it("Phase 8 A1: a run: naming no file finds the file it runs (go run ., npm start, python -m)", () => {
+    expect(projectRun(project({ "README.md": "---\nrun: go run .\n---\n", "main.go": "package main\n" }), "go").entry).toBe("main.go");
+    expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": JSON.stringify({ scripts: { start: "node src/app.js" } }), "src/app.js": "" }), "javascript").entry).toBe("src/app.js");
+    expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": JSON.stringify({ main: "lib/index.mjs" }), "lib/index.mjs": "" }), "javascript").entry).toBe("lib/index.mjs");
+    expect(projectRun(project({ "README.md": "---\nrun: python3 -m bills\n---\n", "bills.py": "" }), "python").entry).toBe("bills.py");
+    expect(projectRun(project({ "README.md": "---\nrun: python3 -m bills\n---\n", "bills/__main__.py": "" }), "python").entry).toBe("bills/__main__.py");
+    expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": "{oops" }), "javascript").entry).toBeNull();
+    expect(projectRun(project({ "README.md": "---\nrun: npm start\n---\n", "package.json": JSON.stringify({ main: "../out.js" }) }), "javascript").entry).toBeNull();
+  });
 });
 
 describe("runChecks without a sandbox (spec §11a)", () => {
