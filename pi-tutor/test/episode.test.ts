@@ -384,6 +384,8 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
   for (const lang of ["rust", "go"] as const) it.skipIf(!tool(lang === "rust" ? "cargo" : "go", lang === "rust" ? ["--version"] : ["version"]))(`the step-up in ${lang}: each part in its own folder, checked one at a time`, async () => {
     const R = lang === "rust";
     const { b, root } = await doneProject(R ? "fn main() {}\n" : "package main\n\nfunc main() {}\n", [], lang);
+    // final review I1: the parts take the project's own manifest settings (here a newer go line)
+    if (!R) writeFileSync(join(root, "go.mod"), "module p\n\ngo 1.23\n");
     const { Profile } = await import("../extensions/tutor/profile.js");
     const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
     const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
@@ -411,7 +413,10 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await turn(b.events, b.ctx, R ? "1. go through the numbers\n2. keep the even ones\n3. count them\npieces: iter, filter, count" : "1. split the text into words\n2. count them\npieces: fields, len", judged("none"));
     await until(() => existsSync(join(root, "stepup", "README.md")), 240000);
     const file = (part: string) => join(root, "stepup", part, R ? "src/main.rs" : "main.go");
-    expect(existsSync(join(root, "stepup", "fix", R ? "Cargo.toml" : "go.mod"))).toBe(true);
+    const man = readFileSync(join(root, "stepup", "fix", R ? "Cargo.toml" : "go.mod"), "utf8");
+    expect(man).toMatch(R ? /name = "fix"[\s\S]*edition = "2021"[\s\S]*\[workspace\]/ : /^module fix\n\ngo 1\.23\n/);
+    // final review M5: the plan part keeps the plan the learner gave
+    expect(readFileSync(file("plan"), "utf8")).toMatch(/\/\/ Your plan:\n\/\/ 1\. go through the numbers|\/\/ Your plan:\n\/\/ 1\. split the text into words/);
     expect(readFileSync(file("fix"), "utf8")).toMatch(/s = s - x/);
     expect(readFileSync(join(root, "stepup", "README.md"), "utf8")).toMatch(R ? /stepup\/solve\/src\/main\.rs/ : /stepup\/solve\/main\.go/);
     writeFileSync(file("solve"), SOLVE);

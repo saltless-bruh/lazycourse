@@ -1644,11 +1644,26 @@ export default function (pi: ExtensionAPI): void {
    * Habits Task 24b: where a step-up part lives. Python and Lua: one file each in stepup/. Rust and Go: a folder
    * each (its own crate or module, with its entry), so the compiled harness builds and checks one part at a time.
    */
+  /**
+   * Final review I1: a part's manifest is the project's own (its `go` line, its Rust edition and dependencies),
+   * renamed, since the hidden solution and its checks were confirmed with the project's manifest.
+   */
+  function partManifest(language: string, part: string): { rel: string; text: string } | null {
+    const fresh = manifestFor(language, part);
+    if (!fresh || !project) return fresh;
+    let text: string;
+    try { text = readFileSync(join(project.path, fresh.rel), "utf8"); } catch { return fresh; }
+    if (language === "go") return /^module\s+\S+/m.test(text) ? { rel: fresh.rel, text: text.replace(/^module\s+\S+/m, () => `module ${part}`) } : fresh;
+    if (!/^\s*name\s*=\s*"[^"]*"/m.test(text)) return fresh;
+    const renamed = text.replace(/^(\s*name\s*=\s*)"[^"]*"/m, (_m, a: string) => `${a}"${part}"`);
+    return { rel: fresh.rel, text: /^\[workspace\]/m.test(renamed) ? renamed : `${renamed.trimEnd()}\n\n[workspace]\n` };
+  }
+
   function stepUpPart(language: string, part: string, ext: string): { dir: string; entry: string; path: string; manifest: { rel: string; text: string } | null; stub: (task: string) => string } {
     if (language === "rust" || language === "go") {
       const entry = language === "rust" ? "src/main.rs" : "main.go", dir = `stepup/${part}`;
       const stub = (task: string) => (language === "rust" ? `// ${task}\n\nfn main() {}\n` : `package main\n\n// ${task}\n\nfunc main() {}\n`);
-      return { dir, entry, path: `${dir}/${entry}`, manifest: manifestFor(language, part), stub };
+      return { dir, entry, path: `${dir}/${entry}`, manifest: partManifest(language, part), stub };
     }
     const c = commentPrefix(`x${ext}`);
     return { dir: "stepup", entry: `${part}${ext}`, path: `stepup/${part}${ext}`, manifest: null, stub: (task) => `${c} ${task}\n` };
@@ -1715,7 +1730,7 @@ export default function (pi: ExtensionAPI): void {
       writeInRoot(root, solveP.path, solveP.stub(s.solveTask));
       writeInRoot(root, fixP.path, broken ?? fixP.stub(s.fixTask ?? ""));
       const planText = planP.stub(s.talkTask);
-      writeInRoot(root, planP.path, lang === "rust" || lang === "go" ? planText.replace(`// ${s.talkTask}\n`, `// ${s.talkTask}\n// Your plan:\n${steps}\n`) : `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
+      writeInRoot(root, planP.path, lang === "rust" || lang === "go" ? planText.replace(`// ${s.talkTask}\n`, () => `// ${s.talkTask}\n// Your plan:\n${steps}\n`) : `${c} ${s.talkTask}\n${c} Your plan:\n${steps}\n`);
       saveStepUp({ ...s, stage: "coding-ready", solveChecks: solve.checks, fixChecks: fix.checks, fixMissing: broken === null, solveRef: solve.reference, fixRef: fix.reference, ...improve });
       showStepUp(`Step-up, part 2: the coding test is in stepup/ (README.md says what each file is for).${moved ? ` Your earlier stepup/ folder was moved to ${moved}.` : ""} No timer: take the time you need. /tutor-step-up check runs the checks; /tutor-step-up submit decides.`);
     } catch (e) {

@@ -151,12 +151,14 @@ let mod = {}, stopped = null;
 try { mod = await import(pathToFileURL(resolve(entry)).href); }
 catch (e) { stopped = "your file stopped while loading: " + (e && e.name) + ": " + (e && e.message); }
 const scope = { ...(mod.default && typeof mod.default === "object" ? mod.default : {}), ...mod };
+// Final review M3: a default-exported function is in scope by its own name.
+if (typeof mod.default === "function" && mod.default.name && !(mod.default.name in scope)) scope[mod.default.name] = mod.default;
 delete scope.default;
 // A CommonJS file's namespace has a "module.exports" key: only names a parameter can take are in scope.
 const names = Object.keys(scope).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k));
 const run = (src) => new Function(...names, "return (" + src + ");")(...names.map((k) => scope[k]));
 const near = (a, b) => {
-  if (typeof a === "number" && typeof b === "number") return a === b || Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  if (typeof a === "number" && typeof b === "number") return a === b || (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b)); // final review M1: NaN is NaN
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => near(x, b[i]));
   if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b) && Object.getPrototypeOf(a) === Object.prototype) {
     const ka = Object.keys(a), kb = Object.keys(b);
@@ -164,9 +166,13 @@ const near = (a, b) => {
   }
   return isDeepStrictEqual(a, b);
 };
+// Final review I2: "not exported" only for a name the check itself uses; a typo inside the learner's function is
+// its own ReferenceError.
+const usesName = (n) => new RegExp("(^|[^\\w$.])" + n + "(?![\\w$])").test(expr + " " + expected);
 const missing = (e) => {
   const name = /^(\w+) is not defined/.exec(e.message)?.[1];
-  return stopped ?? (name ? name + " is not exported yet (export function " + name + "(…))" : e.message);
+  if (stopped) return stopped;
+  return name && !names.includes(name) && usesName(name) ? name + " is not exported yet (export function " + name + "(…))" : "ReferenceError: " + e.message;
 };
 let want;
 try { want = run(expected); }

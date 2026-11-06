@@ -221,5 +221,11 @@ describe.skipIf(!bwrapReady || !has("node"))("JavaScript and TypeScript function
     expect(hidden.results[0]).toMatchObject({ pass: false, error: "splitAmount is not exported yet (export function splitAmount(…))" });
     const broken = await js(project({ "src/main.js": "export function f() { return 1 }\nthrow new Error('boom')\n" }), [value("f()", "1")]);
     expect(broken.results[0].error).toMatch(/^your file stopped while loading: Error: boom/);
+    // final review I2: a typo inside the function is its own ReferenceError, not "not exported"
+    const typo = await js(project({ "src/main.js": "export function total(xs) { return xs.reduce((a, b) => a + b, totl) }\n" }), [value("total([1, 2])", "3")]);
+    expect(typo.results[0]).toMatchObject({ pass: false, error: "ReferenceError: totl is not defined" });
+    // M1: NaN equals NaN; M3: a default-exported function is in scope by its name
+    const nan = await js(project({ "src/main.js": "export const half = (x) => x / 2\nexport default function splitAmount(t, p) { return t / p }\n" }), [value("half(NaN)", "NaN"), value("splitAmount(50, 4)", "12.5")]);
+    expect(nan.results.map((x) => x.pass)).toEqual([true, true]);
   }, 60_000);
 });
