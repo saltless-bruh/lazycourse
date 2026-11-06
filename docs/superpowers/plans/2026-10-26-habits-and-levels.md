@@ -257,4 +257,13 @@ read a planted entry runs in the sandbox. `/tutor-exam sandbox <word>` keeps the
 call); the usage says `/tutor-exam small sandbox …` for such a topic. Two Pis on one Neovim and `setup()`
 restarting Pi stand (M6c). `~/.config/nvim/lua/plugins/tutor.lua` is the author's file.
 
+Independent review (pane-reviewer): no Critical. I1 a kept Rust build could serve a broken copy's build (cargo
+trusts mtimes) → every Rust sandbox run touches the folder's `.rs` files in the throwaway copy; I2 Pi makes an old
+load's `pi.*` stale on `/new`, so A2's module-level guards stopped the new load from restarting a job that would die
+→ guards per load again, session_shutdown aborts the load's checks/improve jobs, the new load restarts the checks
+(PI_SURFACE records it); I3 the reply to a message typed during the checker wait was not judged → `rejected` reset
+on the steer; I4 the recipe's code-moved flag leaked past an unjudged reply → reset per learner message. M1–M8
+fixed (close() deferred under textlock, Rust char literals, improve job token, linked package.json, go run flags,
+exam id cut, prune race, comment).
+
 ### Task 26: Phase 8 review, live check, docs, merge.
