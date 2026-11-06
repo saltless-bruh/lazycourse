@@ -1293,7 +1293,8 @@ export default function (pi: ExtensionAPI): void {
           const lvl = p.language(l)?.level ?? null;
           const base = progressReport({ language: l, level: lvl, episodes: p.episodes(l), exams: p.exams(l), concepts: p.concepts(l), vocab: vocabOf(loadPack(l), loadPack("editor")) });
           // Spec 2026-10-26 §6.1: the band's habits, their state and the latest evidence.
-          if (lvl === null) return base;
+          // Phase 8 B7: a language with no level yet still shows where its habits stand, against the beginner band.
+          if (lvl === null) return `${base}\n\n${habitReport(p.habitEvents(), "beginner", l)}\n(no level for ${l} yet: the beginner habits)`;
           const events = p.habitEvents(), band = bandFor(lvl);
           const missing = missingForStepUp(band, (h) => solidIn(events.filter((e) => e.habit === h), l));
           const up = band === "pro" ? "" : missing.length ? `\nstep-up: when ${missing.map((h) => HABIT_LABEL[h]).join(", ")} turn solid` : "\nstep-up: ready (/tutor-step-up)";

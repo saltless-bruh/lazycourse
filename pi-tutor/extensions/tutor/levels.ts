@@ -62,7 +62,9 @@ export function habitReport(events: HabitEvent[], band: Band, language: string):
   for (const h of BAND_HABITS[band]) {
     if (!GATE_HABITS[band].includes(h)) { lines.push(`- ${HABIT_LABEL[h]}: shown in the step-up`); continue; }
     const es = events.filter((e) => e.habit === h);
-    const state = solidIn(es, language) ? "solid" : habitState(es);
+    // Phase 8 B7: solid elsewhere is not solid here until one good event here (it would not count for the step-up).
+    const overall = habitState(es);
+    const state = solidIn(es, language) ? "solid" : overall === "solid" ? `solid in another language; it counts here after one good try in ${language}` : overall;
     const last = es.at(-1);
     lines.push(`- ${HABIT_LABEL[h]}: ${state}${last ? ` (latest: ${last.ok ? "good" : "miss"}, ${last.evidence})` : ""}`);
   }

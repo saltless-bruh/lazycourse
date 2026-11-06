@@ -50,4 +50,9 @@ describe("habitReport", () => {
     expect(r).toMatch(/runs small pieces.*not yet.*check:P1\.T1/);
     expect(r).toMatch(/looks things up.*shown in the step-up/);
   });
+  it("Phase 8 B7: solid in another language only says so; it counts here after one event here", () => {
+    const r = habitReport(solid("own-fixes"), "beginner", "rust");
+    expect(r).toMatch(/fixes own bugs: solid in another language; it counts here after one good try in rust/);
+    expect(r).not.toMatch(/fixes own bugs: solid \(/);
+  });
 });

@@ -1269,6 +1269,13 @@ describe("/tutor-progress (gap #8)", () => {
     await b.commands["tutor-progress"].handler("../../x", b.ctx);
     expect(b.notes.at(-1)).toMatch(/usage: \/tutor-progress \[language\]/);
   });
+  it("Phase 8 B7: a language with no level still lists its habits, against the beginner band", async () => {
+    const b = await boot();
+    await b.commands["tutor-progress"].handler("lua", b.ctx);
+    const text = String((b.messages.at(-1)?.message as { content: string }).content);
+    expect(text).toMatch(/Habits \(beginner\)/);
+    expect(text).toMatch(/no level for lua yet/);
+  });
 });
 
 describe("pro notes run (phase 5 live run: nemotron answered in the five bold parts)", () => {
