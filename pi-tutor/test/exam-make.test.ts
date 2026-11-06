@@ -105,3 +105,11 @@ describe("makeExam (D5: the tests must fail, not break, against the stub)", () =
     expect(ran[0][1].at(-1)).toBe("true");
   });
 });
+
+describe("nextExamId at a word (Phase 8 D, M8 minor)", () => {
+  it("a long title is cut at a word boundary", () => {
+    const root = mkdtempSync(join(tmpdir(), "eid-"));
+    expect(nextExamId(root, "Count the distinct letters in text")).toBe("01-count-the-distinct"); // not "…-lette"
+    expect(nextExamId(root, "Supercalifragilisticexpialidocious")).toBe("01-supercalifragilisticexpi"); // one word: its first 24
+  });
+});

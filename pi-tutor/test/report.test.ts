@@ -38,3 +38,12 @@ describe("progressReport (gap #8)", () => {
     expect(progressReport({ language: "go", level: null, episodes: [], exams: [], concepts: [], vocab: null })).toMatch(/no episodes or exams yet/);
   });
 });
+
+describe("progressReport tidy (Phase 8 D, M8 minors)", () => {
+  it("no empty concept groups; a long exam id is cut at a word, never ending in '-'", () => {
+    const r = progressReport({ language: "python", level: 45, episodes: [ep(2)], exams: [ex("03-count-words-in-a-very-long-title", 70, 10)],
+      concepts: [{ language: "python", tag: "loops", ease: 0.9, episodes: 1 }], vocab: vocabOf(loadPack("python")) });
+    expect(r).not.toMatch(/^(shaky|weak):\s*$/m);
+    expect(r).toMatch(/- 03-count-words-in 70 · 10 min/);
+  });
+});

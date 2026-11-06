@@ -4,6 +4,7 @@ import type { Band } from "../policy.js";
 import { completeJson, type Complete } from "../llm.js";
 import { normalizeTags, type Vocab } from "../packs.js";
 import { slugify } from "../scaffold.js";
+import { cutSlug } from "../report.js";
 import { writeInRoot } from "../files.js";
 import { layout, examFiles, runExamTests, type RunExec } from "./layout.js";
 import type { SandboxHost } from "./sandbox.js";
@@ -90,7 +91,7 @@ export function renderBrief(e: ExamSpec, m: { id: string; language: string; size
 export function nextExamId(root: string, title: string): string {
   let n = 0;
   try { for (const d of readdirSync(join(root, "exam"))) n = Math.max(n, Number(/^(\d+)-/.exec(d)?.[1] ?? 0)); } catch { /* no exam/ yet */ }
-  return `${String(n + 1).padStart(2, "0")}-${slugify(title).slice(0, 24).replace(/-+$/, "")}`;
+  return `${String(n + 1).padStart(2, "0")}-${cutSlug(slugify(title), 24)}`;
 }
 
 export interface Made { id: string; dir: string; spec: ExamSpec }

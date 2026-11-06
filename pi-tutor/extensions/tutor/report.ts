@@ -7,8 +7,16 @@ const SPARK = ["▁", "▃", "▅", "▇", "█"];
 const W = 40;
 const avg = (xs: number[]) => Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10;
 
-/** "label: a, b, c" wrapped at W with a two-space hanging indent. */
+/** Phase 8 D: a slug cut to at most `n` characters at a word ("-"), never ending in "-"; one long word is cut. */
+export function cutSlug(s: string, n: number): string {
+  if (s.length <= n) return s;
+  const at = s.slice(0, n + 1).lastIndexOf("-");
+  return (at > 0 ? s.slice(0, at) : s.slice(0, n)).replace(/-+$/, "");
+}
+
+/** "label: a, b, c" wrapped at W with a two-space hanging indent; nothing for no items (Phase 8 D). */
 function wrapList(label: string, items: string[]): string[] {
+  if (!items.length) return [];
   const out: string[] = [];
   let line = `${label}:`;
   for (const it of items) {
@@ -29,7 +37,7 @@ export function progressReport(i: { language: string; level: number | null; epis
     lines.push(recent.length >= 4 ? `tries used: ${avg(recent.slice(0, half))} → ${avg(recent.slice(half))}` : `tries used: ${avg(recent)}`, "");
   }
   if (i.exams.length) {
-    lines.push("Exams:", ...i.exams.slice(-5).map((e) => `- ${e.exam.slice(0, 18)} ${e.score} · ${e.minutes} min${e.late ? " · late" : ""}`));
+    lines.push("Exams:", ...i.exams.slice(-5).map((e) => `- ${cutSlug(e.exam, 18)} ${e.score} · ${e.minutes} min${e.late ? " · late" : ""}`));
     if (i.exams.length >= 2) lines.push(`trend: ${i.exams.slice(-5).map((e) => e.score).join(" → ")}`);
     lines.push("");
   }
