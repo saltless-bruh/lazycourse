@@ -9,3 +9,4 @@ Reply with only one JSON object, no prose:
 - `fix`: one more small task line of the same kind, unrelated to the other two, whose solution has real logic in it (a loop, a condition, arithmetic or a comparison) — its solution will be broken on purpose for the learner to repair, so a one-line lookup like returning a list's first item is too small.
 - Each one small enough for 20–40 minutes. No input reading, no printing: functions that return values.
 - `improve` (only when the request says `Band: intermediate`): one more task line of the same kind whose solution is easy to write clumsily (nested loops, repeated work, a list where a set or a dict belongs), so it can be made faster and simpler. Otherwise leave it out.
+- Rust and Go: every function returns a number, a bool, a string or a list (`Vec`, a slice) — never a map — so a check can compare its value exactly.

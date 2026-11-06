@@ -1680,13 +1680,17 @@ export default function (pi: ExtensionAPI): void {
     try {
       const complete = rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS));
       const one = (task: string) => writeMilestoneChecks({ complete, exec, sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${task}\n`, milestone: 1, entry, runCmd: null, root });
-      const solve = await one(s.solveTask);
-      const fix = await one(s.fixTask ?? s.solveTask);
+      // Phase 7 live run (Rust, nemotron): checks the hidden solution never confirms (a HashMap printed in random
+      // order) aborted the whole step-up. A part with none confirmed is asked for once more.
+      const sure = async (task: string) => { const r = await one(task); return trustedOnly(r.checks).length ? r : one(task); };
+      const solve = await sure(s.solveTask);
+      const fix = await sure(s.fixTask ?? s.solveTask);
       const fixTrusted = trustedOnly(fix.checks);
       // Final review I5: nothing confirmed (no sandbox, or every check unverified) is a setup problem, not the learner's.
-      if (!trustedOnly(s.talkChecks).length || !trustedOnly(solve.checks).length || !fixTrusted.length) {
+      const unsure = [...(trustedOnly(solve.checks).length ? [] : ["solve"]), ...(fixTrusted.length ? [] : ["fix"]), ...(trustedOnly(s.talkChecks).length ? [] : ["plan"])];
+      if (unsure.length) {
         saveStepUp(null);
-        ui?.notify("the coding test could not be prepared: no confirmed checks (is the sandbox on? /tutor-exam sandbox on). Nothing counts against you: /tutor-step-up starts again", "warning");
+        ui?.notify(`the coding test could not be prepared: no confirmed checks for the ${unsure.join(" and ")} part${unsure.length > 1 ? "s" : ""} (is the sandbox on? /tutor-exam sandbox on). Nothing counts against you: /tutor-step-up starts again`, "warning");
         return;
       }
       // Habits Task 17: the improve-it part — clumsy working code from the model, confirmed by the checks.

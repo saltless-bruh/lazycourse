@@ -427,6 +427,39 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("submit", b.ctx);
     expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 34/);
   }, 600000);
+  // Phase 7 live run (Rust, nemotron): a part whose checks the hidden solution never confirms got the whole
+  // step-up aborted. It is asked for once more; still nothing confirmed, the note names the part.
+  for (const second of ["confirmed", "unconfirmed"] as const) it(`a part with no confirmed checks is asked for once more (${second} the second time)`, async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const WEEK = "```python\nimport datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n```";
+    const replies = [
+      JSON.stringify({ talk: "Write `top_word(text)` returning the most frequent word.", solve: "Write `weekday(iso)` returning the weekday name of an ISO date.", fix: "Write `tip(total)` returning 15% of the total." }),
+      "check P1.T1: top_word('a b a') == 'a'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```",
+      "check P1.T1: weekday('2026-11-02') == 'Sunday'", WEEK,
+      second === "confirmed" ? "check P1.T1: weekday('2026-11-02') == 'Monday'" : "check P1.T1: weekday('2026-11-02') == 'Friday'", WEEK,
+      "check P1.T1: tip(50) == 7.5", "```python\ndef tip(total):\n    return total * 0.15\n```",
+    ];
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] });
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
+    await turn(b.events, b.ctx, "1. split the text\n2. count each word\n3. keep the biggest\npieces: split, max, count", judged("none"));
+    if (second === "confirmed") {
+      await until(() => existsSync(join(root, "stepup", "README.md")), 60000);
+      await b.commands["tutor-step-up"].handler("check", b.ctx);
+      expect(b.notes.at(-1)).toMatch(/solve 0\/1 · fix 0\/1 · plan 0\/1/);
+    } else {
+      await until(() => b.notes.some((n) => /could not be prepared/.test(n)), 60000);
+      expect(b.notes.find((n) => /could not be prepared/.test(n))).toMatch(/no confirmed checks for the solve part/);
+      expect(existsSync(join(root, "stepup", "README.md"))).toBe(false);
+    }
+  }, 120000);
   it("final review I2: a coding test whose setup stopped is prepared again by check", async () => {
     const { b, root } = await doneProject(code("/"), two);
     const { Profile } = await import("../extensions/tutor/profile.js");
