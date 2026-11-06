@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { NeovimClient } from "neovim";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
 import { boot, episodes, turn, judged, assistant, realExec, REASONED } from "./fake-pi.js";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { NvimLink, type NvimLinkOptions } from "../extensions/tutor/nvim.js";
 
 let h: Headless | undefined;
@@ -759,6 +759,15 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     expect(b.notes.some((n) => /ticked P2\.T2 .*your test/.test(n))).toBe(true);
     expect(await habits()).toContainEqual(["tests-that-fail", true]);
   }, 120000);
+  it("Phase 8 D (M8 minor): an editor too busy to say whether tasks.md has unsaved edits gets no tick written over it", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const busy = spawn("nvim", ["--server", h!.socket, "--remote-expr", "luaeval('(function() local t = vim.uv.hrtime() while vim.uv.hrtime() - t < 7e9 do end end)()')"], { stdio: "ignore" });
+    await new Promise((r) => setTimeout(r, 300));
+    await b.commands["tutor-done"].handler("P2.T2 anyway", b.ctx);
+    busy.kill();
+    expect(b.notes.at(-1)).toMatch(/Neovim did not answer whether spec\/tasks\.md has unsaved edits/);
+    expect(readFileSync(join(root, "spec", "tasks.md"), "utf8")).toContain("- [ ] P2.T2");
+  }, 60000);
   it("Phase 8 C: retrying the same test that cannot fail is one miss; a changed test is new evidence", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("40", b.ctx);

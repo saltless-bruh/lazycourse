@@ -39,3 +39,13 @@ describe("writeInRoot (M8, CLAUDE.md root rule)", () => {
     expect(readFileSync(join(root, "a.md"), "utf8")).toBe("1");
   });
 });
+
+describe("writeInRoot and a dangling symlink (Phase 8 D, M8 minor)", () => {
+  it("never follows a link to a file that does not exist yet outside the project", () => {
+    const root = tmp("wir-dang-"), outside = tmp("wir-out-");
+    mkdirSync(join(root, "exam"));
+    symlinkSync(join(outside, "planted.txt"), join(root, "exam", "grade.md"));
+    expect(() => writeInRoot(root, "exam/grade.md", "x")).toThrow(/outside the project/);
+    expect(existsSync(join(outside, "planted.txt"))).toBe(false);
+  });
+});

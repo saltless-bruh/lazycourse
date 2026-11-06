@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 
 // The one way the extension writes into a project (M8): exam files and spec/tasks.md.
@@ -19,6 +19,10 @@ export function writeInRoot(root: string, rel: string, text: string, opts: { exc
   if (!inside(realpathSync(nearestExisting(dirname(abs))), realRoot)) throw new Error(`${rel} resolves outside the project`);
   mkdirSync(dirname(abs), { recursive: true });
   if (existsSync(abs) && !inside(realpathSync(abs), realRoot)) throw new Error(`${rel} resolves outside the project`);
+  // Phase 8 D: a link to a file not there yet would be followed by the write and create it wherever it points.
+  let link = false;
+  try { link = lstatSync(abs).isSymbolicLink(); } catch { /* nothing there */ }
+  if (link && !existsSync(abs)) throw new Error(`${rel} is a link to a file that does not exist, possibly outside the project`);
   writeFileSync(abs, text, { flag: opts.exclusive ? "wx" : "w" });
   return abs;
 }

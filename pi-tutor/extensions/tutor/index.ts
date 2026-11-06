@@ -1530,7 +1530,8 @@ export default function (pi: ExtensionAPI): void {
       const id = asked ?? open[0];
       if (!id) { ctx.ui.notify("every task in spec/tasks.md is ticked", "info"); return; }
       if (!open.includes(id)) { ctx.ui.notify(`${id} is not an open task in spec/tasks.md`, "info"); return; }
-      try { if (link && await link.isModified(path)) { ctx.ui.notify("spec/tasks.md has unsaved edits in Neovim; save it, then /tutor-done again", "warning"); return; } } catch { /* busy editor: go on */ }
+      const unsaved = await tasksUnsaved(path);
+      if (unsaved) { ctx.ui.notify(unsaved === "unknown" ? TASKS_UNKNOWN : "spec/tasks.md has unsaved edits in Neovim; save it, then /tutor-done again", "warning"); return; }
       let state: ChecksState = { milestones: {} };
       profileWrite(() => { state = readChecksState(p.setting(key)); });
       const current = currentMilestone(tasksMd, lesson);
@@ -1664,6 +1665,16 @@ export default function (pi: ExtensionAPI): void {
     return named.size >= 3 || (fresh && parts);
   }
 
+  const TASKS_UNKNOWN = "Neovim did not answer whether spec/tasks.md has unsaved edits, so nothing was ticked; save it, then /tutor-done again";
+  /**
+   * Phase 8 D (M8 minor): whether spec/tasks.md has unsaved edits in Neovim; asked twice, then "unknown" — a busy
+   * editor no longer gets a tick written over edits it could not report.
+   */
+  async function tasksUnsaved(path: string): Promise<boolean | "unknown"> {
+    if (!link) return false;
+    for (let k = 0; k < 2; k++) { try { return await link.isModified(path); } catch { /* busy: ask once more */ } }
+    return "unknown";
+  }
   /** Tick `id` and its open subtasks in spec/tasks.md, record how, refresh spec/checks.md, close its check episode. */
   async function tickDone(root: string, id: string, how: TickHow, why: string) {
     const path = join(root, "spec", "tasks.md");
@@ -1672,7 +1683,8 @@ export default function (pi: ExtensionAPI): void {
     const r = tickTasks(md, [id, ...taskIds(md).filter((x) => x.startsWith(`${id}.S`))]);
     if (!r.ticked.length) return;
     // Pane check #1: the checks took seconds; edits made meanwhile and not saved must not meet a rewritten file.
-    try { if (link && await link.isModified(path)) { ui?.notify(`spec/tasks.md has unsaved edits in Neovim; save it, then /tutor-done ${id} again`, "warning"); return; } } catch { /* busy editor: go on */ }
+    const unsaved = await tasksUnsaved(path);
+    if (unsaved) { ui?.notify(unsaved === "unknown" ? TASKS_UNKNOWN : `spec/tasks.md has unsaved edits in Neovim; save it, then /tutor-done ${id} again`, "warning"); return; }
     try { writeInRoot(root, "spec/tasks.md", r.text); } catch (e) { ui?.notify(`tutor: could not tick ${id}: ${e instanceof Error ? e.message : String(e)}`, "warning"); return; }
     pi.appendEntry("tutor_tick", { ids: [id], how });
     let state: ChecksState = { milestones: {} };
