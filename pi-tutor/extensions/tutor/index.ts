@@ -912,9 +912,12 @@ export default function (pi: ExtensionAPI): void {
     if (held() && cur && cur.step !== null && text.trim()) {
       let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
-      let reason: string | undefined;
+      let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
+        const steersBefore = pendingSteers;
         reason = await askChecker(ctx, cur.step, text, cur.names ?? new Set());
+        // Phase 8 B4: a message typed during the wait continues this run before any rewrite could start.
+        typedMeanwhile = pendingSteers > steersBefore;
         if (reason) issues = ["checker"];
       }
       if (issues.length) {
@@ -924,7 +927,9 @@ export default function (pi: ExtensionAPI): void {
         // fallback, never an empty reply. Only a clean stop is re-asked.
         const final = !m.content.some((c) => c.type === "toolCall");
         let replacement = "";
-        if (final && m.stopReason === "stop" && (cur.reasks ?? 0) < MAX_REASKS) {
+        // Phase 8 B4: the learner typed while the checker read: the run goes on to their message, so the held reply
+        // gets the fallback instead of a rewrite of a turn they have moved past.
+        if (final && m.stopReason === "stop" && (cur.reasks ?? 0) < MAX_REASKS && !typedMeanwhile) {
           replacement = REWRITE_TEXT;
           rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step, ...(reason ? { reason } : {}) };
           pendingRewrite = issues;

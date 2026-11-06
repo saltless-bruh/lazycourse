@@ -2198,6 +2198,25 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     expect(textOf(good)).toContain("Look at the operator");
     expect(calls).toBe(0);
   });
+  it("Phase 8 B4: a message typed while the checker reads gets the fallback, not a rewrite of a turn the learner moved past", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const calls = await checkerOn(b, []);
+    const reg = (b.ctx as unknown as { modelRegistry: Record<string, unknown> }).modelRegistry;
+    reg.complete = async () => {
+      calls.push({ model: null, user: "", system: "" });
+      await b.events["input"]({ type: "input", text: "oh wait, I see it", source: "interactive", streamingBehavior: "steer" }, b.ctx);
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "no: it names the operator" }] };
+    };
+    const good = reply("Swap the star for the other one in `split_amount`.");
+    await turn(b.events, b.ctx, "help", good);
+    expect(calls).toHaveLength(1);
+    expect(textOf(good)).not.toBe(REWRITE_TEXT);
+    expect(textOf(good)).not.toContain("Swap the star");
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite")).toHaveLength(0);
+  });
   it("on: a 'no' from the checker is handled like a failed code check, with its reason in the rewrite", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);
