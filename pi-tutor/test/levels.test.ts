@@ -56,3 +56,12 @@ describe("habitReport", () => {
     expect(r).not.toMatch(/fixes own bugs: solid \(/);
   });
 });
+
+describe("bandProgress newest (Phase 8 B8)", () => {
+  it("is the habit that turned solid last, not the solid habit with the latest event", () => {
+    const fixes = solid("own-fixes");                 // solid first
+    const runs = solid("small-runs");                 // turns solid after own-fixes
+    const later = { habit: "own-fixes" as HabitId, ok: true, language: "python", project: "/p/a", at: ++t, evidence: "late" }; // a later good own-fixes event
+    expect(bandProgress([...fixes, ...runs, later], "beginner", "python").newest).toBe("small-runs");
+  });
+});

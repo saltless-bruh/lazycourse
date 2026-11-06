@@ -1,7 +1,7 @@
 // The level inside its band (spec 2026-10-26 §4): it rises as the band's habits turn solid, falls a little on
 // a streak of handed fixes, never below the band's floor, never across a band edge (that takes the step-up).
 import type { Band } from "./policy.js";
-import { BAND_HABITS, habitState, solidIn, type HabitEvent, type HabitId } from "./habits.js";
+import { BAND_HABITS, habitState, solidIn, solidSince, type HabitEvent, type HabitId } from "./habits.js";
 
 const BANDS: Record<Band, [number, number]> = { beginner: [0, 33], intermediate: [34, 66], pro: [67, 100] };
 
@@ -50,7 +50,8 @@ export function bandProgress(events: HabitEvent[], band: Band, language: string)
     const es = events.filter((e) => e.habit === h);
     if (!solidIn(es, language)) continue;
     solid++;
-    const at = Math.max(...es.map((e) => e.at));
+    // Phase 8 B8: the habit that turned solid last names the move, not the one with the latest event.
+    const at = solidSince(es) ?? Math.max(...es.map((e) => e.at));
     if (!newest || at > newest.at) newest = { h, at };
   }
   return { solid, total: GATE_HABITS[band].length, newest: newest?.h };

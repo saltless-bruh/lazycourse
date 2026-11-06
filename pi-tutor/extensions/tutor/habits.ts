@@ -17,19 +17,30 @@ export const BAND_HABITS: Record<Band, HabitId[]> = {
  * a solid habit drops back to showing only when 3 of its last 5 events miss (one slip does not undo it).
  */
 export function habitState(events: HabitEvent[]): HabitState {
-  const seen: HabitEvent[] = [];
-  let state: HabitState = "not yet";
+  return replay(events).state;
+}
+
+/** Phase 8 B8: when the habit last turned solid (the time of that event), or null when it is not solid now. */
+export function solidSince(events: HabitEvent[]): number | null {
+  const r = replay(events);
+  return r.state === "solid" ? r.since : null;
+}
+
+function replay(events: HabitEvent[]): { state: HabitState; since: number | null } {
+  // Phase 8 B9: running counts, so a replay is one pass (it ran on every tick for every habit).
+  const seen: HabitEvent[] = [], projects = new Set<string>();
+  let state: HabitState = "not yet", since: number | null = null, good = 0;
   for (const e of [...events].sort((a, b) => a.at - b.at)) {
     seen.push(e);
-    const good = seen.filter((x) => x.ok);
+    if (e.ok) { good++; projects.add(e.project); }
     if (state === "solid") {
       if (seen.slice(-5).filter((x) => !x.ok).length >= 3) state = "showing";
       continue;
     }
-    if (good.length >= 5 && new Set(good.map((x) => x.project)).size >= 2 && seen.slice(-3).every((x) => x.ok)) state = "solid";
-    else if (good.length >= 2) state = "showing";
+    if (good >= 5 && projects.size >= 2 && seen.slice(-3).every((x) => x.ok)) { state = "solid"; since = e.at; }
+    else if (good >= 2) state = "showing";
   }
-  return state;
+  return { state, since };
 }
 
 /** Solid overall, and shown at least once in `language` (author: experience carries, once seen there). */

@@ -35,3 +35,13 @@ describe("solidIn and the band habits", () => {
     expect(BAND_HABITS.pro).toEqual(["optimizes"]);
   });
 });
+
+describe("habitState at scale (Phase 8 B9)", () => {
+  it("replays 20 000 events in well under a second", async () => {
+    const { habitState } = await import("../extensions/tutor/habits.js");
+    const events = Array.from({ length: 20000 }, (_, i) => ({ habit: "small-runs" as const, ok: i % 4 !== 0, language: "python", project: `/p/${i % 3}`, at: i, evidence: "e" }));
+    const t0 = performance.now();
+    habitState(events);
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+});
