@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, symli
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { findOwnTests, runOwnTests, canFail, hasTests } from "../extensions/tutor/own-tests.js";
+import { findOwnTests, runOwnTests, canFail, hasTests, testSpans } from "../extensions/tutor/own-tests.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import { realExec } from "./fake-pi.js";
 
@@ -140,4 +140,16 @@ describe.skipIf(!bwrapReady)("running own tests in the sandbox", () => {
     writeFileSync(join(root, "src/main.rs"), src("16.0", "let _ = split(48.0, 3.0); assert!(1 + 1 == 2);"));
     expect(await canFail(realExec, { root, language: "rust", tests, entry: "src/main.rs", sandbox: host() })).toBe("missed");
   }, 400_000);
+});
+
+describe("testSpans (Phase 8 A11)", () => {
+  it("in Rust, only the item #[cfg(test)] marks is test code; a helper after it can still be broken", () => {
+    const src = "fn a() -> i32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn p1_t1_x() { assert_eq!(a(), 1); let s = \"}\"; }\n}\n\nfn helper() -> i32 { 2 }\n";
+    const spans = testSpans(src, "rust");
+    const start = src.indexOf("#[cfg(test)]"), end = src.indexOf("}\n\nfn helper") + 1;
+    expect(spans).toEqual([[start, end]]);
+    expect(spans.some(([a, b]) => src.indexOf("fn helper") >= a && src.indexOf("fn helper") < b)).toBe(false);
+    const two = "#[cfg(test)]\nmod a { #[test] fn t() {} }\nfn mid() {}\n#[cfg(test)]\nmod b { }\n";
+    expect(testSpans(two, "rust").map(([a, b]) => two.slice(a, b))).toEqual(["#[cfg(test)]\nmod a { #[test] fn t() {} }", "#[cfg(test)]\nmod b { }"]);
+  });
 });

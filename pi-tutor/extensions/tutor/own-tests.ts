@@ -13,6 +13,7 @@ import { sandboxFor, type Sandboxed } from "./check-run.js";
 import { manifestFor } from "./manifest.js";
 import { codeMask, fixMutants } from "./step-up.js";
 import { rustLifetime } from "./near-miss.js";
+import { blockEnd } from "./check-run-compiled.js";
 
 export const OWN_TEST_LANGUAGES = new Set(["python", "rust", "go"]);
 const SKIP_DIRS = new Set(["node_modules", "target", "__pycache__", "venv", "stepup"]);
@@ -218,8 +219,18 @@ async function runOnce(sb: Sandboxed, i: { root: string; language: string; tests
 const firstDiff = (a: string, b: string) => { let k = 0; while (k < a.length && a[k] === b[k]) k++; return k; };
 
 /** Where test code sits inside the entry file: a broken copy must break the learner's code, not their test. */
-function testSpans(source: string, language: string): [number, number][] {
-  if (language === "rust") { const at = source.search(/#\[cfg\(test\)\]/); return at < 0 ? [] : [[at, source.length]]; }
+export function testSpans(source: string, language: string): [number, number][] {
+  // Phase 8 A11: each #[cfg(test)] marks one item (a `mod tests { … }`, or a `use …;`); code after it is the program.
+  if (language === "rust") {
+    const spans: [number, number][] = [];
+    for (const m of source.matchAll(/#\[cfg\(test\)\]/g)) {
+      const at = m.index!, from = at + m[0].length;
+      const brace = source.indexOf("{", from), semi = source.indexOf(";", from);
+      const end = semi >= 0 && (brace < 0 || semi < brace) ? semi + 1 : brace < 0 ? source.length : blockEnd(source, brace) + 1;
+      if (!spans.some(([a, b]) => at >= a && at < b)) spans.push([at, Math.min(end, source.length)]);
+    }
+    return spans;
+  }
   if (language !== "python") return [];
   const spans: [number, number][] = [];
   const lines = source.split("\n");

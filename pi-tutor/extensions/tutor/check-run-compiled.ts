@@ -34,7 +34,7 @@ export function functionSpan(source: string, name: string, language: Lang, type?
 }
 
 /** Index of the brace that closes the first block opened at or after `start`; braces in strings and comments skipped. */
-function blockEnd(source: string, start: number): number {
+export function blockEnd(source: string, start: number): number {
   let depth = 0, opened = false;
   for (let i = start; i < source.length; i++) {
     const ch = source[i], next = source[i + 1];
