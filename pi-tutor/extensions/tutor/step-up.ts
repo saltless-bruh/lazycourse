@@ -76,9 +76,12 @@ export function referencePieces(reference: string, language: string): string[] {
 export function piecesMatch(pieces: string[], reference: string, language: string): { matched: number; total: number } {
   const ref = new Set(referencePieces(reference, language));
   const alias = ALIASES[language] ?? {};
-  // Final review I3: control keywords (for, if, return…) are in almost every solution; they never count.
+  // Final review I3: control keywords (for, if, return…) are in almost every solution; they never count —
+  // unless the solution has fewer than two other pieces (phase 7 live run: a Rust loop with an `if` and no call
+  // could never be passed, whatever the learner named).
   const keywords = new Set(KEYWORDS[language] ?? []);
-  const named = pieces.filter((p) => !keywords.has(p));
+  const plain = [...ref].filter((p) => !keywords.has(p)).length < 2;
+  const named = plain ? pieces : pieces.filter((p) => !keywords.has(p));
   const matched = named.filter((p) => ref.has(p) || (alias[p] ?? []).some((a) => ref.has(a))).length;
   return { matched, total: named.length };
 }

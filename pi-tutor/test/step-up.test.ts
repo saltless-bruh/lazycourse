@@ -140,3 +140,14 @@ describe("referencePieces for Rust and Go (habits Task 24b)", () => {
     expect(referencePieces(go, "go")).not.toContain("println");
   });
 });
+
+describe("piecesMatch when the solution calls nothing (phase 7 live run, Rust)", () => {
+  it("a solution made only of a loop and a condition lets its keywords count; one with calls still does not", () => {
+    const loop = "fn sum_positive(numbers: &[i32]) -> i32 {\n    let mut s = 0;\n    for n in numbers {\n        if *n > 0 {\n            s += n;\n        }\n    }\n    s\n}\n\nfn main() {}\n";
+    const m = piecesMatch(["for", "if"], loop, "rust");
+    expect(m).toEqual({ matched: 2, total: 2 });
+    expect(talkPassed(m)).toBe(true);
+    const calls = "def top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n";
+    expect(piecesMatch(["for", "split", "max"], calls, "python")).toEqual({ matched: 2, total: 2 });
+  });
+});
