@@ -239,7 +239,7 @@ describe("exam tests inside the sandbox (plan 2026-10-16)", () => {
   });
 
   it("a toolchain the sandbox cannot see says so", async () => {
-    const exec = async (c: string, a: string[]) => ({ stdout: "", stderr: "", code: c === "bwrap" && a.includes("--version") ? 1 : 0, killed: false });
+    const exec = async (c: string, a: string[]) => ({ stdout: "", stderr: "", code: (c === "bwrap" || c === "systemd-run") && a.includes("--version") ? 1 : 0, killed: false });
     const dir = mkdtempSync(join(tmpdir(), "sbx-notool-"));
     const r = await runExamTests(exec, "rust", dir, { sandbox: realHost() });
     expect(r.missing).toMatch(/could not run cargo inside the exam sandbox/);

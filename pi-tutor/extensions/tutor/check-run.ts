@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { LANGS } from "./knowledge/versions.js";
-import { CAP_TOOLS, SANDBOX_MISSING, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
+import { CAP_TOOLS, SANDBOX_MISSING, bwrapLauncher, cappedArgv, reachedCap, sandboxArgv, toolBinds, type SandboxHost } from "./exam/sandbox.js";
 import type { RunExec } from "./exam/layout.js";
 import type { Check } from "./checks.js";
 import { runCompiledChecks } from "./check-run-compiled.js";
@@ -326,7 +326,8 @@ export async function sandboxFor(exec: RunExec, root: string, language: string, 
   try { real = realpathSync(root); } catch { /* bwrap cannot mount it: the probe reports it */ }
   const prefix = sandboxArgv(real, language, toolBinds([...tools, "timeout", ...CAP_TOOLS], host), host);
   if ((await exec("bwrap", [...prefix, "true"], { cwd: real, timeout: 10_000 })).code !== 0) return { missing: SANDBOX_MISSING };
-  const run = (argv: string[], timeout: number) => exec("bwrap", [...prefix, ...argv], { cwd: real, timeout });
+  const launch = await bwrapLauncher(exec);
+  const run = (argv: string[], timeout: number) => { const [c, a] = launch([...prefix, ...argv]); return exec(c, a, { cwd: real, timeout }); };
   const limited = (await run(["timeout", "--version"], 10_000)).code === 0;
   return { run, limited };
 }

@@ -78,6 +78,19 @@ export function toolBinds(cmds: string[], host: SandboxHost): string[] {
   return [...out];
 }
 
+/**
+ * Phase 8 D (sandbox minor): bwrap sets no resource limits, so a fork bomb or a file filling the in-memory overlay
+ * reached the whole machine. A systemd user scope gives the run kernel limits (memory, overlay pages included, and
+ * tasks: processes and threads; builds run many). Without one (no systemd user session) runs stay as they were.
+ */
+const SCOPE = ["--user", "--scope", "--quiet", "-p", "MemoryMax=4G", "-p", "TasksMax=1024", "--"];
+type Exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => Promise<{ code: number }>;
+export async function bwrapLauncher(exec: Exec): Promise<(argv: string[]) => [string, string[]]> {
+  let scoped = false;
+  try { scoped = (await exec("systemd-run", [...SCOPE, "true"], { cwd: "/", timeout: 10_000 })).code === 0; } catch { scoped = false; }
+  return (argv) => (scoped ? ["systemd-run", [...SCOPE, "bwrap", ...argv]] : ["bwrap", argv]);
+}
+
 const TARGET_KEEP = 8, TARGET_DAYS = 14;
 
 /**

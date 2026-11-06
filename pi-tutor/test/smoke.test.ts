@@ -1111,13 +1111,15 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     await b.commands["tutor-exam"].handler("small", b.ctx);
     expect(b.notes.at(-1)).toMatch(/exam 01-word-frequency/);
     expect(testRuns().length).toBeGreaterThan(0);
-    expect(testRuns().every(([c]) => c === "bwrap")).toBe(true); // the hidden check ran sandboxed
+    // the hidden check ran sandboxed (Phase 8 D: bwrap itself, or bwrap inside a limited systemd scope)
+    const sandboxed = ([c, a]: [string, string[]]) => c === "bwrap" || (c === "systemd-run" && a.includes("bwrap"));
+    expect(testRuns().every(sandboxed)).toBe(true);
     await b.commands["tutor-exam"].handler("sandbox off", b.ctx);
     expect(b.notes.at(-1)).toMatch(/exam sandbox: off.*run as you/);
     calls.length = 0;
     await b.commands["tutor-exam"].handler("check", b.ctx);
     expect(testRuns().length).toBeGreaterThan(0);
-    expect(calls.map(([c]) => c)).not.toContain("bwrap");
+    expect(calls.some(sandboxed)).toBe(false);
     expect(b.notes.at(-1)).toMatch(/examples fail/);
     const again = await boot({ cwd }); // a new session reads the saved choice
     await again.commands["tutor-exam"].handler("sandbox", again.ctx);

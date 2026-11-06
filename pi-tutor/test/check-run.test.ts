@@ -263,3 +263,23 @@ describe.skipIf(!bwrapReady || !has("luajit", "-v"))("runChecks: Lua 5.1 / LuaJI
     expect(r[1]).toMatchObject({ pass: false, error: "tip_rate is not defined yet" });
   }, 30_000);
 });
+
+// Phase 8 D (sandbox minor): runs get kernel limits on memory (the in-memory overlay too) and processes.
+describe("sandbox resource limits", () => {
+  it("runs inside a systemd scope with MemoryMax and TasksMax when one can start; plain bwrap otherwise", async () => {
+    const { sandboxFor } = await import("../extensions/tutor/check-run.js");
+    const seen: [string, string[]][] = [];
+    const fake = (scope: boolean): RunExec => async (c, a) => { seen.push([c, a]); return { stdout: "", stderr: "", code: c === "systemd-run" && !scope ? 1 : 0, killed: false }; };
+    const sb = await sandboxFor(fake(true), project({}), "python", ["python3"], host());
+    if ("missing" in sb) throw new Error(sb.missing);
+    await sb.run(["python3", "-c", "1"], 5000);
+    const last = seen.at(-1)!;
+    expect(last[0]).toBe("systemd-run");
+    expect(last[1].join(" ")).toMatch(/--user --scope .*MemoryMax=\d+G.*TasksMax=\d+ -- bwrap .*python3 -c 1$/);
+    seen.length = 0;
+    const plain = await sandboxFor(fake(false), project({}), "python", ["python3"], host());
+    if ("missing" in plain) throw new Error(plain.missing);
+    await plain.run(["python3", "-c", "1"], 5000);
+    expect(seen.at(-1)![0]).toBe("bwrap");
+  });
+});
