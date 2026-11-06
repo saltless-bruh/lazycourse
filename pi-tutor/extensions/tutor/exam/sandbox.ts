@@ -1,6 +1,7 @@
 // Exam test sandbox (plan 2026-10-16 exam-sandbox): the model writes exam tests, so they run under
 // bubblewrap with the filesystem read-only, home, temp folders and user sockets hidden, no network
 // and an empty environment. Only the exam folder is writable.
+import { createHash } from "node:crypto";
 import { accessSync, constants, mkdirSync, realpathSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, join } from "node:path";
 
@@ -91,6 +92,13 @@ export function sandboxArgv(dir: string, language: string, binds: string[], host
     const cache = join(host.cacheDir, "go-build");
     mkdirSync(cache, { recursive: true });
     a.push("--bind", cache, cache, "--setenv", "GOCACHE", cache, "--setenv", "GOTOOLCHAIN", "local", "--setenv", "GOPATH", "/tmp/go");
+  }
+  // Phase 8 B1: a Rust build kept per project folder (never shared between folders, so one exam or project cannot
+  // leave build output for another); in the throwaway overlay every check run rebuilt the crate from nothing.
+  if (language === "rust") {
+    const target = join(host.cacheDir, "cargo-target", createHash("sha256").update(dir).digest("hex").slice(0, 16));
+    mkdirSync(target, { recursive: true });
+    a.push("--bind", target, target, "--setenv", "CARGO_TARGET_DIR", target);
   }
   // Final review C2: the test writes into a throwaway overlay of the exam folder, so files and symlinks it
   // plants never reach the folder the extension later reads (brief.md), writes (grade.md) or cleans up.

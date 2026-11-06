@@ -100,4 +100,14 @@ describe("exam sandbox: the bwrap arguments (plan S3, S5, S6)", () => {
     expect(go.join(" ")).toContain("--setenv GOTOOLCHAIN local");
     expect(argv.join(" ")).not.toContain("GOCACHE");
   });
+  it("Phase 8 B1: rust gets a writable build folder per project folder, so a check run rebuilds only what changed", () => {
+    const at = (dir: string) => /--setenv CARGO_TARGET_DIR (\S+)/.exec(sandboxArgv(dir, "rust", [], host).join(" "))?.[1];
+    const a = at("/w/a"), b = at("/w/b");
+    expect(a?.startsWith(join(host.cacheDir, "cargo-target"))).toBe(true);
+    expect(existsSync(a!)).toBe(true);
+    expect(sandboxArgv("/w/a", "rust", [], host).join(" ")).toContain(`--bind ${a} ${a}`);
+    expect(at("/w/a")).toBe(a);
+    expect(b).not.toBe(a);
+    expect(argv.join(" ")).not.toContain("CARGO_TARGET_DIR");
+  });
 });
