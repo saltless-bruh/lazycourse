@@ -26,6 +26,20 @@ const IO = /^run\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*stdin\s+"((?:[^"\\]|\\.)*)"\s*(
 
 const unquote = (s: string) => s.replace(/\\(.)/g, (_, c: string) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
 
+/** Rust/Go minor: every bracket closes, in order, outside quotes (an unclosed one sank a reference run). */
+function balanced(s: string): boolean {
+  const open = "([{", close = ")]}", stack: string[] = [];
+  let quote: string | null = null;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (open.includes(ch)) stack.push(close[open.indexOf(ch)]);
+    else if (close.includes(ch) && stack.pop() !== ch) return false;
+  }
+  return stack.length === 0 && quote === null;
+}
+
 /** The last top-level ` == ` outside quotes splits expression from expected value. */
 function splitValue(body: string): [string, string] | null {
   let quote: string | null = null, depth = 0, at = -1;
@@ -52,7 +66,7 @@ export function parseChecks(text: string, o: { language: string; taskIds: string
     const tm = TIMED.exec(line);
     if (tm && known.has(tm[1]) && TIMED_LANGUAGES.has(o.language)) { checks.push({ task: tm[1], kind: "timed", expr: tm[2].trim(), milestone: o.milestone, status: "unverified" }); continue; }
     const v = VALUE.exec(line), parts = v ? splitValue(v[2]) : null;
-    if (v && parts && known.has(v[1]) && VALUE_LANGUAGES.has(o.language)) {
+    if (v && parts && known.has(v[1]) && VALUE_LANGUAGES.has(o.language) && balanced(parts[0]) && balanced(parts[1])) {
       checks.push({ task: v[1], kind: "value", expr: parts[0], expected: parts[1], milestone: o.milestone, status: "unverified" });
       continue;
     }

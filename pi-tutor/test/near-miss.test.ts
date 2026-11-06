@@ -16,6 +16,10 @@ describe("roundingWeakTasks (spec 2026-10-22 §5.5)", () => {
 });
 
 describe("slipMutants", () => {
+  it("Rust/Go minor: a Lua long string or long comment is not code", () => {
+    expect(slipMutants("local s = [[a + b]]\n--[[ x + y ]]\nlocal t = [==[ p - q ]==]\nreturn a + b\n", 8, "lua")).toEqual(["local s = [[a + b]]\n--[[ x + y ]]\nlocal t = [==[ p - q ]==]\nreturn a - b\n"]);
+    expect(slipMutants("x = [[1, 2]]\ny = a + b\n", 8, "python")).toEqual(["x = [[1, 2]]\ny = a - b\n"]);
+  });
   it("final review I4: a Rust lifetime is not a quote; a char literal still is", () => {
     expect(slipMutants("const N: &'static str = \"x\";\nfn a(x: i32) -> i32 { x + 1 }\n", 8, "rust")).toEqual(["const N: &'static str = \"x\";\nfn a(x: i32) -> i32 { x - 1 }\n"]);
     expect(slipMutants("let c = '\"';\nlet y = a + b;\n", 8, "rust")).toEqual(["let c = '\"';\nlet y = a - b;\n"]);

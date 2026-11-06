@@ -30,6 +30,14 @@ export function rustLifetime(source: string, i: number): boolean {
   return !/^'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'/.test(source.slice(i, i + 12));
 }
 
+/** Where a Lua long bracket opened at `i` (`[[`, `[=[`, or the comment `--[[`) ends, or `i` when none opens there. */
+export function luaLongEnd(source: string, i: number): number {
+  const m = /^(?:--)?\[(=*)\[/.exec(source.slice(i, i + 40));
+  if (!m) return i;
+  const close = source.indexOf(`]${m[1]}]`, i + m[0].length);
+  return close < 0 ? source.length : close + m[1].length + 1;
+}
+
 export function slipMutants(source: string, max = 8, language?: string): string[] {
   const out: string[] = [];
   let quote: string | null = null;
@@ -37,6 +45,8 @@ export function slipMutants(source: string, max = 8, language?: string): string[
     const ch = source[i];
     if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
     if (ch === "'" && language === "rust" && rustLifetime(source, i)) continue;
+    // Rust/Go minor: a Lua long string `[[…]]` / `[==[…]==]` or long comment `--[[…]]` is not code.
+    if (language === "lua") { const e = luaLongEnd(source, i); if (e > i) { i = e; continue; } }
     if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
     if (ch === "#" || (ch === "/" && source[i + 1] === "/") || (ch === "-" && source[i + 1] === "-")) { const nl = source.indexOf("\n", i); if (nl < 0) break; i = nl; continue; }
     if (source[i - 1] !== " ") continue;

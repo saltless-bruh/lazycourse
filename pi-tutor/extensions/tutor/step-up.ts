@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Band } from "./policy.js";
 import type { HabitId } from "./habits.js";
 import { GATE_HABITS, HABIT_LABEL } from "./levels.js";
-import { rustLifetime, slipMutants } from "./near-miss.js";
+import { luaLongEnd, rustLifetime, slipMutants } from "./near-miss.js";
 
 const DAY_MS = 86_400_000;
 
@@ -129,6 +129,7 @@ export function codeMask(source: string, language?: string): boolean[] {
     const ch = source[i];
     if (quote) { mask[i] = false; if (ch === "\\") { if (i + 1 < source.length) mask[++i] = false; } else if (ch === quote) quote = null; continue; }
     if (ch === "'" && language === "rust" && rustLifetime(source, i)) continue;
+    if (language === "lua") { const e = luaLongEnd(source, i); if (e > i) { for (let j = i; j <= e && j < source.length; j++) mask[j] = false; i = e; continue; } }
     if (ch === '"' || ch === "'" || ch === "`") { quote = ch; mask[i] = false; continue; }
     if (ch === "#" || (ch === "/" && source[i + 1] === "/") || (ch === "-" && source[i + 1] === "-")) {
       const nl = source.indexOf("\n", i), end = nl < 0 ? source.length : nl;

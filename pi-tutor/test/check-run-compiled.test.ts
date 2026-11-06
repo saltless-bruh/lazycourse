@@ -28,6 +28,14 @@ async function run(language: "rust" | "go", root: string, checks: Check[], limit
 const rs = (body: string) => project({ "Cargo.toml": CARGO, "src/main.rs": `${body}\nfn main() {}\n` });
 const go = (body: string) => project({ "go.mod": "module p\n\ngo 1.22\n", "src/main.go": `package main\n\n${body}\n\nfunc main() {}\n` });
 
+describe("functionSpan scoped to an impl (Rust/Go minor)", () => {
+  it("`Point::new` finds the new inside impl Point, not the first new in the file", () => {
+    const src = "struct Line;\nimpl Line {\n    fn new() -> Line { Line }\n}\nstruct Point;\nimpl Point {\n    fn new(x: i32) -> Point {\n        Point\n    }\n}\n";
+    expect(functionSpan(src, "new", "rust", "Point")).toEqual([7, 9]);
+    expect(functionSpan(src, "new", "rust")).toEqual([3, 3]);
+  });
+});
+
 describe("functionSpan / calledName", () => {
   it("finds a function's lines through nested braces, ignoring braces in strings and comments", () => {
     const src = 'fn a() {}\nfn split_amount(t: f64) -> f64 {\n    let s = "}";\n    // }\n    if t > 0.0 { t } else { 0.0 }\n}\nfn b() {}\n';
@@ -121,4 +129,27 @@ describe.skipIf(!bwrapReady || !has("go", ["version"]))("Go checks in the sandbo
     expect(r[0]).toMatchObject({ pass: false, outcome: "elsewhere" });
     expect(r[0].error).toMatch(/^your project does not compile \(src\/main\.go:\d+: declared and not used/);
   }, 120_000);
+});
+
+describe.skipIf(!bwrapReady)("Rust/Go harness minors (habits Task 21)", () => {
+  it.skipIf(!has("cargo", ["--version"]))("Rust: an entry without a final newline still maps a check's own error to the check", async () => {
+    const root = project({ "Cargo.toml": CARGO, "src/main.rs": "fn split_amount(t: f64, p: f64) -> f64 {\n    t / p\n}\nfn main() {}" });
+    const [r] = await run("rust", root, [value("split_amount(50.0)", "12.5")]);
+    expect(r).toMatchObject({ pass: false, outcome: "unfit" });
+  }, 300_000);
+  it.skipIf(!has("cargo", ["--version"]))("Rust: an error inside the checked function in a module subfolder is the function's, not elsewhere", async () => {
+    const root = project({ "Cargo.toml": CARGO, "src/main.rs": "mod bill;\nuse bill::money::split_amount;\nfn main() { let _ = split_amount(1.0, 1.0); }\n",
+      "src/bill/mod.rs": "pub mod money;\n", "src/bill/money.rs": "pub fn split_amount(t: f64, p: f64) -> f64 {\n    t / p + true\n}\n" });
+    const [r] = await run("rust", root, [value("split_amount(50.0, 4.0)", "12.5")]);
+    expect(r.outcome).toBeUndefined();
+    expect(r.error).toMatch(/src\/bill\/money\.rs:\d+/);
+  }, 300_000);
+  it.skipIf(!has("go", ["version"]))("Go: an entry at the project root finds an error inside the checked function", async () => {
+    const root = project({ "go.mod": "module p\n\ngo 1.22\n", "main.go": "package main\n\nfunc SplitAmount(t, p float64) float64 {\n\treturn t / q\n}\n\nfunc main() {}\n" });
+    const sb = await sandboxFor(realExec, root, "go", ["go"], host());
+    if ("missing" in sb) throw new Error(sb.missing);
+    const [r] = await runCompiledChecks(sb, { language: "go", root, entry: "main.go", checks: [value("SplitAmount(50, 4)", "12.5")], limitSec: 20 });
+    expect(r.outcome).toBeUndefined();
+    expect(r.error).toMatch(/^main\.go:4: undefined: q/);
+  }, 300_000);
 });

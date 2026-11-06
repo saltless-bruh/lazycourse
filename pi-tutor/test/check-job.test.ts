@@ -124,6 +124,15 @@ describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 
     expect(asked[2]).toMatch(/P1\.T1/);
     expect(asked[2]).toMatch(/rounded down/);
   }, 60_000);
+  it("Rust/Go minor: when every extra check is unverified the second probe is skipped (it would try the same checks)", async () => {
+    const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(50, 3) == 99"];
+    const runs: string[] = [];
+    const exec: typeof realExec = async (c, a, o) => { if (a.includes("split_amount(48, 3)")) runs.push("48"); return realExec(c, a, o); };
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
+    expect(m.weak).toEqual(["P1.T1"]);
+    expect(runs).toHaveLength(2); // the first run and one probe; no second probe
+  }, 60_000);
   it("still weak after the one extra ask: kept, and marked weak", async () => {
     const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(30, 3) == 10.0"];
     const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });

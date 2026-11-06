@@ -2,7 +2,7 @@
 // throwaway copy only (Rust: a `#[cfg(test)] mod tutor_check` appended to the entry; Go: zz_tutor_check_test.go
 // beside it), built once, then each check runs on its own under a time limit. Compiler errors are sorted
 // into the outcomes of spec §4: not written yet, does not fit, inside the checked function, elsewhere, typo.
-import { readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Check } from "./checks.js";
 import { PRINTED_TOO_MUCH, TOO_LONG, type CheckResult, type Sandboxed, type ValueType } from "./check-run.js";
@@ -15,15 +15,28 @@ const PART_CAP = 16384;
 const BUILD_LIMIT_SEC = 300;
 
 /** 1-based first and last line of function `name` in `source`, or null. Braces in strings and comments are skipped. */
-export function functionSpan(source: string, name: string, language: Lang): [number, number] | null {
+export function functionSpan(source: string, name: string, language: Lang, type?: string): [number, number] | null {
   const head = language === "rust"
-    ? new RegExp(`\\bfn\\s+${name}\\s*[<(]`)
-    : new RegExp(`^func\\s+(?:\\([^)]*\\)\\s*)?${name}\\s*[[(]`, "m");
+    ? new RegExp(`\\bfn\\s+${name}\\s*[<(]`, "g")
+    : new RegExp(`^func\\s+(?:\\([^)]*\\)\\s*)?${name}\\s*[[(]`, "gm");
+  // Rust/Go minor: `Point::new(…)` is the `new` inside `impl Point`, not the first `new` of the file.
+  let from = 0, to = source.length;
+  if (type && language === "rust") {
+    const im = new RegExp(`\\bimpl(?:\\s*<[^>]*>)?\\s+(?:[\\w:]+\\s+for\\s+)?${type}\\b[^{;]*\\{`).exec(source);
+    if (im) { from = im.index; to = blockEnd(source, im.index + im[0].length - 1); }
+  }
+  head.lastIndex = from;
   const m = head.exec(source);
-  if (!m) return null;
+  if (!m || m.index >= to) return null;
   const lineAt = (i: number) => source.slice(0, i).split("\n").length;
+  const end = blockEnd(source, m.index);
+  return end < source.length ? [lineAt(m.index), lineAt(end)] : null;
+}
+
+/** Index of the brace that closes the first block opened at or after `start`; braces in strings and comments skipped. */
+function blockEnd(source: string, start: number): number {
   let depth = 0, opened = false;
-  for (let i = m.index; i < source.length; i++) {
+  for (let i = start; i < source.length; i++) {
     const ch = source[i], next = source[i + 1];
     if (ch === "/" && next === "/") { i = source.indexOf("\n", i); if (i < 0) break; continue; }
     if (ch === "/" && next === "*") { i = source.indexOf("*/", i + 2) + 1; if (i <= 0) break; continue; }
@@ -32,15 +45,21 @@ export function functionSpan(source: string, name: string, language: Lang): [num
       continue;
     }
     if (ch === "{") { depth++; opened = true; }
-    else if (ch === "}" && --depth === 0 && opened) return [lineAt(m.index), lineAt(i)];
+    else if (ch === "}" && --depth === 0 && opened) return i;
   }
-  return null;
+  return source.length;
 }
 
 /** The function an expression calls: the last path segment before its first `(`. */
 export function calledName(expr: string): string | null {
   const m = /^\s*([A-Za-z_][\w]*(?:(?:::|\.)[A-Za-z_]\w*)*)\s*(?:::<[^>]*>)?\s*\(/.exec(expr);
   return m ? m[1].split(/::|\./).at(-1)! : null;
+}
+
+/** The type an expression's call is on (`Point::new(1, 2)` → Point), or null. */
+export function calledType(expr: string): string | null {
+  const m = /^\s*(?:[A-Za-z_]\w*::)*([A-Z]\w*)::[A-Za-z_]\w*\s*(?:::<[^>]*>)?\s*\(/.exec(expr);
+  return m ? m[1] : null;
 }
 
 interface Diag { file: string; line: number; message: string }
@@ -52,7 +71,7 @@ function diagnostics(text: string, language: Lang): Diag[] {
     const m = /^(\S+?):(\d+):\d+: (.*)$/.exec(l.trim());
     if (!m) continue;
     if (language === "rust" && !/^error\b/.test(m[3])) continue; // warnings and notes
-    out.push({ file: m[1], line: Number(m[2]), message: m[3] });
+    out.push({ file: m[1].replace(/^\.\//, ""), line: Number(m[2]), message: m[3] }); // Go names a root entry ./main.go
   }
   return out;
 }
@@ -100,9 +119,21 @@ const SCRIPT = [
   `for n in "$@"; do printf '\\036START\\t%s\\n' "$n"; { timeout -k 5 "$lim" sh -c "$runp$n" 2>&1; printf '\\n\\036CODE\\t%s\\n' "$?"; } | head -c ${PART_CAP}; printf '\\n\\036END\\n'; done`,
 ].join("\n");
 
-function sources(root: string, dir: string, ext: string): Map<string, string> {
+/** The source files beside the entry; Rust also its module subfolders (Rust/Go minor). Symlinks are never followed. */
+function sources(root: string, dir: string, ext: string, deep: boolean): Map<string, string> {
   const out = new Map<string, string>();
-  try { for (const f of readdirSync(join(root, dir))) if (f.endsWith(ext)) out.set(dir === "." ? f : `${dir}/${f}`, readFileSync(join(root, dir, f), "utf8")); } catch { /* no folder */ }
+  const walk = (d: string, depth: number) => {
+    let names: string[] = [];
+    try { names = readdirSync(join(root, d)); } catch { return; }
+    for (const f of names) {
+      const rel = d === "." ? f : `${d}/${f}`;
+      let st;
+      try { st = lstatSync(join(root, rel)); } catch { continue; }
+      if (st.isFile() && f.endsWith(ext)) { try { out.set(rel, readFileSync(join(root, rel), "utf8")); } catch { /* unreadable */ } }
+      else if (deep && st.isDirectory() && depth < 6 && !f.startsWith(".") && f !== "target") walk(rel, depth + 1);
+    }
+  };
+  walk(dir, 0);
   return out;
 }
 
@@ -110,15 +141,17 @@ export async function runCompiledChecks(sb: Sandboxed, i: { language: Lang; root
   const { language, root, entry } = i;
   const results: (CheckResult | undefined)[] = i.checks.map(() => undefined);
   const dir = dirname(entry) || ".";
-  const files = sources(root, dir, language === "rust" ? ".rs" : ".go");
+  const files = sources(root, dir, language === "rust" ? ".rs" : ".go", language === "rust");
   const entryText = files.get(entry) ?? "";
   const pkg = /^package\s+(\w+)/m.exec(entryText)?.[1] ?? "main";
   const manifest = manifestFor(language, "project")!;
   let pending = i.checks.map((c, k) => ({ c, n: k + 1 }));
   for (let attempt = 0; attempt <= i.checks.length && pending.length; attempt++) {
     const hfile = language === "rust" ? entry : `${dir}/zz_tutor_check_test.go`;
-    const firstLine = language === "rust" ? entryText.split("\n").length + (entryText.endsWith("\n") ? 0 : 1) : 1;
-    const h = harness(language, pending, pkg, firstLine);
+    // Rust/Go minor: the harness always starts on a fresh line, so the map holds with or without a final newline.
+    const firstLine = language === "rust" ? entryText.split("\n").length + 1 : 1;
+    const h0 = harness(language, pending, pkg, firstLine);
+    const h = language === "rust" ? { ...h0, text: `\n${h0.text}` } : h0;
     const build = language === "rust" ? "cargo test --offline --no-run --message-format=short --quiet" : `go test -c -vet=off -o /tmp/.tutor.test ./${dir === "." ? "" : dir}`;
     const runp = language === "rust" ? "cargo test --offline --quiet -- --nocapture --exact tutor_check::c" : `/tmp/.tutor.test -test.v -test.run ^TestTutorC`;
     const names = pending.map((p) => language === "rust" ? String(p.n) : `${p.n}$`);
@@ -174,7 +207,7 @@ export async function runCompiledChecks(sb: Sandboxed, i: { language: Lang; root
       for (const p of pending) {
         const name = calledName(p.c.expr ?? "");
         const inside = learner.find((d) => {
-          const src = files.get(d.file), span = name && src ? functionSpan(src, name, language) : null;
+          const src = files.get(d.file), span = name && src ? functionSpan(src, name, language, calledType(p.c.expr ?? "") ?? undefined) : null;
           return span && d.line >= span[0] && d.line <= span[1];
         });
         results[p.n - 1] = inside

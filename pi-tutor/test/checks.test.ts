@@ -119,3 +119,11 @@ describe("timed checks in checks.md (habits Task 17)", () => {
     expect(liveChecks([value1, { ...t, milestone: 2 }], 2)).toEqual([value1, { ...t, milestone: 2 }]);
   });
 });
+
+describe("parseChecks rejects an expected value with an unclosed bracket (Rust/Go minor)", () => {
+  it("one that would sink the reference run never becomes a check", () => {
+    const r = parseChecks("check P1.T1: f(1) == [1, 2\ncheck P1.T1: f(2) == (3, 4\ncheck P1.T1: f(3) == [1, (2, 3)]", { language: "python", taskIds: ["P1.T1"], milestone: 1 });
+    expect(r.checks.map((c) => c.expected)).toEqual(["[1, (2, 3)]"]);
+    expect(r.rejected).toEqual(["check P1.T1: f(1) == [1, 2", "check P1.T1: f(2) == (3, 4"]);
+  });
+});

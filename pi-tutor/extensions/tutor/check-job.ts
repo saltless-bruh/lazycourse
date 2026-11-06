@@ -178,9 +178,11 @@ export async function writeMilestoneChecks(d: {
       const extra = parseChecks(await d.complete(systemText("checks"), more), { language: d.language, taskIds: [...weak.keys()], milestone: d.milestone });
       if (extra.checks.length) {
         const r2 = await run(extra.checks);
-        checks = [...checks, ...(r2.missing ? extra.checks : crossCheck(r2.results))];
+        const added = r2.missing ? extra.checks : crossCheck(r2.results);
+        checks = [...checks, ...added];
         for (const x of r2.results) if (x.valueType && x.check.expr) types.set(x.check.expr, x.valueType);
-        weak = await probe(checks);
+        // Rust/Go minor: with every extra check unverified the trusted set is unchanged, so probing again is waste.
+        if (added.some((c) => c.status === "trusted")) weak = await probe(checks);
       }
     }
     return { checks, reference, ran: true, ...(weak.size ? { weak: [...weak.keys()] } : {}) };
