@@ -162,6 +162,13 @@ function modelComplete(ctx: ExtensionContext, label: () => string): Complete {
   return (system, user) => withProgress(ctx, label(), (signal) => rawComplete(ctx, signal)(system, user));
 }
 
+/**
+ * Project paths whose plan job (spec Q22) or checks job (spec 2026-10-21 §7) is running in this process. Module
+ * level, not per load: Pi loads the extension again on /new and /resume while an older job runs on (Phase 8 A2).
+ */
+const specRunning = new Set<string>();
+const checksRunning = new Set<string>();
+
 export default function (pi: ExtensionAPI): void {
   // pi-tutor is installed globally; only the Pi that nvim-tutor starts is the tutor.
   if (process.env.PI_TUTOR !== "1") return;
@@ -210,8 +217,6 @@ export default function (pi: ExtensionAPI): void {
   let onboardingHere = false;
   /** Bumped at every session start; a background job only paints the session that started it (final review I2). */
   let generation = 0;
-  /** Project paths whose plan job is running in this process (it outlives /new). */
-  const specRunning = new Set<string>();
   /** Learn-first lessons for this project (spec 2026-10-19 §7), saved as profile setting `lesson:<project path>`. */
   let lesson: LessonState | null = null;
   /** The background spec job (Q10): shown on the widget's second line while writing or after a failure. */
@@ -372,6 +377,14 @@ export default function (pi: ExtensionAPI): void {
    */
   function profileWrite(write: () => void) {
     try { write(); } catch (e) { ui?.notify(`tutor: profile write failed: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
+  }
+  /**
+   * Phase 8 A2: a background job that outlives this load (/new, /resume: Pi loads the extension again and this
+   * load's profile is closed) still saves what it made, through the open profile or one opened just for it.
+   */
+  function withProfile(use: (p: Profile) => void) {
+    if (profile) { const p = profile; profileWrite(() => use(p)); return; }
+    profileWrite(() => { const p = Profile.open(); try { use(p); } finally { p.close(); } });
   }
 
   function mirror(closed: Episode) {
@@ -2151,7 +2164,6 @@ export default function (pi: ExtensionAPI): void {
    * plan of a build-now project, a lesson round reaching its milestone, or an older project at session start).
    * Like the plan job, it keeps the model it started with and writes through the profile open when it ends.
    */
-  const checksRunning = new Set<string>();
   function ensureChecks(ctx: ExtensionContext) {
     if (!project || !profile || checksRunning.has(project.path) || specRunning.has(project.path)) return;
     const proj = project, p = profile, key = `checks:${proj.path}`, mine = generation;
@@ -2173,17 +2185,13 @@ export default function (pi: ExtensionAPI): void {
             complete: rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS)), exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(),
             language: proj.language, tasksMd, milestone: k, entry, runCmd, root: proj.path,
           });
-          if (!profile) return;
           // Examples rows saved before this milestone had a reference are kept, cross-checked on the new one.
           let earlier: ChecksState = { milestones: {} };
-          const before = profile;
-          profileWrite(() => { earlier = readChecksState(before.setting(key)); });
+          withProfile((pr) => { earlier = readChecksState(pr.setting(key)); });
           const rows = (earlier.milestones[k]?.checks ?? []).filter((c) => !m.checks.some((x) => x.kind === c.kind && x.expr === c.expr && x.stdin === c.stdin));
           const kept = rows.length ? await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: proj.language, entry, runCmd, reference: m.reference, checks: rows, root: proj.path }) : [];
-          if (!profile) return;
-          const now = profile;
           let saved: ChecksState = { milestones: {} };
-          profileWrite(() => { saved = readChecksState(now.setting(key)); saved.milestones[k] = { ...m, checks: [...m.checks, ...kept] }; now.setSetting(key, JSON.stringify(saved)); });
+          withProfile((pr) => { saved = readChecksState(pr.setting(key)); saved.milestones[k] = { ...m, checks: [...m.checks, ...kept] }; pr.setSetting(key, JSON.stringify(saved)); });
           writeChecksMd(proj.path, saved, current);
           const trusted = m.checks.filter((c) => c.status === "trusted").length;
           if (generation === mine && m.checks.length) ui?.notify(`checks for milestone ${k}: spec/checks.md (${trusted} trusted, ${m.checks.length - trusted} unverified)`, "info");

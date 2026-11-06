@@ -1851,6 +1851,39 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
       expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("## P1.T2 (done)");
     });
+    it("Phase 8 A2: after /new mid-job (Pi loads the extension again) the checks job is not started twice", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const saved = process.env.NVIM; delete process.env.NVIM;
+      let asked = 0, release!: () => void;
+      const held = new Promise<void>((r) => { release = r; });
+      const replies = [CHECKS, REF];
+      const start = async () => {
+        const f = fakePi();
+        extension(f.pi as never);
+        const c = fakeCtx([], dir);
+        (c.ctx.modelRegistry as { complete: unknown }).complete = async () => {
+          asked++; await held;
+          return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] };
+        };
+        return { f, c };
+      };
+      const one = await start();
+      await one.f.events["session_start"]({ type: "session_start", reason: "startup" }, one.c.ctx);
+      await waitFor(() => asked === 1);
+      await one.f.events["session_shutdown"]({ type: "session_shutdown", reason: "new" }, one.c.ctx);
+      const two = await start();
+      await two.f.events["session_start"]({ type: "session_start", reason: "new" }, two.c.ctx);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(asked).toBe(1);
+      release();
+      if (saved) process.env.NVIM = saved;
+      await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
+      expect(asked).toBe(2); // checks, then the reference: one job's two asks
+    });
   });
   it("no answer in the note: the code asks with a dialog", async () => {
     const b = await boot({ cwd: dir });
