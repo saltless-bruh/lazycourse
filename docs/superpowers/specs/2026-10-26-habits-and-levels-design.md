@@ -297,3 +297,17 @@ minimax-m3.1-flash answered no (it quotes the learner's code), yes, yes in 101�
 "the operation needs to separate them instead" (close to naming the fix; code's prose-fix check missed it too);
 mistral-large-4-1t-a52b is not in Pi's NVIDIA model list. Both beat glm here; minimax applies the rule as
 written, deepseek is a little faster and more lenient (two or three verdicts each: a direction, not a ranking).
+
+**Phase 7 (2026-11-06, real LazyVim, nemotron).** A — JavaScript (Task 23): nemotron wrote the milestone's
+checks and hidden reference in the background; both checks (`splitAmount(50, 4) == 12.5` and a typed-input run)
+were confirmed; `:TutorDone` on `total * people` said "splitAmount(50, 4) gave 200, expected 12.5"; fixed, it
+ticked. B — the Rust step-up (Task 24b), run 1: the solve problem returned a `HashMap`, whose Debug output is in
+random order, so the reference confirmed none of its checks and the coding test was aborted — fixed: a part
+with no confirmed check is asked for once more, the abort names the part, the step-up prompt keeps Rust/Go
+returns to numbers, bools, strings and lists, and the checks prompt says to check a Rust map by one key. Run 2:
+stepup/{solve,fix,plan}/ crates prepared, the fix part planted `>=` for `>`, the good-learner answers scored
+"solve 1/1 · fix 4/4 · plan 6/6", but the talking test could not pass — the hidden `sum_positive` was a loop
+with an `if` and no call, so its only pieces were keywords — fixed: when a solution has fewer than two other
+pieces, its keywords count. Independent final review: the Rust/Go parts build with the project's own manifest
+(its go line and edition); a typo inside a JS function is its own ReferenceError, not "not exported"; NaN equals
+NaN; a default-exported function is in scope. Pi's settings unchanged.
