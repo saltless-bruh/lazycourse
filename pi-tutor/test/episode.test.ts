@@ -246,6 +246,14 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(await habits()).toContainEqual(["right-question", true]);
   }, 60000);
+  it("Phase 8 A12: a question about another open task is not credited to this task's next try", async () => {
+    const { b, root } = await doneProject(code("*"), two);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    await turn(b.events, b.ctx, "what should P2.T3 print?", judged("none"));
+    writeFileSync(join(root, "src", "main.py"), code("//"));
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect((await habits()).filter(([k]) => k === "right-question")).toEqual([]);
+  }, 60000);
   it("habits solid in this language raise the level inside its band on a tick, with the reason; /tutor-progress shows them (Task 8)", async () => {
     const { b, root } = await doneProject(code("/"), two);
     const { Profile } = await import("../extensions/tutor/profile.js");

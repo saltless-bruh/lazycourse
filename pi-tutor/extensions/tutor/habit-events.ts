@@ -18,6 +18,23 @@ export function questionEvent(nextTry: { closer: boolean } | null, repeated: boo
   return nextTry ? nextTry.closer : null;
 }
 
+/**
+ * Phase 8 A12: the task a question (it has a "?") is about, so it is judged by that task's next try: a named task
+ * id wins (null when that task is not open), then the functions it names when they all belong to one other task
+ * (`fns`: function → the tasks whose checks call it), else the open episode's task.
+ */
+export function questionTask(prompt: string, episodeTask: string | null, open: Set<string>, fns: Map<string, string[]>): string | null {
+  if (!prompt.includes("?")) return null;
+  const named = /\bP\d+\.T\d+\b/.exec(prompt)?.[0];
+  if (named) return named === episodeTask || open.has(named) ? named : null;
+  if (!episodeTask) return null;
+  const words = new Set(prompt.match(/[A-Za-z_][\w]*/g) ?? []);
+  const tasks = [...fns].filter(([f]) => words.has(f)).map(([, ts]) => ts);
+  if (!tasks.length || tasks.some((ts) => ts.includes(episodeTask))) return episodeTask;
+  const other = [...new Set(tasks.flat())];
+  return other.length === 1 && open.has(other[0]) ? other[0] : episodeTask;
+}
+
 /** Reads errors: the right-click ask came after the error was on screen ≥ 5 s; a chat question with an error open is a miss. */
 export function readsErrorEvent(ask: { shownMs: number | null } | null, chatQuestionWithErrorOpen: boolean): boolean | null {
   if (ask) return ask.shownMs !== null && ask.shownMs >= 5000;

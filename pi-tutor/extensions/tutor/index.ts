@@ -30,7 +30,7 @@ import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTest
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
 import { crossCheckOnReference, currentMilestone, extractCode, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
 import { recognize, examplesToChecks } from "./recipe-steps.js";
-import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
+import { questionTask, directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
 import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, brokenProgram, backupStepUp, STEP_UP_LANGUAGES, ADVANCED_STEP_UP_LANGUAGES } from "./step-up.js";
@@ -763,7 +763,8 @@ export default function (pi: ExtensionAPI): void {
       for (const k of fresh) missedErrors.add(k);
     }
     // Right question: judged by the next graded try on the task this question was asked during (M2: a question has a "?").
-    const task = episode?.spot?.startsWith("check:") && prompt.includes("?") ? episode.spot.split(":")[1] : null;
+    // Phase 8 A12: a question that names another open task (or only its functions) is that task's question.
+    const task = episode?.spot?.startsWith("check:") && prompt.includes("?") ? questionTask(prompt, episode.spot.split(":")[1], ...taskIndex()) : null;
     if (task) {
       const said = prompt.trim().toLowerCase(), before = askedBefore.get(task) ?? [];
       if (before.includes(said)) recordHabit("right-question", questionEvent(null, true), `question:${task}`);
@@ -771,6 +772,22 @@ export default function (pi: ExtensionAPI): void {
       askedBefore.set(task, [...before, said]);
     }
   }
+  }
+
+  /** The open task ids and, from the live checks, function → the tasks whose checks call it (Phase 8 A12). */
+  function taskIndex(): [Set<string>, Map<string, string[]>] {
+    const fns = new Map<string, string[]>();
+    if (!project || !profile) return [new Set(), fns];
+    let tasksMd = "";
+    try { tasksMd = readFileSync(join(project.path, "spec", "tasks.md"), "utf8"); } catch { /* no plan */ }
+    let cs: ChecksState = { milestones: {} };
+    const p = profile, key = `checks:${project.path}`;
+    profileWrite(() => { cs = readChecksState(p.setting(key)); });
+    for (const c of liveChecks(Object.values(cs.milestones).flatMap((m) => m.checks), currentMilestone(tasksMd, lesson))) {
+      const task = c.task.replace(/\.S\d+$/, "");
+      for (const f of calledFunctions(c.expr ? [c.expr] : [])) fns.set(f, [...new Set([...(fns.get(f) ?? []), task])]);
+    }
+    return [new Set(openTaskIds(tasksMd)), fns];
   }
 
   pi.on("input", (event) => {

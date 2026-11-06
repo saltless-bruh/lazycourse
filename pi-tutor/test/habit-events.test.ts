@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { directionEvent, questionEvent, readsErrorEvent, smallRunEvent, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, looksUpEvent, changedLines } from "../extensions/tutor/habit-events.js";
+import { questionTask, directionEvent, questionEvent, readsErrorEvent, smallRunEvent, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, looksUpEvent, changedLines } from "../extensions/tutor/habit-events.js";
 
 describe("habit detectors (spec 2026-10-26 §3): good, miss, or nothing", () => {
   it("right direction: more checks pass, or a crash becomes a wrong value", () => {
@@ -51,5 +51,20 @@ describe("final review I2: right direction compares only the same checks", () =>
   it("a different set of checks resets the comparison", () => {
     expect(directionEvent({ passed: 0, total: 1, crashed: false, key: "a" }, { passed: 2, total: 4, crashed: false, key: "a|b|c|d" })).toBeNull();
     expect(directionEvent({ passed: 0, total: 2, crashed: false, key: "a|b" }, { passed: 1, total: 2, crashed: false, key: "a|b" })).toBe(true);
+  });
+});
+
+describe("questionTask (Phase 8 A12): which task a question is about", () => {
+  const fns = new Map([["split_amount", ["P2.T2"]], ["print_total", ["P2.T3"]], ["shared", ["P2.T2", "P2.T3"]]]);
+  const open = new Set(["P2.T2", "P2.T3"]);
+  it("the episode's task, unless the question names another open task or only its functions", () => {
+    expect(questionTask("why does split_amount give 144?", "P2.T2", open, fns)).toBe("P2.T2");
+    expect(questionTask("how do I start P2.T3?", "P2.T2", open, fns)).toBe("P2.T3");
+    expect(questionTask("what should print_total print?", "P2.T2", open, fns)).toBe("P2.T3");
+    expect(questionTask("does print_total call split_amount?", "P2.T2", open, fns)).toBe("P2.T2");
+    expect(questionTask("is shared right?", "P2.T2", open, fns)).toBe("P2.T2");
+    expect(questionTask("what about P9.T9?", "P2.T2", open, fns)).toBeNull(); // a task that is not open: no credit anywhere
+    expect(questionTask("I think it works.", "P2.T2", open, fns)).toBeNull(); // no question
+    expect(questionTask("why?", null, open, fns)).toBeNull();
   });
 });
