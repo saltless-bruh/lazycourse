@@ -214,6 +214,13 @@ describe("projectRun keeps the entry inside the project (final review I6)", () =
 describe.skipIf(!bwrapReady || !has("node"))("JavaScript and TypeScript function checks", () => {
   const js = (root: string, checks: Check[], entry = "src/main.js", language = "javascript") =>
     runChecks(realExec, { language, root, entry, runCmd: `node ${entry}`, checks, sandbox: host() });
+  it("Phase 8 A5: a class instance matches an object literal with its fields; two different classes do not", async () => {
+    const root = project({ "src/main.js": "class Point { constructor(x, y) { this.x = x; this.y = y } }\nclass Other { constructor(x, y) { this.x = x; this.y = y } }\nexport const at = (x) => new Point(x, x / 3)\nexport const other = (x) => new Other(x, x / 3)\nexport { Point }\n" });
+    const r = await js(root, [value("at(1)", "{ x: 1, y: 0.3333333333333333 }"), value("at(1)", "{ x: 1, y: 2 }"), value("other(1)", "new Point(1, 1 / 3)"), value("at(1)", "new Point(1, 1 / 3)")]);
+    expect(r.results.map((x) => x.pass)).toEqual([true, false, false, true]);
+    const built = project({ "src/main.js": "export const m = () => new Map()\nexport const d = () => new Date(0)\n" });
+    expect((await js(built, [value("m()", "{}"), value("d()", "{}")])).results.map((x) => x.pass)).toEqual([false, false]);
+  }, 30_000);
   it("an exported function is called; numbers compare within a tolerance, arrays and objects element by element", async () => {
     const root = project({ "src/main.js": "export function splitAmount(t, p) { return t / p }\nexport const pair = (a) => [a, { n: a / 3 }]\n" });
     const r = await js(root, [value("splitAmount(50, 3)", "16.666666666666668"), value("splitAmount(50, 4)", "13"), value("pair(1)", "[1, { n: 0.3333333333333333 }]")]);

@@ -189,7 +189,12 @@ const run = (src) => new Function(...names, "return (" + src + ");")(...names.ma
 const near = (a, b) => {
   if (typeof a === "number" && typeof b === "number") return a === b || (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b)); // final review M1: NaN is NaN
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => near(x, b[i]));
-  if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b) && Object.getPrototypeOf(a) === Object.prototype) {
+  // Phase 8 A5: either side a plain object (the expected value is usually a literal) compares field by field, so a
+  // class instance matches the literal of its fields; two instances still need the same class.
+  const plain = (o) => [Object.prototype, null].includes(Object.getPrototypeOf(o));
+  const builtIn = (o) => [Map, Set, WeakMap, WeakSet, Date, RegExp, Error, Promise].some((C) => o instanceof C) || ArrayBuffer.isView(o) || o instanceof ArrayBuffer;
+  const fields = (o, p) => plain(o) ? true : !builtIn(o) && plain(p);
+  if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b) && (plain(a) || plain(b)) && fields(a, b) && fields(b, a)) {
     const ka = Object.keys(a), kb = Object.keys(b);
     return ka.length === kb.length && ka.every((k) => k in b && near(a[k], b[k]));
   }
