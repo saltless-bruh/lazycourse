@@ -2,7 +2,7 @@
 // bubblewrap with the filesystem read-only, home, temp folders and user sockets hidden, no network
 // and an empty environment. Only the exam folder is writable.
 import { createHash } from "node:crypto";
-import { accessSync, constants, mkdirSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, join } from "node:path";
 
 export interface SandboxHost { env: NodeJS.ProcessEnv; home: string; cacheDir: string }
@@ -78,6 +78,28 @@ export function toolBinds(cmds: string[], host: SandboxHost): string[] {
   return [...out];
 }
 
+const TARGET_KEEP = 8, TARGET_DAYS = 14;
+
+/**
+ * Side-agent note on B1: a Rust build folder can take hundreds of MB, and every exam is a new folder. Only these
+ * cache folders are removed: the build of a project or exam folder that is gone, one unused for 14 days, and any
+ * past the 8 used most recently.
+ */
+function pruneCargoTargets(root: string, current: string) {
+  let names: string[];
+  try { names = readdirSync(root); } catch { return; }
+  const now = Date.now(), live: { dir: string; at: number }[] = [];
+  for (const n of names) {
+    const dir = join(root, n);
+    if (dir === current) continue;
+    let at = 0, src = "";
+    try { at = statSync(join(dir, ".used")).mtimeMs; src = readFileSync(join(dir, ".used"), "utf8"); } catch { /* not ours to keep */ }
+    if (!src || !exists(src) || now - at > TARGET_DAYS * 86400_000) rmSync(dir, { recursive: true, force: true });
+    else live.push({ dir, at });
+  }
+  for (const old of live.sort((x, y) => y.at - x.at).slice(TARGET_KEEP - 1)) rmSync(old.dir, { recursive: true, force: true });
+}
+
 /** bwrap arguments up to and including `--`; `dir` must already be a realpath. */
 export function sandboxArgv(dir: string, language: string, binds: string[], host: SandboxHost): string[] {
   const a = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
@@ -98,6 +120,8 @@ export function sandboxArgv(dir: string, language: string, binds: string[], host
   if (language === "rust") {
     const target = join(host.cacheDir, "cargo-target", createHash("sha256").update(dir).digest("hex").slice(0, 16));
     mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, ".used"), dir); // whose build it is, and (its time) when it was last used
+    pruneCargoTargets(join(host.cacheDir, "cargo-target"), target);
     a.push("--bind", target, target, "--setenv", "CARGO_TARGET_DIR", target);
   }
   // Final review C2: the test writes into a throwaway overlay of the exam folder, so files and symlinks it

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, existsSync, linkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, existsSync, linkSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findOnPath, toolBinds, sandboxArgv } from "../extensions/tutor/exam/sandbox.js";
@@ -102,12 +102,29 @@ describe("exam sandbox: the bwrap arguments (plan S3, S5, S6)", () => {
   });
   it("Phase 8 B1: rust gets a writable build folder per project folder, so a check run rebuilds only what changed", () => {
     const at = (dir: string) => /--setenv CARGO_TARGET_DIR (\S+)/.exec(sandboxArgv(dir, "rust", [], host).join(" "))?.[1];
-    const a = at("/w/a"), b = at("/w/b");
+    const wa = mkdtempSync(join(tmpdir(), "w-a-")), wb = mkdtempSync(join(tmpdir(), "w-b-"));
+    const a = at(wa), b = at(wb);
     expect(a?.startsWith(join(host.cacheDir, "cargo-target"))).toBe(true);
     expect(existsSync(a!)).toBe(true);
-    expect(sandboxArgv("/w/a", "rust", [], host).join(" ")).toContain(`--bind ${a} ${a}`);
-    expect(at("/w/a")).toBe(a);
+    expect(sandboxArgv(wa, "rust", [], host).join(" ")).toContain(`--bind ${a} ${a}`);
+    expect(at(wa)).toBe(a);
     expect(b).not.toBe(a);
     expect(argv.join(" ")).not.toContain("CARGO_TARGET_DIR");
+  });
+  it("side-agent note: build folders of gone folders, unused for 14 days, or past the newest 8 are removed", () => {
+    const h = { ...host, cacheDir: mkdtempSync(join(tmpdir(), "cargo-gc-")) };
+    const live = (n: number) => { const d = mkdtempSync(join(tmpdir(), `live${n}-`)); return d; };
+    const target = (dir: string) => /--setenv CARGO_TARGET_DIR (\S+)/.exec(sandboxArgv(dir, "rust", [], h).join(" "))![1];
+    const gone = live(0), old = live(1);
+    const goneT = target(gone), oldT = target(old);
+    rmSync(gone, { recursive: true });
+    const past = (Date.now() - 15 * 86400_000) / 1000;
+    utimesSync(join(oldT, ".used"), past, past);
+    const keep = Array.from({ length: 9 }, (_, i) => live(i + 2));
+    const kept = keep.map((d) => { const t = target(d); return t; });
+    expect(existsSync(goneT)).toBe(false);
+    expect(existsSync(oldT)).toBe(false);
+    expect(kept.filter((t) => existsSync(t))).toHaveLength(8);
+    expect(existsSync(kept.at(-1)!)).toBe(true);
   });
 });
