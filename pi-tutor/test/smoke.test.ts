@@ -1851,6 +1851,20 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       await waitFor(() => existsSync(pjoin(dir, "spec", "checks.md")));
       expect(readFileSync(pjoin(dir, "spec", "checks.md"), "utf8")).toContain("## P1.T2 (done)");
     });
+    it("Phase 8 A9: an intermediate step-up saved before it had tests and improve parts is started again, not scored on three", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", "");
+      const old = { stage: "coding-ready", language: "python", band: "intermediate", talkTask: "t", solveTask: "s", module: null, talkRef: "", talkChecks: [], started: 1 };
+      p.setSetting(`stepup:${dir}`, JSON.stringify(old));
+      p.setSetting(`stepup:/other`, JSON.stringify({ ...old, band: "beginner" }));
+      p.close();
+      const b = await boot({ cwd: dir });
+      expect(b.notes.some((n) => /intermediate step-up now also has a tests part and an improve part.*\/tutor-step-up starts it again.*Nothing counts against you/.test(n))).toBe(true);
+      expect(await setting(`stepup:${dir}`)).toBeNull();
+    });
     it("Phase 8 A2: after /new mid-job (Pi loads the extension again) the checks job is not started twice", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");

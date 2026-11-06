@@ -380,6 +380,37 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("submit", b.ctx);
     expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 67/);
   }, 180000);
+  it("Phase 8 A8: an improve part with no clumsy version that works is asked once more, then stops the setup — never a free pass", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("40", b.ctx);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.intermediate) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const WRONG = "```python\ndef count_unique(items):\n    return 0\n```";
+    const replies = [
+      JSON.stringify({ talk: "Write `top_word(text)` returning the most frequent word.", solve: "Write `weekday(iso)` returning the weekday name of an ISO date.", fix: "Write `tip(total)` returning 15% of the total.", improve: "Write `count_unique(items)` returning how many different items there are." }),
+      "check P1.T1: top_word('a b a') == 'a'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```",
+      "check P1.T1: weekday('2026-11-02') == 'Monday'", "```python\nimport datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n```",
+      "check P1.T1: tip(50) == 7.5", "```python\ndef tip(total):\n    return total * 0.15\n```",
+      "check P1.T1: count_unique([1, 1, 2]) == 2", "```python\ndef count_unique(items):\n    return len(set(items))\n```", WRONG,
+      "check P1.T1: count_unique([1, 1, 2]) == 2", "```python\ndef count_unique(items):\n    return len(set(items))\n```", WRONG,
+    ];
+    let asked = 0;
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => { asked++; return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] }; };
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
+    await turn(b.events, b.ctx, "1. split the text\n2. count each word\n3. keep the biggest\npieces: split, max, count", judged("none"));
+    await until(() => b.notes.some((n) => /coding test could not be prepared/.test(n)), 60000);
+    expect(b.notes.find((n) => /coding test could not be prepared/.test(n))).toMatch(/improve part.*Nothing counts against you/);
+    expect(replies).toEqual([]); // the improve part was asked for twice
+    expect(existsSync(join(root, "stepup", "README.md"))).toBe(false);
+    expect(await (async () => { const q = Profile.open(process.env.PI_TUTOR_PROFILE!); try { return q.setting(`stepup:${root}`) || null; } finally { q.close(); } })()).toBeNull();
+    expect(asked).toBeGreaterThan(0);
+  }, 180000);
   // Habits Task 24b: the step-up for Rust and Go, each part in its own crate / module folder.
   for (const lang of ["rust", "go"] as const) it.skipIf(!tool(lang === "rust" ? "cargo" : "go", lang === "rust" ? ["--version"] : ["version"]))(`the step-up in ${lang}: each part in its own folder, checked one at a time`, async () => {
     const R = lang === "rust";
