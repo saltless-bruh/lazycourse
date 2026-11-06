@@ -9,7 +9,13 @@ export interface SandboxHost { env: NodeJS.ProcessEnv; home: string; cacheDir: s
 
 /** Cheap check that bwrap exists and user namespaces are allowed. */
 export const BWRAP_PROBE: [string, string[]] = ["bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--die-with-parent", "true"]];
-export const SANDBOX_MISSING = "exam tests run in a sandbox and bubblewrap (bwrap) cannot start here: install it (Arch: pacman -S bubblewrap) or run /tutor-exam sandbox off";
+/** Phase 8 D (sandbox minor): bubblewrap is Linux only; other systems are told so, not given an Arch command. */
+export function sandboxMissing(platform: string): string {
+  return platform === "linux"
+    ? "exam tests run in a sandbox and bubblewrap cannot start here: install bubblewrap with your package manager (Arch: pacman -S bubblewrap; Debian/Ubuntu: apt install bubblewrap) or run /tutor-exam sandbox off"
+    : "exam tests run in a sandbox, and the sandbox (bubblewrap) needs Linux: on this system run /tutor-exam sandbox off to run them as you";
+}
+export const SANDBOX_MISSING = sandboxMissing(process.platform);
 
 /**
  * `argv` with stdin closed and stdout/stderr cut at the caps, keeping the command's exit code (phase 2 final

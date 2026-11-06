@@ -73,13 +73,22 @@ describe("makeExam (D5: the tests must fail, not break, against the stub)", () =
     expect(readdirSync(join(d.root, m.dir)).filter((f) => f !== "__pycache__").sort()).toEqual(["brief.md", "solution.py", "test_examples.py"]);
     expect(readFileSync(join(d.root, m.dir, "brief.md"), "utf8")).toContain("Word frequency");
   });
+  it("Phase 8 D (sandbox minor): the learner's own pytest at the project root never collects exam tests", async () => {
+    const d = deps([JSON.stringify(PY_EXAM)]);
+    const m = await makeExam(d);
+    expect(readFileSync(join(d.root, "exam", "conftest.py"), "utf8")).toMatch(/collect_ignore_glob = \["\*"\]/);
+    const { spawnSync } = await import("node:child_process");
+    const r = spawnSync("python3", ["-m", "pytest", "--collect-only", "-q"], { cwd: d.root, encoding: "utf8" });
+    if (r.error || /No module named pytest/.test(r.stderr)) return; // no pytest here: the file above is the proof
+    expect(r.stdout).not.toContain(m.dir);
+  });
   it("a broken test file is removed and asked for again (Review Focus #1)", async () => {
     const broken = { ...PY_EXAM, tests: PY_EXAM.tests.replace("from solution import count_words", "from solution import nope") };
     const seen: string[] = [];
     const d = { ...deps([]), complete: async (_s: string, u: string) => { seen.push(u); return seen.length === 1 ? JSON.stringify(broken) : JSON.stringify(PY_EXAM); } };
     const m = await makeExam(d);
     expect(seen[1]).toMatch(/do not compile or load/);
-    expect(readdirSync(join(d.root, "exam"))).toEqual([m.id]);
+    expect(readdirSync(join(d.root, "exam")).filter((f) => f !== "conftest.py")).toEqual([m.id]); // Phase 8 D: conftest.py is the tutor's
   });
   it("two bad exams: a clear error and no folder left (Review Focus #1)", async () => {
     const solved = { ...PY_EXAM, stub: "def count_words(text):\n    out = {}\n    for w in text.lower().split():\n        out[w] = out.get(w, 0) + 1\n    return out\n" };

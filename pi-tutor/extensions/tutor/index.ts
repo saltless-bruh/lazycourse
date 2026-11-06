@@ -54,7 +54,7 @@ import { lastClosedEpisode, transcript, learnPrompt, checkLearned, renderLearned
 import { fetchReference, referenceInfo, skillsRoot } from "./knowledge/reference.js";
 import { loadPack, normalizeTags, vocabOf, cookbookIndex, remapConcepts, weakConcepts, type IndexEntry } from "./packs.js";
 import { layout, runExamTests } from "./exam/layout.js";
-import { BWRAP_PROBE, type SandboxHost } from "./exam/sandbox.js";
+import { BWRAP_PROBE, SANDBOX_MISSING, type SandboxHost } from "./exam/sandbox.js";
 import { parseExamArgs, examPrompt, makeExam, LIMIT_MIN } from "./exam/make.js";
 import { restoreExam, examLabel, formatExamContext, type ExamState } from "./exam/state.js";
 import { learnerFiles, checkGrade, score, gradePrompt, renderGrade, type Grade } from "./exam/grade.js";
@@ -1163,12 +1163,12 @@ export default function (pi: ExtensionAPI): void {
     description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons; sandbox on|off",
     handler: (args, ctx) => exclusive(ctx, async () => {
       const a = parseExamArgs(args);
-      if (a.kind === "usage") { ctx.ui.notify("usage: /tutor-exam [small|medium] [topic] | check | off | sandbox [on|off]", "warning"); return; }
+      if (a.kind === "usage") { ctx.ui.notify("usage: /tutor-exam [small|medium] [topic] | check | off | sandbox [on|off] (for a topic that starts with \"sandbox\": /tutor-exam small sandbox …)", "warning"); return; }
       if (a.kind === "sandbox") {
         if (a.mode === null) {
           if (examSandbox === "off") { ctx.ui.notify("exam sandbox: off — exam tests run as you, with your files and network", "info"); return; }
           const ok = (await pi.exec(BWRAP_PROBE[0], BWRAP_PROBE[1], { cwd: project?.path ?? process.cwd(), timeout: 10_000 })).code === 0;
-          ctx.ui.notify(ok ? "exam sandbox: on (bubblewrap ready)" : "exam sandbox: on, but bubblewrap cannot start: install bubblewrap (Arch: pacman -S bubblewrap) or /tutor-exam sandbox off", ok ? "info" : "warning");
+          ctx.ui.notify(ok ? "exam sandbox: on (bubblewrap ready)" : `exam sandbox: on, but ${SANDBOX_MISSING}`, ok ? "info" : "warning");
           return;
         }
         examSandbox = a.mode;

@@ -1135,6 +1135,7 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     expect(b.notes.at(-1)).toMatch(/exam sandbox: on \(bubblewrap ready\)/);
     await b.commands["tutor-exam"].handler("sandbox maybe", b.ctx);
     expect(b.notes.at(-1)).toMatch(/usage: \/tutor-exam .*sandbox \[on\|off\]/);
+    expect(b.notes.at(-1)).toMatch(/a topic that starts with "sandbox": \/tutor-exam small sandbox …/); // Phase 8 D
   });
   it("off abandons the exam; check runs the examples without a model call", async () => {
     const cwd = await projectDir("python");

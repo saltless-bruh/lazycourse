@@ -128,3 +128,12 @@ describe("exam sandbox: the bwrap arguments (plan S3, S5, S6)", () => {
     expect(existsSync(kept.at(-1)!)).toBe(true);
   });
 });
+
+describe("sandbox missing message (Phase 8 D, sandbox minor)", () => {
+  it("names the system: Linux gets the package, others are told it needs Linux", async () => {
+    const { sandboxMissing } = await import("../extensions/tutor/exam/sandbox.js");
+    expect(sandboxMissing("linux")).toMatch(/install bubblewrap with your package manager \(Arch: pacman -S bubblewrap; Debian\/Ubuntu: apt install bubblewrap\)/);
+    expect(sandboxMissing("darwin")).toMatch(/needs Linux.*\/tutor-exam sandbox off/);
+    expect(sandboxMissing("darwin")).not.toMatch(/pacman/);
+  });
+});

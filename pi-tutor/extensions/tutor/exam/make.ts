@@ -108,6 +108,8 @@ function unwrite(paths: string[], root: string, dir: string) {
   }
 }
 
+const PYTEST_IGNORE = "# Written by the tutor: exam tests run only in its sandbox (:TutorExam check), never in your own pytest.\ncollect_ignore_glob = [\"*\"]\n";
+
 export async function makeExam(d: { complete: Complete; exec: RunExec; system: string; prompt: string; language: string; root: string; vocab: Vocab | null; size: ExamSize; topic: string | null; sandbox?: SandboxHost | null }): Promise<Made> {
   let reason = "";
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -124,7 +126,12 @@ export async function makeExam(d: { complete: Complete; exec: RunExec; system: s
       if (r.killed) reason = "the example tests did not finish within 120 s against the stub";
       else if (r.broken) reason = `the example tests do not compile or load: ${r.out.slice(-1500)}`;
       else if (r.code === 0) reason = "the example tests pass against the stub; they must fail until the learner writes the solution";
-      else return { id, dir, spec };
+      else {
+        // Phase 8 D (sandbox minor): the model writes exam tests, so only the sandbox runs them; a learner's own
+        // pytest at the project root would collect exam/*/test_examples.py and run them as the learner.
+        if (d.language === "python" && !existsSync(join(d.root, "exam", "conftest.py"))) writeInRoot(d.root, "exam/conftest.py", PYTEST_IGNORE);
+        return { id, dir, spec };
+      }
     } catch (e) {
       unwrite(written, d.root, dir);
       throw e;
