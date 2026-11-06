@@ -22,7 +22,8 @@ Expected:
 - `WIDGET present=true offlink=false chan=<n>` (offlink = the widget says "outside nvim" or "nvim closed")
 - `LEVEL lvl40=true`
 - `DIAG widget=true`
-- `EPISODE widget=true nudge=true` (level 10 = beginner, error threshold 0)
+- `EPISODE widget=false nudge=false` (since habits phase 1, spec 2026-10-26 §5.2: an error that just sits never
+  opens an episode or nudges; the learner asks with the right-click entry or `<leader>te`)
 - `RUN done` preceded by `[tutor] no run_cmd configured` (unless `run_cmd` is set)
 - `no stray pi`
 
