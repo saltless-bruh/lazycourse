@@ -136,3 +136,18 @@ describe("check lines for JavaScript and TypeScript (habits Task 23)", () => {
         .toEqual([{ task: "P1.T1", kind: "value", expr: "splitAmount(50, 4)", expected: "12.5", milestone: 1, status: "unverified" }]);
   });
 });
+
+describe("Phase 8 A6: brackets and == inside a JS template, a Go raw string or a Lua long string", () => {
+  const one = (line: string, language: string) => parseChecks(line, { language, taskIds: ["P1.T1"], milestone: 1 }).checks[0];
+  it("are text, not code", () => {
+    expect(one("check P1.T1: wrap(`(a`) == `[(a]`", "javascript")).toMatchObject({ expr: "wrap(`(a`)", expected: "`[(a]`" });
+    expect(one("check P1.T1: eq(`a == b`) == true", "typescript")).toMatchObject({ expr: "eq(`a == b`)", expected: "true" });
+    expect(one("check P1.T1: Wrap(`(a`) == \"[(a]\"", "go")).toMatchObject({ expr: "Wrap(`(a`)", expected: "\"[(a]\"" });
+    expect(one("check P1.T1: wrap([[(a]]) == [==[[(a]]==]", "lua")).toMatchObject({ expr: "wrap([[(a]])", expected: "[==[[(a]]==]" });
+  });
+  it("a Python nested list is still brackets, and an unclosed bracket is still dropped", () => {
+    expect(one("check P1.T1: flat([[1, 2], [3]]) == [1, 2, 3]", "python")).toMatchObject({ expr: "flat([[1, 2], [3]])", expected: "[1, 2, 3]" });
+    expect(one("check P1.T1: wrap(`(a`) == (1", "javascript")).toBeUndefined();
+    expect(one("check P1.T1: wrap([[(a]] == 1", "lua")).toBeUndefined();
+  });
+});

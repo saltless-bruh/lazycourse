@@ -26,28 +26,49 @@ const IO = /^run\s+(P\d+\.T\d+(?:\.S\d+)?)\s*:\s*stdin\s+"((?:[^"\\]|\\.)*)"\s*(
 
 const unquote = (s: string) => s.replace(/\\(.)/g, (_, c: string) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
 
-/** Rust/Go minor: every bracket closes, in order, outside quotes (an unclosed one sank a reference run). */
-function balanced(s: string): boolean {
+const BACKTICK = new Set(["javascript", "typescript", "go"]);
+
+/**
+ * The string starting at `i`: the index after it and whether it closed (unclosed runs to the end), or null when
+ * none starts there. Phase 8 A6: JS/TS templates and Go raw strings in backticks, Lua long strings `[==[…]==]`.
+ */
+function stringAt(s: string, i: number, language: string): { end: number; closed: boolean } | null {
+  const ch = s[i];
+  if (ch === '"' || ch === "'" || (ch === "`" && BACKTICK.has(language))) {
+    const escapes = !(ch === "`" && language === "go"); // a Go raw string has no escapes
+    for (let j = i + 1; j < s.length; j++) {
+      if (escapes && s[j] === "\\") j++;
+      else if (s[j] === ch) return { end: j + 1, closed: true };
+    }
+    return { end: s.length, closed: false };
+  }
+  const long = language === "lua" ? /^\[(=*)\[/.exec(s.slice(i)) : null;
+  if (!long) return null;
+  const close = s.indexOf(`]${long[1]}]`, i + long[0].length);
+  return close < 0 ? { end: s.length, closed: false } : { end: close + long[0].length, closed: true };
+}
+
+/** Rust/Go minor: every bracket closes, in order, outside strings (an unclosed one sank a reference run). */
+function balanced(s: string, language: string): boolean {
   const open = "([{", close = ")]}", stack: string[] = [];
-  let quote: string | null = null;
   for (let i = 0; i < s.length; i++) {
+    const str = stringAt(s, i, language);
+    if (str) { if (!str.closed) return false; i = str.end - 1; continue; }
     const ch = s[i];
-    if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
-    if (ch === '"' || ch === "'") { quote = ch; continue; }
     if (open.includes(ch)) stack.push(close[open.indexOf(ch)]);
     else if (close.includes(ch) && stack.pop() !== ch) return false;
   }
-  return stack.length === 0 && quote === null;
+  return stack.length === 0;
 }
 
-/** The last top-level ` == ` outside quotes splits expression from expected value. */
-function splitValue(body: string): [string, string] | null {
-  let quote: string | null = null, depth = 0, at = -1;
+/** The last top-level ` == ` outside strings splits expression from expected value. */
+function splitValue(body: string, language: string): [string, string] | null {
+  let depth = 0, at = -1;
   for (let i = 0; i < body.length; i++) {
+    const str = stringAt(body, i, language);
+    if (str) { i = str.end - 1; continue; }
     const ch = body[i];
-    if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if ("([{".includes(ch)) depth++;
+    if ("([{".includes(ch)) depth++;
     else if (")]}".includes(ch)) depth--;
     else if (depth === 0 && body.startsWith("==", i)) { at = i; i++; }
   }
@@ -65,8 +86,8 @@ export function parseChecks(text: string, o: { language: string; taskIds: string
     if (io && known.has(io[1])) { checks.push({ task: io[1], kind: "io", stdin: unquote(io[2]), contains: unquote(io[3]), milestone: o.milestone, status: "unverified" }); continue; }
     const tm = TIMED.exec(line);
     if (tm && known.has(tm[1]) && TIMED_LANGUAGES.has(o.language)) { checks.push({ task: tm[1], kind: "timed", expr: tm[2].trim(), milestone: o.milestone, status: "unverified" }); continue; }
-    const v = VALUE.exec(line), parts = v ? splitValue(v[2]) : null;
-    if (v && parts && known.has(v[1]) && VALUE_LANGUAGES.has(o.language) && balanced(parts[0]) && balanced(parts[1])) {
+    const v = VALUE.exec(line), parts = v ? splitValue(v[2], o.language) : null;
+    if (v && parts && known.has(v[1]) && VALUE_LANGUAGES.has(o.language) && balanced(parts[0], o.language) && balanced(parts[1], o.language)) {
       checks.push({ task: v[1], kind: "value", expr: parts[0], expected: parts[1], milestone: o.milestone, status: "unverified" });
       continue;
     }
