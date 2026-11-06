@@ -15,6 +15,8 @@ describe("turns (spec 2026-10-21 §6)", () => {
   it("a fallback quotes the error line as the learner saw it (live check: '#' and stripped underscores)", () => {
     expect(fallbackReply("why", "split_amount(10, 4) gave 2, expected 2.5")).toContain("split_amount(10, 4) gave 2, expected 2.5");
     expect(fallbackReply("why", "use `x` here")).not.toMatch(/`/);
+    // phase 1 minor M6: the spot is shown as plain text, so no other Markdown in an error renders either
+    expect(fallbackReply("hint", "total * people * 2 in [main](x) _here_")).toContain("total \\* people \\* 2 in \\[main\\](x) \\_here\\_");
   });
   it("fallbacks hold no code and no fix", () => {
     for (const s of ["teach", "hint", "why", "ask", "fix"] as const) {

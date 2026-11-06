@@ -82,7 +82,8 @@ export interface TestRun { code: number; out: string; killed: boolean; broken: b
  * Final review I2: Pi's exec kills only its direct child, so cargo's and go's test binaries outlived a
  * hang. coreutils `timeout` runs the command in its own process group and kills the whole group.
  */
-export interface ExamRunOptions { limitSec?: number; sandbox?: SandboxHost | null }
+/** `overlay` (M8 minor M3): files laid over the exam folder in the throwaway sandbox copy only. */
+export interface ExamRunOptions { limitSec?: number; sandbox?: SandboxHost | null; overlay?: Record<string, string> }
 
 export async function runExamTests(exec: RunExec, language: string, dir: string, opts: ExamRunOptions = {}): Promise<TestRun> {
   const l = LAYOUTS[language];
@@ -107,7 +108,10 @@ export async function runExamTests(exec: RunExec, language: string, dir: string,
     return { code: tool.code, out: missing, killed: false, broken: false, missing };
   }
   const group = (await run("timeout", ["--version"], 10_000)).code === 0;
-  const [c, ...a] = cappedArgv([l.command[0], ...l.command[1]], EXAM_OUT_CAP, EXAM_OUT_CAP);
+  const over = prefix ? Object.entries(opts.overlay ?? {}) : [];
+  const write = 'while [ "$1" != "--" ]; do mkdir -p "$(dirname "$1")" && printf "%s" "$2" > "$1" || exit 126; shift 2; done; shift; exec "$@"';
+  const cmd = over.length ? ["sh", "-c", write, "sh", ...over.flat(), "--", l.command[0], ...l.command[1]] : [l.command[0], ...l.command[1]];
+  const [c, ...a] = cappedArgv(cmd, EXAM_OUT_CAP, EXAM_OUT_CAP);
   const r = group
     ? await run("timeout", ["-k", "5", String(limitSec), c, ...a], (limitSec + 15) * 1000)
     : await run(c, a, limitSec * 1000);

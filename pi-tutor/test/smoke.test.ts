@@ -1143,6 +1143,23 @@ describe("/tutor-exam (spec 2026-10-13 §6)", () => {
     p.close();
     expect(b.widgets["tutor"]?.[0]).not.toMatch(/exam/);
   }, 30_000);
+  it("M8 minor M3: tests the learner edited are not what grades; the tests as written are, and the grade says so", async () => {
+    const cwd = await projectDir("python");
+    const b = await boot({ cwd });
+    b.pi.exec = realExec as never;
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    const dir = pjoin(cwd, "exam", "01-word-frequency");
+    wfile(pjoin(dir, "test_examples.py"), "import unittest\n\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n");
+    b.replies.push(JSON.stringify({
+      requirements: [{ id: "R1", met: false, evidence: "solution.py:1 — not written" }, { id: "R2", met: false, evidence: "solution.py:1 — not written" }],
+      idioms: [], next_fixes: ["write count_words", "lowercase each word", "count with a dict"], in_short: "Not started.",
+    }));
+    await b.commands["tutor-submit"].handler("", b.ctx);
+    const md = readFileSync(pjoin(dir, "grade.md"), "utf8");
+    expect(md).toContain("The example tests failed (exit 1).");
+    expect(md).toMatch(/test_examples\.py was changed after the exam began; these results come from the tests as written/);
+  }, 30_000);
   it("a grade the model gets wrong twice writes nothing and keeps the exam open (Review Focus #4)", async () => {
     const cwd = await projectDir("python");
     const b = await boot({ cwd });
@@ -2004,6 +2021,18 @@ describe("/tutor-fix (spec 2026-10-21 §5: at pro the fix comes only when asked)
     const t = await turn(b.events, b.ctx, "go on", judged("none"));
     expect(t.message?.content).toContain("this turn: Give the fix for only the stuck part");
   });
+  it("phase 1 minor M1: asked early, the note says how many more tries before the fix, not 'the next reply'", async () => {
+    const early = { ...ep("pro"), data: { ...ep("pro").data, attempts: 1 } };
+    const b = await boot({ branch: [early] });
+    await b.commands["tutor-level"].handler("90", b.ctx);
+    await b.commands["tutor-fix"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toBe("noted: the fix comes after 3 more tries on this spot");
+    expect(episodes(b.entries).at(-1)).toMatchObject({ fixAsked: true });
+    const late = await boot({ branch: [ep("pro")] });
+    await late.commands["tutor-level"].handler("90", late.ctx);
+    await late.commands["tutor-fix"].handler("", late.ctx);
+    expect(late.notes.at(-1)).toBe("the next reply shows the fix for this spot");
+  });
   it("other levels and no episode: a note, nothing changes", async () => {
     const b = await boot({ branch: [ep("beginner")] });
     await b.commands["tutor-level"].handler("10", b.ctx);
@@ -2080,6 +2109,24 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     await b.commands["tutor-checker"].handler("nvidia/z-ai/glm-5.3-flash", b.ctx);
     return calls;
   };
+  it("phase 1 minor M5: /new starts clean: a rewrite owed by the old session never fires in the new one", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const leak = reply("Change it to `return total / people`.");
+    await turn(b.events, b.ctx, "help", leak);
+    expect(textOf(leak)).toBe(REWRITE_TEXT);
+    await b.events["session_start"]({ type: "session_start", reason: "new" }, b.ctx);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite")).toHaveLength(0);
+  });
+  it("phase 1 minor M4: a hint (plain sentences) is never folded, even with a bold label in it", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const r = reply("Look at line 2 of `split_amount`.\n**Tip**: what does the star do to 50 and 4?");
+    await turn(b.events, b.ctx, "help", r);
+    expect(textOf(r)).toContain("Look at line 2 of `split_amount`.");
+  });
   it("the checker is off by default: a reply that passes code's checks costs no extra call", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);

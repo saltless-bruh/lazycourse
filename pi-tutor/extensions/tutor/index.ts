@@ -430,6 +430,9 @@ export default function (pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     closing = false;
     session = ctx;
+    // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
+    // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
+    rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
@@ -769,6 +772,8 @@ export default function (pi: ExtensionAPI): void {
   // the saved session and the model's next context see it. Fences (the judgment block) are kept.
   /** A teaching turn: its reply is held off screen while it streams and checked before it is shown. */
   const held = () => run !== null && run.step !== null && !onboardingActive();
+  /** Phase 1 minor M4: a hint or a question is plain sentences, so a bold label in it is no heading to fold to. */
+  const folds = () => held() && run!.step !== "hint" && run!.step !== "ask";
   const guarded = () => held() && run!.step !== "fix";
   /**
    * Habits Task 19 (spec 2026-10-26 §9): `/tutor-checker <provider/model>` names a second model that reads a held
@@ -838,7 +843,7 @@ export default function (pi: ExtensionAPI): void {
     paneWidth = c.availableWidth;
     if (held() && c.isStreaming) return HOLD_TEXT;
     const shown = hideJudgment(scrubInternals(md));
-    return held() ? foldPreamble(shown) : shown;
+    return folds() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", async (event, ctx) => {
     const m = event.message;
@@ -853,7 +858,7 @@ export default function (pi: ExtensionAPI): void {
     let changed = false;
     let content = m.content.map((c) => {
       if (c.type !== "text") return c;
-      const text = held() ? foldPreamble(scrubInternals(c.text)) : scrubInternals(c.text);
+      const text = folds() ? foldPreamble(scrubInternals(c.text)) : scrubInternals(c.text);
       if (text === c.text) return c;
       changed = true;
       return { ...c, text };
@@ -1155,7 +1160,9 @@ export default function (pi: ExtensionAPI): void {
           language: lang, root: proj.path, vocab, size: a.size, topic: a.topic, sandbox: sandboxHost(),
         });
         setRole(DEFAULT_ROLE); // spec §3: another role command ends the architect role
-        exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts };
+        let tests: string | undefined;
+        try { tests = readFileSync(join(proj.path, made.dir, lay.tests), "utf8"); } catch { tests = undefined; }
+        exam = { id: made.id, dir: made.dir, language: lang, topic: a.topic, size: a.size, started: Date.now(), limit: LIMIT_MIN[a.size], concepts: made.spec.concepts, ...(tests !== undefined ? { tests } : {}) };
         saveExam(exam);
         examClock();
         paint();
@@ -1181,7 +1188,18 @@ export default function (pi: ExtensionAPI): void {
       try { brief = readFileSync(join(dir, "brief.md"), "utf8"); } catch { ctx.ui.notify(`${e.dir}/brief.md is missing; /tutor-exam off and start a new exam`, "error"); return; }
       const ids = briefIds(brief);
       ctx.ui.notify("running the example tests…", "info");
-      const test = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir, { sandbox: sandboxHost() });
+      // M8 minor M3: tests the learner edited never grade. In the sandbox the tests as written are laid over the
+      // throwaway copy; without it the grade says it ran the edited ones.
+      const testsFile = layout(e.language)?.tests;
+      let nowTests: string | undefined;
+      try { nowTests = testsFile ? readFileSync(join(dir, testsFile), "utf8") : undefined; } catch { nowTests = undefined; }
+      const edited = testsFile !== undefined && e.tests !== undefined && nowTests !== e.tests;
+      const host = sandboxHost();
+      const runTest = await runExamTests((c, a, o) => pi.exec(c, a, o), e.language, dir, { sandbox: host, ...(edited && host ? { overlay: { [testsFile!]: e.tests! } } : {}) });
+      const editNote = !edited ? "" : host ? `${testsFile} was changed after the exam began; these results come from the tests as written.`
+        : `${testsFile} was changed after the exam began and the sandbox is off, so these results come from the changed tests.`;
+      // At the end: grade.md shows the last 30 lines of the output.
+      const test = editNote ? { ...runTest, out: `${runTest.out}\n\n${editNote}` } : runTest;
       if (test.missing) { ctx.ui.notify(`${test.missing} The exam stays open.`, "warning"); return; }
       const files = learnerFiles(dir, e.language);
       const minutes = Math.round((Date.now() - e.started) / 6000) / 10;
@@ -1826,7 +1844,12 @@ export default function (pi: ExtensionAPI): void {
       if (bandFor(level()) !== "pro") { ctx.ui.notify("the fix comes after a few tries on the same spot", "info"); return; }
       episode = { ...episode, fixAsked: true };
       pi.appendEntry("tutor_episode", episode);
-      ctx.ui.notify("the next reply shows the fix for this spot", "info");
+      // Phase 1 minor M1: at pro the fix still waits for the question step; say how many tries that is.
+      const ep = episode;
+      let more = 0;
+      while (more < 20 && stepFor({ ...ep, attempts: ep.attempts + more }, { exam: exam !== null }) !== "fix") more++;
+      if (exam) { ctx.ui.notify("during an exam the tutor never gives the fix (spec §11a); it stays noted for after", "info"); return; }
+      ctx.ui.notify(more === 0 ? "the next reply shows the fix for this spot" : `noted: the fix comes after ${more} more ${more === 1 ? "try" : "tries"} on this spot`, "info");
     },
   });
 

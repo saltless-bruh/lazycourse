@@ -32,7 +32,10 @@ export function turnInstruction(step: TurnStep): string {
 
 /** Shown when every re-ask of a reply failed its check: written by code, so it can never hold code or the fix. */
 export function fallbackReply(step: TurnStep, spot?: string): string {
-  const at = spot ? ` (${spot.replace(/`/g, "").slice(0, 120)})` : "";
+  // Phase 1 minor M6: shown as plain text. `*`, `[`, `]` and a word-edge `_` would render as Markdown; an
+  // underscore inside a name (split_amount) never does, so it stays as the learner saw it.
+  const plain = (t: string) => t.replace(/`/g, "").replace(/([*[\]])/g, "\\$1").replace(/(^|[^A-Za-z0-9])_|_(?=[^A-Za-z0-9]|$)/g, (m) => m.replace("_", "\\_"));
+  const at = spot ? ` (${plain(spot.slice(0, 120))})` : "";
   switch (step) {
     case "teach": return "Tell me which step you are on and what you tried so far, and I will show the idea on a small example.";
     case "hint": return `Look again at the spot the last run points to${at}: what does that part do with its values? Change it, then run again.`;
