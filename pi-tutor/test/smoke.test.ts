@@ -1655,6 +1655,20 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       await b.events["message_start"](user("P1.T1 is the tip box"), b.ctx);
       expect(step()).toBe(2);
     });
+    it("Phase 8 A14, A16: a right-click ask never moves the recipe; a step code recognised is not moved again by the reply's step_done", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      const stepDone = assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "none", episode_closed: false, step_done: true }) + "\n```");
+      expect(step()).toBe(1);
+      await turn(b.events, b.ctx, "[ask-error] src/main.py:3: NameError: name 'x' is not defined | code: # P1.T1 tip", judged("none"));
+      expect(step()).toBe(1);
+      await turn(b.events, b.ctx, "P1.T1 is the tip box", stepDone);
+      expect(step()).toBe(2);
+    });
     it("final review M10: a plan sent as the first message of the talking test is taken as the plan", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");

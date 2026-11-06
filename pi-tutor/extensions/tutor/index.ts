@@ -652,7 +652,8 @@ export default function (pi: ExtensionAPI): void {
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
 
-  /** Move the design recipe on one step when `stepDone`; persists it and drops it once finished. */
+  /** Phase 8 A16: the learner's message moved the recipe since the last judgment. */
+  let recipeMovedByCode = false;
   /** Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. */
   function recipeStep(prompt: string) {
     const w = workflow;
@@ -660,6 +661,7 @@ export default function (pi: ExtensionAPI): void {
     if (w.step === 3) void addExampleChecks(prompt, w.task);
     rememberOwnStep(w.task, w.step);
     advanceWorkflow(true);
+    recipeMovedByCode = true;
     paint();
   }
 
@@ -715,7 +717,10 @@ export default function (pi: ExtensionAPI): void {
     pi.appendEntry("tutor_judgment", j);
     // Spec 2026-10-21 §7: tasks are ticked from evidence (/tutor-done), never by the model; task_done_ids is ignored.
     const ladder = roleNamed(activeRole).ladder;
-    if (ladder) advanceWorkflow(j.step_done);
+    // Phase 8 A16: one step per reply — when code already moved the recipe on the learner's message, the reply's
+    // step_done is about that same step.
+    if (ladder) advanceWorkflow(j.step_done && !recipeMovedByCode);
+    recipeMovedByCode = false;
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     // M3 #17: the reply answered an episode an editor trigger has since replaced (or, M6c M6, none:
     // the run started without one and an editor episode opened mid-reply).
@@ -747,7 +752,8 @@ export default function (pi: ExtensionAPI): void {
     // evidence); a right-click question stays a question.
     const talking = stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask");
     if (talking && prompt && !prompt.startsWith(TUTOR_PREFIX) && !prompt.startsWith("[ask-error]")) { stepUpTurn(prompt); return; }
-  if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX)) recipeStep(prompt);
+  // Phase 8 A14: a right-click ask carries the code it points at, which is no recipe step of the learner's.
+  if (workflow && prompt && !prompt.startsWith(TUTOR_PREFIX) && !prompt.startsWith("[ask-error]")) recipeStep(prompt);
   const asked = /^\[ask-error\] (.+?):(\d+): (.*?) \| code: /.exec(prompt);
   if (asked) {
     const base = project?.path ?? session?.cwd;

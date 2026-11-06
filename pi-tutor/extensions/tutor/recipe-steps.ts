@@ -4,7 +4,8 @@ import { VALUE_LANGUAGES, type Check } from "./checks.js";
 
 const ARROW = /\s(?:→|->)\s/;
 const lines = (t: string) => t.split("\n").map((l) => l.trim()).filter(Boolean);
-const CALL_ROW = /^(?:edge(?: case)?:\s*)?([A-Za-z_][\w.:]*\s*\(.*\))\s*(?:→|->)\s*(.+)$/i;
+// Phase 8 A15: `f(x) = y` and `f(x) == y` are rows too.
+const CALL_ROW = /^(?:edge(?: case)?:\s*)?([A-Za-z_][\w.:]*\s*\(.*\))\s*(?:→|->|==?)\s*(.+)$/i;
 
 const SHAPE: Record<string, RegExp> = {
   rust: /\bfn\s+\w+\s*\([^)]*:[^)]*\)\s*->\s*\S/,
@@ -32,7 +33,8 @@ export function recognize(step: number, learnerText: string, o: { language: stri
     case 4: {
       if (learnerText.includes("```")) return false;
       const numbered = ls.filter((l) => /^\d+[.)]\s+\S/.test(l));
-      return numbered.length >= 2 && !numbered.some((l) => /[A-Za-z_]\w*\s*\(|[=*/+]|\breturn\b/.test(l.replace(/^\d+[.)]\s+/, "")));
+      // Phase 8 A15: a numbered question ("1. what do I take first?") asks, it is no step.
+      return numbered.length >= 2 && !numbered.some((l) => /[A-Za-z_]\w*\s*\(|[=*/+]|\breturn\b|\?$/.test(l.replace(/^\d+[.)]\s+/, "")));
     }
     case 5: return ls.filter((l) => /^[A-Za-z][\w ,'-]*[A-Za-z]\s+(?:→|->)\s+\S/.test(l) && l.split(/\s+/).length >= 3).length >= 2;
     default: return false;

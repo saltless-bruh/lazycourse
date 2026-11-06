@@ -51,3 +51,15 @@ describe("examplesToChecks: the learner's Examples rows become value checks", ()
     expect(examplesToChecks("splitAmount(50, 3) → 16.67", "P1.T1", "c", 1)).toEqual([]); // habits Task 23: JS/TS have function checks now
   });
 });
+
+describe("Phase 8 A15: steps recognised more exactly", () => {
+  it("numbered questions are not Steps", () => {
+    expect(recognize(4, "1. what do I take first?\n2. should I divide it?", py)).toBe(false);
+    expect(recognize(4, "1. take the total\n2. what next?", py)).toBe(false);
+  });
+  it("`f(x) = y` and `f(x) == y` are Examples rows, and become checks", () => {
+    expect(recognize(3, "split_amount(48, 3) = 16.0\nedge: split_amount(0, 3) == 0.0", py)).toBe(true);
+    expect(examplesToChecks("split_amount(48, 3) = 16.0\nedge: split_amount(0, 3) == 0.0", "P1.T1", "python", 1).map((c) => [c.expr, c.expected]))
+      .toEqual([["split_amount(48, 3)", "16.0"], ["split_amount(0, 3)", "0.0"]]);
+  });
+});
