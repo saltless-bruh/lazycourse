@@ -186,6 +186,11 @@ describe("attempt spots (spec 2026-10-21 §5)", () => {
     expect(isSyntaxError("error: expected one of `,`, `:`, or `}`, found `{`")).toBe(true);
     expect(isSyntaxError("error: unexpected closing delimiter: `}`")).toBe(true);
     expect(isSyntaxError("error: mismatched closing delimiter: `)`")).toBe(true);
+    expect(isSyntaxError("lua: src/main.lua:7: syntax error near <eof>")).toBe(true);
+    expect(isSyntaxError("syntax error: unexpected newline, expected comma or } (main.go:5)")).toBe(true); // the compiled harness's form
+    // Phase 8 A3: a function that returns or raises the text "syntax error" is the learner's program, not a typo.
+    for (const t of ["ValueError: syntax error", "lua: src/main.lua:9: syntax error", "check gave 'syntax error', expected 'ok'", "Error: syntax error in the formula"])
+      expect(isSyntaxError(t), t).toBe(false);
     for (const t of ["NameError: name 'totl' is not defined", "TypeError: total is not a function", "lua: src/main.lua:4: attempt to call a nil value (global 'splt')", "error[E0308]: mismatched types", "split_amount(48, 3) gave 144, expected 16.0", "ValueError: could not convert string to float: 'abc'"])
       expect(isSyntaxError(t), t).toBe(false);
   });

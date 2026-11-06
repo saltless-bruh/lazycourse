@@ -61,7 +61,9 @@ interface ErrorWatch { line: number; msg: string; since: number; fired: boolean 
 const SYNTAX = [
   /^\s*(SyntaxError|IndentationError|TabError)\b/m,
   /'[^']*' expected near |unexpected symbol near |unfinished (string|long string|long comment) near /,
-  /\bsyntax error\b/,
+  // Go (`main.go:5:2: syntax error: …`) and Lua (`main.lua:7: syntax error near <eof>`) as their tools print it, or
+  // at the start as the compiled harness passes it on. Phase 8 A3: never the text "syntax error" a program gives.
+  /(^|:\d+(:\d+)?: )syntax error(: | near )/m,
   /^error: (expected|unexpected|mismatched closing delimiter|this file contains an unclosed delimiter)\b/m,
 ];
 export function isSyntaxError(trace: string): boolean {
