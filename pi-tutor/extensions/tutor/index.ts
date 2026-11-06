@@ -168,6 +168,8 @@ function modelComplete(ctx: ExtensionContext, label: () => string): Complete {
  */
 const specRunning = new Set<string>();
 const checksRunning = new Set<string>();
+/** Phase 8 B2: project path → the task whose improve-it checks are being written in the background. */
+const improvePreparing = new Map<string, string>();
 
 export default function (pi: ExtensionAPI): void {
   // pi-tutor is installed globally; only the Pi that nvim-tutor starts is the tutor.
@@ -1401,11 +1403,15 @@ export default function (pi: ExtensionAPI): void {
       let st: ImproveState | null = null;
       profileWrite(() => { try { st = JSON.parse(p.setting(improveKey(root)) ?? "null"); } catch { st = null; } });
       const running = st as ImproveState | null;
+      const preparing = improvePreparing.get(root);
       if (arg === "off") {
         profileWrite(() => p.setSetting(improveKey(root), ""));
-        ctx.ui.notify(running ? `the improve-it task for ${running.task} dropped` : "no improve-it task is running", "info");
+        improvePreparing.delete(root);
+        const task = running?.task ?? preparing;
+        ctx.ui.notify(task ? `the improve-it task for ${task} dropped` : "no improve-it task is running", "info");
         return;
       }
+      if (preparing) { ctx.ui.notify(`the improve-it checks for ${preparing} are still being written; you can keep working, or /tutor-improve off`, "info"); return; }
       if (proj.language !== "python") { ctx.ui.notify("improve-it measures Python code for now", "info"); return; }
       if (exam && arg !== "done") { ctx.ui.notify("improve-it waits until the exam is over (/tutor-submit)", "info"); return; }
       if (running && arg !== "done") { ctx.ui.notify(`an improve-it task for ${running.task} is running: /tutor-improve done, or /tutor-improve off first`, "info"); return; }
@@ -1453,23 +1459,36 @@ export default function (pi: ExtensionAPI): void {
       const beforeSource = pythonSources(root);
       if (beforeSource[entry] === undefined) { ctx.ui.notify(`cannot read ${entry}`, "warning"); return; }
       const line = tasksMd.split("\n").find((l) => l.includes(` ${id} `)) ?? id;
-      ctx.ui.notify(`writing edge-case and timing checks for ${id}…`, "info");
-      const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext;
-      const text = await rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS))(systemText("improve"),
-        improvePrompt({ taskLine: line, checks: checks.map((c) => c.kind === "value" ? `check ${c.task}: ${c.expr} == ${c.expected}` : `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}`) }));
-      const parsed = parseChecks(text, { language: "python", taskIds: [id], milestone: checks[0].milestone }).checks.filter((c) => c.kind !== "io");
-      const extra = (await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: "python", entry, runCmd: null, reference, checks: parsed, root }))
-        .filter((c) => c.status === "trusted");
-      const functions = calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : [])));
-      const before = await measure(root, entry, { checks, extra, functions }, undefined, beforeSource);
-      if (before.missing || !before.m) { ctx.ui.notify(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
-      if (before.failed) { ctx.ui.notify(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
-      const next: ImproveState = { task: id, checks, extra, functions, before: before.m, beforeSource };
-      profileWrite(() => p.setSetting(improveKey(root), JSON.stringify(next)));
-      const timed = extra.find((c) => c.kind === "timed")?.expr ?? null;
-      ctx.ui.notify(`improve ${id}: make the working code better — faster, simpler, or right on more edge cases. `
-        + `measured now: ${measuredLine(before.m, extra.filter((c) => c.kind === "value").length, timed)}. `
-        + "The task's checks must still pass. /tutor-improve done measures it again; /tutor-improve off drops it.", "info");
+      // Phase 8 B2: the model writes the checks in the background, outside the command lock, so /tutor-done and the
+      // other commands keep working meanwhile (it can take up to 30 min); /tutor-improve off drops it.
+      ctx.ui.notify(`writing edge-case and timing checks for ${id} in the background…`, "info");
+      const frozen = { model: ctx.model, modelRegistry: ctx.modelRegistry } as ExtensionContext, mine = generation;
+      const say = (text: string, level: "info" | "warning") => { if (generation === mine) ui?.notify(text, level); };
+      improvePreparing.set(root, id);
+      void (async () => {
+        try {
+          const text = await rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS))(systemText("improve"),
+            improvePrompt({ taskLine: line, checks: checks.map((c) => c.kind === "value" ? `check ${c.task}: ${c.expr} == ${c.expected}` : `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}`) }));
+          const parsed = parseChecks(text, { language: "python", taskIds: [id], milestone: checks[0].milestone }).checks.filter((c) => c.kind !== "io");
+          const extra = (await crossCheckOnReference({ exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: "python", entry, runCmd: null, reference, checks: parsed, root }))
+            .filter((c) => c.status === "trusted");
+          const functions = calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : [])));
+          const before = await measure(root, entry, { checks, extra, functions }, undefined, beforeSource);
+          if (improvePreparing.get(root) !== id) return; // dropped with /tutor-improve off
+          if (before.missing || !before.m) { say(before.missing ?? "your file does not parse, so it could not be measured", "warning"); return; }
+          if (before.failed) { say(`${id}'s checks fail now; make it work again before improving it`, "warning"); return; }
+          const next: ImproveState = { task: id, checks, extra, functions, before: before.m, beforeSource };
+          withProfile((pr) => pr.setSetting(improveKey(root), JSON.stringify(next)));
+          const timed = extra.find((c) => c.kind === "timed")?.expr ?? null;
+          say(`improve ${id}: make the working code better — faster, simpler, or right on more edge cases. `
+            + `measured now: ${measuredLine(before.m, extra.filter((c) => c.kind === "value").length, timed)}. `
+            + "The task's checks must still pass. /tutor-improve done measures it again; /tutor-improve off drops it.", "info");
+        } catch (e) {
+          say(`the improve-it checks for ${id} could not be written: ${e instanceof Error ? e.message : String(e)}; /tutor-improve ${id} tries again`, "warning");
+        } finally {
+          if (improvePreparing.get(root) === id) improvePreparing.delete(root);
+        }
+      })();
     }),
   });
 

@@ -20,6 +20,12 @@ const until = (f: () => boolean, ms = 5000) => new Promise<void>((res, rej) => {
   const t0 = Date.now();
   const id = setInterval(() => { if (f()) { clearInterval(id); res(); } else if (Date.now() - t0 > ms) { clearInterval(id); rej(new Error("timeout")); } }, 25);
 });
+/** Phase 8 B2: /tutor-improve <task> writes its checks in the background; wait until it says how it went. */
+async function startImprove(b: { notes: string[]; commands: Record<string, { handler: (a: string, c: unknown) => Promise<void> }>; ctx: unknown }, id = "P2.T2") {
+  const n = b.notes.length;
+  await b.commands["tutor-improve"].handler(id, b.ctx);
+  await until(() => b.notes.slice(n).some((x) => /^improve \S+:|could not|checks fail now|does not parse/.test(x)), 60000);
+}
 
 /** Boot linked to a fresh headless Neovim at beginner level (error threshold 0) and open a file in the root. */
 async function linked(busy = false, branch: (root: string) => unknown[] = () => []) {
@@ -562,7 +568,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-level"].handler("70", b.ctx);
     writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items: `count_unique(items)`\n- [ ] P2.T3 print\n");
     b.replies.push("check P2.T2: count_unique([]) == 0\ntimed P2.T2: count_unique(list(range(20000)))");
-    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await startImprove(b);
     expect(b.notes.at(-1)).toMatch(/measured now: longest function 5 statements · nesting 2 · branches 2/);
     writeFileSync(join(root, "src", "helpers.py"), "def unique(items):\n    return list(dict.fromkeys(items))\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
@@ -577,7 +583,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/no improve-it task is running: \/tutor-improve <ticked task id> starts one/);
     b.replies.push("check P2.T2: count_unique([]) == 0\ncheck P2.T2: count_unique([3, 3, 3]) == 1\ntimed P2.T2: count_unique(list(range(20000)))");
-    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await startImprove(b);
     expect(b.notes.at(-1)).toMatch(/improve P2\.T2: .*measured now: longest function 5 statements · nesting 2 · branches 2 · edge cases 2\/2 · count_unique\(list\(range\(20000\)\)\) \d+ ms\. The task's checks must still pass.*\/tutor-improve done/s);
     writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return 0\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
@@ -591,7 +597,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     // final review I3: make it worse, start again, undo it — a repeat on the same task never counts twice
     writeFileSync(join(root, "src", "main.py"), SLOW);
     b.replies.push("check P2.T2: count_unique([]) == 0");
-    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await startImprove(b);
     writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items))\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: .*\(optimizes counts once per task; P2\.T2 already counted\)/);
@@ -603,7 +609,7 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
       { reference: "def count_unique(items):\n    return len(set(items))\n" });
     writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items\n");
     b.replies.push("timed P2.T2: count_unique(list(range(20000)))");
-    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await startImprove(b);
     // the first timing happened in a busy moment: ten times slower than the code really is
     const { Profile } = await import("../extensions/tutor/profile.js");
     const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
@@ -623,17 +629,39 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
       writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items))\n"); // the learner, too early
       return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "check P2.T2: count_unique([]) == 0" }] };
     };
-    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await startImprove(b);
     expect(b.notes.at(-1)).toMatch(/measured now: longest function 5 statements · nesting 2 · branches 2/);
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: longest function: 5 → 1 statements/);
   }, 180000);
+  it("Phase 8 B2: while the improve-it checks are written, other commands work; done waits; off drops it", async () => {
+    const { b, root } = await doneProject("def count_unique(items):\n    return len(set(items))\n", [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items\n- [ ] P2.T3 print\n");
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => { await held; return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "check P2.T2: count_unique([]) == 0" }] }; };
+    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/in the background/);
+    await b.commands["tutor-done"].handler("P2.T3 anyway", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T3/); // not "an exam command is still running"
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/still being written/);
+    await b.commands["tutor-improve"].handler("off", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve-it task for P2\.T2 dropped/);
+    release();
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(b.notes.some((n) => /^improve P2\.T2:/.test(n))).toBe(false);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    expect(p.setting(`improve:${root}`) || null).toBeNull(); p.close();
+  }, 120000);
   it("improve it (Task 17): something worse is no optimizes; /tutor-improve off drops it", async () => {
     const { b, root } = await doneProject("def count_unique(items):\n    return len(set(items))\n", [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
       { reference: "def count_unique(items):\n    return len(set(items))\n" });
     writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items\n");
     b.replies.push("check P2.T2: count_unique([]) == 0");
-    await b.commands["tutor-improve"].handler("P2.T2", b.ctx);
+    await startImprove(b);
     writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    n = 0\n    for i, x in enumerate(items):\n        if x not in items[:i]:\n            n += 1\n    return n\n");
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/P2\.T2 is not better yet: worse: longest function: 1 → 5 statements · nesting: 0 → 2 · branches: 0 → 2/);
