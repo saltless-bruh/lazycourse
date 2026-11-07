@@ -451,6 +451,24 @@ describe("tutor.init", function()
     assert.is_nil(tutor.state.run_job)
   end)
 
+  it("quitting a run with Ctrl+C is not a failed try (side-agent note)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    -- a loop that only ends when the learner quits it, like a guessing game
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false,
+      run_cmd = { "sh", "-c", 'trap "exit 130" INT; while true; do sleep 0.1; done' } })
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("TutorRun")
+    local job = tutor.state.run_job
+    vim.wait(300)
+    vim.fn.chansend(job, "\3")
+    assert.are_not.equal(-1, vim.fn.jobwait({ job }, 2000)[1])
+    vim.wait(300)
+    assert.same({}, sent)
+    assert.is_nil(tutor.state.run_job)
+  end)
+
   it(":TutorRun test can never hang (stdin is empty)", function()
     package.loaded["tutor"] = nil
     local tutor = require("tutor")

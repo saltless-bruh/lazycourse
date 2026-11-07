@@ -129,6 +129,12 @@ function M.run(kind)
   if kind == "run" then
     local pane, why = runpane.start(argv, opts.cwd, function(code, lines, id)
       if stopped[id] then stopped[id] = nil return end
+      -- Side-agent note: Ctrl+C in the split (exit 130, Python's KeyboardInterrupt) is the learner quitting the
+      -- program, like :TutorRun stop: never a failed try.
+      if code == 130 then
+        vim.notify("[tutor] run stopped", vim.log.levels.INFO)
+        return
+      end
       report(code, table.concat(lines, "\n"), "")
     end, function(id)
       if M.state.run_job == id then M.state.run_job = nil end
