@@ -26,6 +26,7 @@ import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
 import { COMMANDS_NOTE, WELCOME } from "./commands-note.js";
+import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
@@ -202,7 +203,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -620,6 +621,12 @@ export default function (pi: ExtensionAPI): void {
       const sources = projectSources(root);
       if (snap && realCwd(snap.path).startsWith(root + "/")) sources.push(snap.lines.join("\n"));
       run.names = ownNames({ tasksMd, sources });
+      // Learner-session fixes (spec §5): the current task's words — the recipe's task, the episode's, else the first
+      // open one — or, before a plan, the README's title and first paragraph (the project's own words).
+      const current = workflow?.task ?? (episode?.spot?.startsWith("check:") ? episode.spot.split(":")[1] : null) ?? (tasksMd ? openTaskIds(tasksMd)[0] ?? null : null);
+      const taskLine = current && tasksMd ? findTask(tasksMd, current) : null;
+      const about = taskLine ?? projectAbout(root);
+      run.taskTerms = about ? taskTerms(about) : undefined;
       // The failed run's output is what the learner saw too: quoting it is not a leak.
       const trace = episode?.trigger.kind === "run" ? episode.trigger.trace : "";
       run.sourceLines = [...sources, trace].flatMap((t) => t.split(/\r?\n/));
@@ -630,6 +637,7 @@ export default function (pi: ExtensionAPI): void {
         profileWrite(() => { state = readChecksState(p.setting(key)); });
         const k = Object.keys(state.milestones).map(Number).filter((n) => n <= now).sort((a, b) => b - a)[0];
         run.referenceLines = k ? state.milestones[k].reference.split(/\r?\n/) : [];
+        run.referenceCode = k ? state.milestones[k].reference : undefined;
         // Final review C1: a fix in words is judged on a failed check only, inside the function it calls.
         const fn = episode?.spot?.startsWith("check:") ? calledName(episode.spot.split(":").slice(2).join(":")) : null;
         run.proseScope = fn ? { referenceLines: functionLines(run.referenceLines, fn), sourceLines: functionLines(sources.flatMap((t) => t.split(/\r?\n/)), fn) } : undefined;
@@ -929,7 +937,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
@@ -2122,6 +2130,14 @@ export default function (pi: ExtensionAPI): void {
     if (o.stage === "choose") return !!project && project.path === o.dir;
     return onboardingHere || !project;
   };
+  /** The project README's title and first paragraph (front matter skipped): its own words before a plan exists. */
+  function projectAbout(root: string): string | null {
+    let text: string;
+    try { text = readFileSync(join(root, "README.md"), "utf8"); } catch { return null; }
+    const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+    const paras = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    return paras.length ? paras.slice(0, 2).join("\n") : null;
+  }
   /**
    * Spec §2: nothing known yet — onboarding never written (a finished one is saved as ""), no project here, no
    * language in the profile.

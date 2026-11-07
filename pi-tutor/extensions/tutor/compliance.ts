@@ -3,6 +3,7 @@ import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import type { TurnStep } from "./ladder.js";
 import { turnInstruction, TURN_LIMITS } from "./turns.js";
+import { termHits, windowOverlap } from "./similarity.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -276,7 +277,12 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 
 /** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
  *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
-export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } }): TurnIssue[] {
+/** Fence tags that mark code (not a diagram, a quote or a note) for the structural leak check (spec §5). */
+const CODE_TAGS = new Set(["python", "py", "javascript", "js", "typescript", "ts", "lua", "rust", "rs", "go", "golang"]);
+
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] };
+  /** Learner-session fixes (spec §5): the hidden solution's code, and the task's (or project's) content words. */
+  referenceCode?: string; taskTerms?: Set<string> }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
@@ -296,6 +302,8 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     // Final review I1: a ```markdown fence is checked too (style.md asks for quotes in one); its text also counts as prose.
     if (QUOTES.has(tag)) quotedProse += `\n${m[3]}`;
     if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
+    // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
+    if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }
   const prose = text.replace(FENCES, "") + quotedProse;
   // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).

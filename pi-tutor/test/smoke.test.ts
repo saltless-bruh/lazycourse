@@ -2277,6 +2277,31 @@ describe("held replies (spec 2026-10-21 §6)", () => {
       expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["own-code"] });
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
   });
+  it("learner-session fixes Task 6: an 'unrelated' example that is a script task's answer renamed is held (the session's case)", async () => {
+    // A beginner's script task names no function, so the old name check had nothing to protect.
+    const dir = mkd(pjoin(tmp(), "pitutor-held-script-"));
+    mkdir(pjoin(dir, "src")); mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "src", "main.py"), "");
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Generate random secret number and store in variable src/main.py done when: secret_number is int 1-100\n");
+    const b = await boot({ cwd: dir, branch: [ep(1)] });
+    await level10(b);
+    const leak = reply("Picking one works like this:\n\n```python\nimport random\nnumber = random.randint(1, 100)\n```\n\nWhat would yours look like?");
+    await turn(b.events, b.ctx, "help", leak);
+    expect(textOf(leak)).toBe(REWRITE_TEXT);
+    const fine = reply("Picking one works like this:\n\n```python\nimport random\ndie = random.randint(1, 6)\n```\n\nWhat would yours look like?");
+    await turn(b.events, b.ctx, "help", fine);
+    expect(textOf(fine)).not.toBe(REWRITE_TEXT);
+  });
+  it("learner-session fixes Task 6: before a plan, an example that is the project itself is held (the README's words)", async () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-held-noplan-"));
+    mkdir(pjoin(dir, "src"));
+    wfile(pjoin(dir, "README.md"), "---\nrun: python3 src/main.py\nlanguage: python\n---\n# Number Guessing Game\n\nPrompt the user to guess a randomly generated number\n");
+    const b = await boot({ cwd: dir, branch: [ep(1)] });
+    await level10(b);
+    const loop = reply("A small unrelated example:\n\n```python\nimport random\nsecret = random.randint(1, 100)\nguess = int(input('Guess: '))\nif guess < secret:\n    print('Too low')\n```\n\nWhat would you type first?");
+    await turn(b.events, b.ctx, "help", loop);
+    expect(textOf(loop)).toBe(REWRITE_TEXT);
+  });
   // Habits Task 19 (spec 2026-10-26 §9): an optional second model reads a held reply that passed code's checks.
   const checkerOn = async (b: Awaited<ReturnType<typeof boot>>, answers: (string | { stopReason: string; errorMessage: string })[]) => {
     const calls: { model: unknown; user: string; system: string; signal?: AbortSignal }[] = [];

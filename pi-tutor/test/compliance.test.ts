@@ -433,3 +433,25 @@ describe("cleanReply", () => {
     expect(replyReminder("teach")).not.toMatch(/\d+ characters/);
   });
 });
+
+// Learner-session fixes Task 6 (spec §5): an example that is the task, renamed, is held outside the fix step.
+describe("checkTurn: structural leaks", () => {
+  const terms = new Set(["generate", "random", "secret", "number"]);
+  const base = { names: new Set<string>(), sourceLines: [] as string[] };
+  const reply = (code: string) => `**Example**: a small unrelated example:\n\n\`\`\`python\n${code}\n\`\`\`\n\nWhat would you write? ` + "```tutor-judgment\n{}\n```";
+  it("holds an 'unrelated' example that uses the task's words", () => {
+    expect(checkTurn(reply("number = random.randint(1, 100)"), { ...base, step: "teach", taskTerms: terms })).toContain("own-code");
+  });
+  it("holds an example whose structure is the hidden solution's", () => {
+    const ref = "secret_number = random.randint(1, 100)\nguess = int(input('Enter: '))";
+    expect(checkTurn(reply("x = random.randint(1, 100)\ny = int(input('Go: '))"), { ...base, step: "teach", referenceCode: ref })).toContain("own-code");
+  });
+  it("lets a concept example on another domain through, and never holds the fix step", () => {
+    expect(checkTurn(reply("die = random.randint(1, 6)"), { ...base, step: "teach", taskTerms: terms })).not.toContain("own-code");
+    expect(checkTurn(reply("number = random.randint(1, 100)"), { ...base, step: "fix", taskTerms: terms })).not.toContain("own-code");
+  });
+  it("a diagram that names the task's words is not code", () => {
+    const diagram = "**What's happening**:\n\n```\npick a random secret number\n  v\nstore it\n```\n\nWhat comes next? ```tutor-judgment\n{}\n```";
+    expect(checkTurn(diagram, { ...base, step: "teach", taskTerms: terms })).not.toContain("own-code");
+  });
+});
