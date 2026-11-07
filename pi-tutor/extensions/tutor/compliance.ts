@@ -173,7 +173,7 @@ export function replyReminder(step: TurnStep | null, recipe = false): string {
   // Final review I5: a hint or a question is a few plain sentences; the five parts would fail its length check.
   const shape = step === "hint" || step === "ask"
     ? "Reply in plain sentences, no bold parts,"
-    : "Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters,";
+    : "Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagrams narrow,";
   return `[tutor-reply] ${shape} and end with the \`\`\`tutor-judgment block.${hold}${turn}`;
 }
 
@@ -311,6 +311,16 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   // Final review C1: only on a graded try with a checked function, comparing that function's lines on both sides.
   if (o.step !== "fix" && !issues.has("own-code") && o.proseScope?.referenceLines.length && proseFixLeak(raw, { ...o.proseScope, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
   return [...issues];
+}
+
+/**
+ * Learner-session fixes (spec §4): a reply the model wrapped whole in a ```markdown (or ```md) fence showed as raw
+ * text — the bold parts with their asterisks, nested fences. Only a fence around the entire reply is removed; a
+ * quoted line inside a reply stays.
+ */
+export function cleanReply(text: string): string {
+  const m = /^\s*```(?:markdown|md)[ \t]*\r?\n([\s\S]*)\r?\n```[ \t]*\s*$/.exec(text);
+  return m ? m[1] : text;
 }
 
 /** C: a weak model's planning before the reply's first heading is folded away; a reply with no heading stays. */

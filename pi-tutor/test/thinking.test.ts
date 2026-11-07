@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { parseThinkingMode, thinkingHidden, THINKING_LABEL } from "../extensions/tutor/thinking.js";
 
 describe("thinking visibility", () => {
-  it("auto hides only at pro; show and hide win over the band", () => {
+  it("auto hides on every band (learner-session fixes §4); show and hide win over the band", () => {
     expect(thinkingHidden("auto", "pro")).toBe(true);
-    expect(thinkingHidden("auto", "intermediate")).toBe(false);
-    expect(thinkingHidden("auto", "beginner")).toBe(false);
+    expect(thinkingHidden("auto", "intermediate")).toBe(true);
+    expect(thinkingHidden("auto", "beginner")).toBe(true);
     expect(thinkingHidden("show", "pro")).toBe(false);
     expect(thinkingHidden("hide", "beginner")).toBe(true);
   });
@@ -27,5 +27,13 @@ describe("guarded turns (spec 2026-10-21 §6: the thinking is where a model work
     expect(thinkingHidden("show", "beginner", true)).toBe(true);
     expect(thinkingHidden("show", "beginner", false)).toBe(false);
     expect(thinkingHidden("show", "beginner")).toBe(false);
+  });
+});
+
+describe("thinking hidden by default (learner-session fixes Task 5)", () => {
+  it("auto hides thinking on every band; show shows it", () => {
+    for (const band of ["beginner", "intermediate", "pro"] as const) expect(thinkingHidden("auto", band)).toBe(true);
+    expect(thinkingHidden("show", "beginner")).toBe(false);
+    expect(thinkingHidden("show", "beginner", true)).toBe(true); // a guarded turn still hides it
   });
 });

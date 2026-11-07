@@ -10,7 +10,7 @@ import { bandFor, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
+import { cleanReply, guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
 import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply, turnInstruction } from "./turns.js";
 /** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
 const CHECKER_TIMEOUT_MS = 180_000;
@@ -903,7 +903,8 @@ export default function (pi: ExtensionAPI): void {
     if (c.messageType !== "assistant") return md;
     paneWidth = c.availableWidth;
     if (held() && c.isStreaming) return HOLD_TEXT;
-    const shown = hideJudgment(scrubInternals(md));
+    // Learner-session fixes (spec §4): every assistant message, every turn type, onboarding included.
+    const shown = hideJudgment(scrubInternals(cleanReply(md)));
     return folds() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", async (event, ctx) => {
@@ -919,7 +920,8 @@ export default function (pi: ExtensionAPI): void {
     let changed = false;
     let content = m.content.map((c) => {
       if (c.type !== "text") return c;
-      const text = folds() ? foldPreamble(scrubInternals(c.text)) : scrubInternals(c.text);
+      const clean = cleanReply(c.text);
+      const text = folds() ? foldPreamble(scrubInternals(clean)) : scrubInternals(clean);
       if (text === c.text) return c;
       changed = true;
       return { ...c, text };
@@ -1357,7 +1359,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-thinking", {
-    description: "Show or hide the model's thinking: auto (hidden at pro) | show | hide",
+    description: "Show or hide the model's thinking: auto (hidden) | show | hide",
     handler: async (args, ctx) => {
       const shown = () => (thinkingHidden(thinking, bandFor(level())) ? "hidden" : "shown");
       if (!args.trim()) { ctx.ui.notify(`thinking: ${thinking} (${shown()} now)`, "info"); return; }

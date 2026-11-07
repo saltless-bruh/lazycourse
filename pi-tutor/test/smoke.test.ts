@@ -909,12 +909,14 @@ describe("thinking visibility (/tutor-thinking)", () => {
   afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
   const think = (t: (md: string, c: { messageType: string; isStreaming: boolean; availableWidth: number }) => string) =>
     t("The user asks about rung 2 and INDEX.md", { messageType: "assistant-thinking", isStreaming: true, availableWidth: 68 });
-  it("auto: shown below pro, a one-line label at pro", async () => {
+  it("auto: a one-line label on every band (learner-session fixes §4); show shows it", async () => {
     const b = await boot();
     const [t] = b.transformers;
-    expect(think(t)).toBe("The user asks about rung 2 and INDEX.md");
+    expect(think(t)).toBe(THINKING_LABEL);
     await b.commands["tutor-level"].handler("90", b.ctx);
     expect(think(t)).toBe(THINKING_LABEL);
+    await b.commands["tutor-thinking"].handler("show", b.ctx);
+    expect(think(t)).toBe("The user asks about rung 2 and INDEX.md");
   });
   it("hide and show override the band, persist in the profile, and bad input only warns", async () => {
     const b = await boot();
@@ -941,7 +943,7 @@ describe("thinking visibility (/tutor-thinking)", () => {
   it("with no argument it reports the current mode", async () => {
     const b = await boot();
     await b.commands["tutor-thinking"].handler("", b.ctx);
-    expect(b.notes.at(-1)).toMatch(/thinking: auto \(shown/);
+    expect(b.notes.at(-1)).toMatch(/thinking: auto \(hidden/);
   });
 });
 
@@ -1360,6 +1362,18 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     expect(b.widgets["tutor"]?.[0]).toMatch(/level not set/);
     expect(b.widgets["tutor"]?.[0]).not.toMatch(/lvl/);
     expect(b.statuses["tutor"]).toMatch(/level not set/);
+  });
+});
+
+describe("clean replies on every turn (learner-session fixes Task 5)", () => {
+  const fixture = (name: string) => readFileSync(new URL(`./fixtures/replies/${name}`, import.meta.url), "utf8");
+  it("an onboarding reply wrapped in a markdown fence is unwrapped before display, and its thinking is hidden", async () => {
+    const b = await boot();
+    await b.commands["tutor-start"].handler("python", b.ctx);
+    const shown = b.transformers[0](fixture("outer-markdown-fence.md"), { messageType: "assistant", isStreaming: false, availableWidth: 80 });
+    expect(shown).not.toContain("```markdown");
+    const thinking = b.transformers[0](fixture("onboarding-thinking.md"), { messageType: "assistant-thinking", isStreaming: false, availableWidth: 80 });
+    expect(thinking).toBe("thinking hidden · /tutor-thinking show");
   });
 });
 

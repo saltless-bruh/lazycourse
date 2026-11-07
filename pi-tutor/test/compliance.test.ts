@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
+import { readFileSync } from "node:fs";
+import { cleanReply, proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -408,5 +409,27 @@ describe("checkTurn and the hidden reference (spec 2026-10-21 §6, §7)", () => 
     expect(checkTurn("Your `return total / people` is right.", { step: "hint", names: new Set(), sourceLines: ["    return total / people"], referenceLines: reference })).not.toContain("own-code");
     expect(checkTurn("Use `x`.", { step: "hint", names: new Set(), sourceLines: [], referenceLines: ["x"] })).not.toContain("own-code");
     expect(checkTurn("Change it to `return total / people`.", { step: "fix", names: new Set(), sourceLines: [], referenceLines: reference })).not.toContain("own-code");
+  });
+});
+
+// Learner-session fixes Task 5 (spec §4): a reply the model wrapped whole in a markdown fence showed raw.
+describe("cleanReply", () => {
+  const fixture = (name: string) => readFileSync(new URL(`./fixtures/replies/${name}`, import.meta.url), "utf8");
+  it("unwraps an outer markdown fence (a real nemotron reply from the learner session)", () => {
+    const out = cleanReply(fixture("outer-markdown-fence.md"));
+    expect(out.trimStart().startsWith("**What's happening**")).toBe(true);
+    expect(out).not.toContain("```markdown");
+    expect(out).toContain("**In short**");
+  });
+  it("leaves a reply whose only fence is an inner one-line quote alone (Review Focus 5)", () => {
+    const reply = "**What's happening**: look at this line:\n\n```markdown\ntotal = price * qty\n```\n\n**In short**: the star multiplies.";
+    expect(cleanReply(reply)).toBe(reply);
+  });
+  it("a reply that only starts with a fence but goes on after it is not unwrapped", () => {
+    const reply = "```markdown\nquote\n```\nThen prose follows.";
+    expect(cleanReply(reply)).toBe(reply);
+  });
+  it("the reminder states no column count", () => {
+    expect(replyReminder("teach")).not.toMatch(/\d+ characters/);
   });
 });
