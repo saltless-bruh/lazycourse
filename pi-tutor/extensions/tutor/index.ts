@@ -24,6 +24,7 @@ import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel,
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
+import { fallbackChecks, pickFallback } from "./improve-fallback.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
@@ -1798,32 +1799,43 @@ export default function (pi: ExtensionAPI): void {
         ui?.notify(`the coding test could not be prepared: no confirmed checks for the ${unsure.join(" and ")} part${unsure.length > 1 ? "s" : ""} (is the sandbox on? /tutor-exam sandbox on). Nothing counts against you: /tutor-step-up starts again`, "warning");
         return;
       }
-      // Habits Task 17: the improve-it part — clumsy working code from the model, confirmed by the checks and
-      // measured as written. Phase 8 A8: asked once more when that fails, then the setup stops like a part with no
-      // confirmed checks (final review I5) — never a part that counts as done without the learner doing it.
+      // Habits Task 17: the improve-it part — clumsy working code, confirmed by the checks and measured as written.
+      // Phase 8 A8, option C (author 2026-11-07): the model is asked twice; when its clumsy code still does not work,
+      // a ready-made program vetted by the test suite is used (improve-fallback.ts). Never a part that counts as
+      // done without the learner doing it, and never a cancelled coding test because the model failed.
       let improve: Partial<StepUpState> & { improveClumsy?: string } = {};
       if (s.improveTask) {
+        const lines = (cs: Check[]) => cs.map((c) => (c.kind === "timed" ? `timed P1.T1: ${c.expr}` : `check P1.T1: ${c.expr} == ${c.expected}`));
+        /** Clumsy code that passes the task's trusted checks, its extra checks confirmed on the reference, measured. */
+        const finish = async (task: string, checks: Check[], reference: string, raw: string, extraFor: () => Promise<Check[]>): Promise<typeof improve | null> => {
+          const clumsy = raw.endsWith("\n") ? raw : `${raw}\n`;
+          const works = raw.trim() !== "" && (await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: clumsy, checks, root })).every((c) => c.status === "trusted");
+          if (!works) return null;
+          const extra = trustedOnly(await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference, checks: await extraFor(), root }));
+          const st = { checks, extra, functions: calledFunctions(checks.flatMap((c) => (c.expr ? [c.expr] : []))) };
+          const before = await measure(root, `stepup/improve${ext}`, st, undefined, clumsy);
+          if (!before.m || before.failed) return null;
+          return { improveTask: task, improveChecks: st.checks, improveExtra: st.extra, improveFunctions: st.functions, improveRef: reference, improveBefore: before.m, improveSource: clumsy, improveClumsy: clumsy };
+        };
         const task = s.improveTask;
-        const improvePart = async (): Promise<typeof improve | null> => {
+        const fromModel = async (): Promise<typeof improve | null> => {
           const imp = await one(task);
           const impTrusted = trustedOnly(imp.checks);
           if (!impTrusted.length) return null;
-          const raw = extractCode(await complete(systemText("step-up-clumsy"), `Language: ${lang}.\nThe task: ${task}\nIts checks:\n${impTrusted.map((c) => `check P1.T1: ${c.expr} == ${c.expected}`).join("\n")}`));
-          const clumsy = raw.endsWith("\n") ? raw : `${raw}\n`;
-          const works = raw.trim() !== "" && (await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: clumsy, checks: impTrusted, root })).every((c) => c.status === "trusted");
-          if (!works) return null;
-          const asked = await complete(systemText("improve"), improvePrompt({ taskLine: `P1.T1 ${task}`, checks: impTrusted.map((c) => `check P1.T1: ${c.expr} == ${c.expected}`) }));
-          const extra = trustedOnly(await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: imp.reference,
-            checks: parseChecks(asked, { language: lang, taskIds: ["P1.T1"], milestone: 1 }).checks.filter((c) => c.kind !== "io"), root }));
-          const st = { checks: impTrusted, extra, functions: calledFunctions(impTrusted.flatMap((c) => (c.expr ? [c.expr] : []))) };
-          const before = await measure(root, `stepup/improve${ext}`, st, undefined, clumsy);
-          if (!before.m || before.failed) return null;
-          return { improveChecks: st.checks, improveExtra: st.extra, improveFunctions: st.functions, improveRef: imp.reference, improveBefore: before.m, improveSource: clumsy, improveClumsy: clumsy };
+          const raw = extractCode(await complete(systemText("step-up-clumsy"), `Language: ${lang}.\nThe task: ${task}\nIts checks:\n${lines(impTrusted).join("\n")}`));
+          return finish(task, impTrusted, imp.reference, raw, async () =>
+            parseChecks(await complete(systemText("improve"), improvePrompt({ taskLine: `P1.T1 ${task}`, checks: lines(impTrusted) })), { language: lang, taskIds: ["P1.T1"], milestone: 1 }).checks.filter((c) => c.kind !== "io"));
         };
-        const made = (await improvePart()) ?? (await improvePart());
+        const readyMade = async (): Promise<typeof improve | null> => {
+          const f = pickFallback(s.started), parsed = fallbackChecks(f);
+          const checks = trustedOnly(await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: f.reference, checks: parsed.checks, root }));
+          return checks.length === parsed.checks.length ? finish(f.task, checks, f.reference, f.clumsy, async () => parsed.extra) : null;
+        };
+        const made = (await fromModel()) ?? (await fromModel()) ?? (lang === "python" ? await readyMade() : null);
         if (!made) {
+          // Only a sandbox that cannot run the vetted program gets here: a setup problem, not the learner's.
           saveStepUp(null);
-          ui?.notify("the coding test could not be prepared: no working clumsy version for the improve part could be confirmed. Nothing counts against you: /tutor-step-up starts again", "warning");
+          ui?.notify("the coding test could not be prepared: the improve part's code could not be run and measured here (is the sandbox on? /tutor-exam sandbox on). Nothing counts against you: /tutor-step-up starts again", "warning");
           return;
         }
         improve = made;
@@ -1841,7 +1853,7 @@ export default function (pi: ExtensionAPI): void {
         more += `4. \`stepup/test_solve${ext}\`: write tests for \`${solveFn}\` (functions named \`test_…\`, \`from solve import ${solveFn}\`). They run against a hidden solution: they must pass on it and must fail on a broken version of it.\n`;
         writeInRoot(root, `stepup/improve${ext}`, clumsy);
         const timed = improve.improveExtra?.find((c) => c.kind === "timed")?.expr ?? null;
-        more += `5. \`stepup/improve${ext}\`: ${s.improveTask} This code works but is clumsy: make it better (faster, simpler, right on more edge cases) and keep it working. measured now: ${measuredLine(improve.improveBefore, (improve.improveExtra ?? []).filter((c) => c.kind === "value").length, timed)}.\n`;
+        more += `5. \`stepup/improve${ext}\`: ${improve.improveTask ?? s.improveTask} This code works but is clumsy: make it better (faster, simpler, right on more edge cases) and keep it working. measured now: ${measuredLine(improve.improveBefore, (improve.improveExtra ?? []).filter((c) => c.kind === "value").length, timed)}.\n`;
       }
       const [solveP, fixP, planP] = (["solve", "fix", "plan"] as const).map((k) => stepUpPart(lang, k, ext));
       for (const part of [solveP, fixP, planP]) if (part.manifest) writeInRoot(root, `${part.dir}/${part.manifest.rel}`, part.manifest.text);
@@ -1980,8 +1992,9 @@ export default function (pi: ExtensionAPI): void {
           if (typeof json.talk !== "string" || typeof json.solve !== "string") throw new Error("the problems came back incomplete");
           const entry = projectRun(root, lang).entry ?? "src/main.py";
           const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
-          const improveTask = band === "intermediate" && typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve : undefined;
-          if (band === "intermediate" && !improveTask) throw new Error("the improve-it problem came back missing");
+          const given = typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve.trim() : "";
+          // Phase 8 A8, option C: no improve-it problem from the model is a ready-made one's task, not a failed setup.
+          const improveTask = band === "intermediate" ? given || pickFallback(prep.started).task : undefined;
           saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, fixTask: typeof json.fix === "string" ? json.fix : json.solve, talkRef: ref.reference, talkChecks: ref.checks, ...(improveTask ? { improveTask } : {}) });
           showStepUp(`Step-up, part 1: the talking test.\n\n${json.talk}\n\nTalk it through in your own words: what the program needs, the steps, and which pieces you would use. No code yet.`);
         } catch (e) {

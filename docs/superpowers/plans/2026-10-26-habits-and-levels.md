@@ -230,8 +230,10 @@ Phase 7, from the ledger and the project memory, each fixed with a failing test 
   and its reference folder gets `package.json`; the checks job runs once after `/new` and saves its result; a
   program's own "syntax error" text is no typo; the Lua harness works on 5.1/LuaJIT; a JS class instance matches
   the literal of its fields; brackets in JS templates, Go raw strings and Lua long strings are text; only
-  check-solved ticks count down the retake; the improve part is asked twice, then the coding test is not set up
-  (never a free pass); an intermediate step-up saved without its tests/improve parts starts again; improve-it
+  check-solved ticks count down the retake; the improve part is asked twice, then a ready-made program is used
+  (author's choice C, 2026-11-07: `improve-fallback.ts`, six Python programs vetted by
+  `test/improve-fallback.test.ts`; also when the model gives no improve-it task) — never a free pass, never a
+  cancelled coding test; an intermediate step-up saved without its tests/improve parts starts again; improve-it
   measures and times helpers in other files; Rust `#[cfg(test)]` protects only the item it marks; a question
   naming another task is that task's; the fix during an exam is the learner's own; a right-click ask never moves
   the recipe; numbered questions are not Steps; `f(x) = y` is an Example; one recipe step per reply.

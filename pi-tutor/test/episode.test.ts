@@ -407,7 +407,29 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("submit", b.ctx);
     expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 67/);
   }, 180000);
-  it("Phase 8 A8: an improve part with no clumsy version that works is asked once more, then stops the setup — never a free pass", async () => {
+  it("Phase 8 A8 (option C): an intermediate step-up whose problems come without an improve-it task takes a ready-made task", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("40", b.ctx);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const { IMPROVE_FALLBACKS } = await import("../extensions/tutor/improve-fallback.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.intermediate) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const replies = [JSON.stringify({ talk: "Write `top_word(text)` returning the most frequent word.", solve: "Write `weekday(iso)`.", fix: "Write `tip(total)`." }),
+      "check P1.T1: top_word('a b a') == 'a'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```"];
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] });
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
+    expect(b.notes.some((n) => /could not be prepared/.test(n))).toBe(false);
+    const q = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const saved = JSON.parse(q.setting(`stepup:${root}`) ?? "{}") as { improveTask?: string };
+    q.close();
+    expect(IMPROVE_FALLBACKS.map((f) => f.task)).toContain(saved.improveTask);
+  }, 120000);
+  it("Phase 8 A8 (option C): a model that cannot write a working clumsy version twice gets a ready-made one — never a free pass, never a cancelled test", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("40", b.ctx);
     const { Profile } = await import("../extensions/tutor/profile.js");
@@ -431,13 +453,31 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("", b.ctx);
     await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
     await turn(b.events, b.ctx, "1. split the text\n2. count each word\n3. keep the biggest\npieces: split, max, count", judged("none"));
-    await until(() => b.notes.some((n) => /coding test could not be prepared/.test(n)), 60000);
-    expect(b.notes.find((n) => /coding test could not be prepared/.test(n))).toMatch(/improve part.*Nothing counts against you/);
-    expect(replies).toEqual([]); // the improve part was asked for twice
-    expect(existsSync(join(root, "stepup", "README.md"))).toBe(false);
-    expect(await (async () => { const q = Profile.open(process.env.PI_TUTOR_PROFILE!); try { return q.setting(`stepup:${root}`) || null; } finally { q.close(); } })()).toBeNull();
+    await until(() => existsSync(join(root, "stepup", "README.md")), 90000);
+    expect(replies).toEqual([]); // the model's improve part was asked for twice
+    expect(b.notes.some((n) => /coding test could not be prepared/.test(n))).toBe(false);
+    const { IMPROVE_FALLBACKS } = await import("../extensions/tutor/improve-fallback.js");
+    const handed = readFileSync(join(root, "stepup", "improve.py"), "utf8");
+    const used = IMPROVE_FALLBACKS.find((f) => f.clumsy === handed);
+    expect(used).toBeTruthy();
+    const readme = readFileSync(join(root, "stepup", "README.md"), "utf8");
+    expect(readme).toContain(used!.task); // the task of the program handed over, not the model's
+    expect(readme).toMatch(/5\. `stepup\/improve\.py`: .*works but is clumsy.*measured now: longest function/s);
+    expect(readme).not.toContain(used!.reference.split("\n")[1].trim()); // the hidden solution never enters the project
+    const q = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const saved = JSON.parse(q.setting(`stepup:${root}`) ?? "{}") as { improveTask?: string; improveMissing?: boolean; improveBefore?: unknown };
+    q.close();
+    expect(saved).toMatchObject({ improveTask: used!.task, improveBefore: expect.any(Object) });
+    expect(saved.improveMissing).toBeUndefined();
     expect(asked).toBeGreaterThan(0);
-  }, 180000);
+    // unchanged clumsy code is no improvement: the part does not pass for free
+    writeFileSync(join(root, "stepup", "solve.py"), "import datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n");
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve 0\/1/);
+    writeFileSync(join(root, "stepup", "improve.py"), used!.reference);
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve 1\/1/);
+  }, 240000);
   // Habits Task 24b: the step-up for Rust and Go, each part in its own crate / module folder.
   for (const lang of ["rust", "go"] as const) it.skipIf(!tool(lang === "rust" ? "cargo" : "go", lang === "rust" ? ["--version"] : ["version"]))(`the step-up in ${lang}: each part in its own folder, checked one at a time`, async () => {
     const R = lang === "rust";
