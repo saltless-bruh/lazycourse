@@ -835,6 +835,11 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     const q = Profile.open(process.env.PI_TUTOR_PROFILE!);
     try { expect(q.setting("proscores:python")).toBe(st2); } finally { q.close(); }
   }, 180000);
+  it("learner-session fixes Task 4: a task with no confirmed check ticks on trust, and says so", async () => {
+    const { b } = await doneProject(code("/"), [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "unverified" }]);
+    await b.commands["tutor-done"].handler("P2.T2", b.ctx);
+    expect(b.notes.some((n) => /ticked on trust: I could not build a check that works for P2\.T2/.test(n))).toBe(true);
+  }, 60000);
   it("habits Task 22: a failed /tutor-done writes spec/checks.md again, so it shows the checks that ran", async () => {
     const { b, root } = await doneProject(code("*"), two);
     expect(existsSync(join(root, "spec", "checks.md"))).toBe(false);

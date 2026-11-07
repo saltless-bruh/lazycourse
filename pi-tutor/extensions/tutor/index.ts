@@ -1594,7 +1594,7 @@ export default function (pi: ExtensionAPI): void {
       if (failed.length === 0) {
         const extra = shaky.length ? `; ${shaky.length} unverified check(s) failed and do not block: ${shaky.map((x) => x.check.expr ?? JSON.stringify(x.check.stdin)).join(", ")}` : "";
         // Only a trusted check proves it; unverified ones alone make it self-checked (final review I5).
-        if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
+        if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `ticked on trust: I could not build a check that works for ${id}${extra}`);
         const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
         // Task 16: at pro a tick from checks shows the pro score, built only from facts code checked here.
         // Final review M3: `judged` false when the own tests could not run, so a sandbox failure never suggests a level.
@@ -1799,7 +1799,7 @@ export default function (pi: ExtensionAPI): void {
     const exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
     try {
       const complete = rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS));
-      const one = (task: string) => writeMilestoneChecks({ complete, exec, sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${task}\n`, milestone: 1, entry, runCmd: null, root });
+      const one = (task: string) => writeMilestoneChecks({ complete, exec, sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${task}\n`, milestone: 1, entry, runCmd: null, root, retry: false });
       // Phase 7 live run (Rust, nemotron): checks the hidden solution never confirms (a HashMap printed in random
       // order) aborted the whole step-up. A part with none confirmed is asked for once more.
       const sure = async (task: string) => { const r = await one(task); return trustedOnly(r.checks).length ? r : one(task); };
@@ -2017,7 +2017,7 @@ export default function (pi: ExtensionAPI): void {
           const json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as { talk?: unknown; solve?: unknown; fix?: unknown };
           if (typeof json.talk !== "string" || typeof json.solve !== "string") throw new Error("the problems came back incomplete");
           const entry = projectRun(root, lang).entry ?? "src/main.py";
-          const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
+          const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root, retry: false });
           const given = typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve.trim() : "";
           // Phase 8 A8, option C: no improve-it problem from the model is a ready-made one's task, not a failed setup.
           const improveTask = band === "intermediate" ? given || pickFallback(lastFallback()).task : undefined;

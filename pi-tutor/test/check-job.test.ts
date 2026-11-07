@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { referenceFolder, crossCheckOnReference, checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, currentMilestone, writeMilestoneChecks, readChecksState } from "../extensions/tutor/check-job.js";
+import { SHAPE_RULE, referenceFolder, crossCheckOnReference, checksPrompt, referencePrompt, crossCheck, extractCode, milestoneText, currentMilestone, writeMilestoneChecks, readChecksState } from "../extensions/tutor/check-job.js";
 import type { Check } from "../extensions/tutor/checks.js";
 import type { SandboxHost } from "../extensions/tutor/exam/sandbox.js";
 import { realExec } from "./fake-pi.js";
@@ -123,7 +123,7 @@ describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 
   it("whole-number checks get one more check, asked for by name; once it lands the task is not weak", async () => {
     const asked: string[] = [];
     const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(50, 3) == 16.666666666666668"];
-    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py", retry: false });
     expect(m.checks.map((c) => [c.expected, c.status])).toEqual([["16.0", "trusted"], ["16.666666666666668", "trusted"]]);
     expect(m.weak ?? []).toEqual([]);
     expect(asked[2]).toMatch(/P1\.T1/);
@@ -133,14 +133,14 @@ describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 
     const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(50, 3) == 99"];
     const runs: string[] = [];
     const exec: typeof realExec = async (c, a, o) => { if (a.includes("split_amount(48, 3)")) runs.push("48"); return realExec(c, a, o); };
-    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py", retry: false });
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
     expect(m.weak).toEqual(["P1.T1"]);
     expect(runs).toHaveLength(2); // the first run and one probe; no second probe
   }, 60_000);
   it("still weak after the one extra ask: kept, and marked weak", async () => {
     const replies = ["check P1.T1: split_amount(48, 3) == 16.0", REF, "check P1.T1: split_amount(30, 3) == 10.0"];
-    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "python", tasksMd: TASKS, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py", retry: false });
     expect(m.checks).toHaveLength(2);
     expect(m.weak).toEqual(["P1.T1"]);
   }, 60_000);
@@ -148,7 +148,7 @@ describe.skipIf(!compiled("python3", ["--version"]))("the near-miss guard (spec 
     const tasks = "## Milestone 1: conditionals\n- [ ] P1.T1 Write `is_adult(age)` returning True from 18 on\n";
     const asked: string[] = [];
     const replies = ["check P1.T1: is_adult(30) == True\ncheck P1.T1: is_adult(10) == False", "```python\ndef is_adult(age):\n    return age >= 18\n```", "check P1.T1: is_adult(18) == True"];
-    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: tasks, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift()!; }, exec: realExec, sandbox: host(), language: "python", tasksMd: tasks, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py", retry: false });
     expect(asked[2]).toMatch(/one character/);
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "trusted", "trusted"]);
     expect(m.weak ?? []).toEqual([]);
@@ -175,7 +175,7 @@ describe("writeMilestoneChecks for Rust and Go (spec 2026-10-22 §5.3)", () => {
       "```rust\nfn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\n\nfn main() {}\n```",
     ];
     const root = mkdtempSync(join(tmpdir(), "rs-proj-"));
-    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs", runCmd: "cargo run", root });
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs", runCmd: "cargo run", retry: false, root });
     expect(m.ran).toBe(true);
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
     expect(readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length).toBe(before);
@@ -187,7 +187,7 @@ describe("writeMilestoneChecks for Rust and Go (spec 2026-10-22 §5.3)", () => {
     ];
     const root = mkdtempSync(join(tmpdir(), "go-proj-"));
     writeFileSync(join(root, "go.mod"), "module mine\n\ngo 1.22\n");
-    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go", runCmd: "go run ./src", root });
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "go", tasksMd: TASKS, milestone: 1, entry: "src/main.go", runCmd: "go run ./src", retry: false, root });
     expect(m.checks.map((c) => c.status)).toEqual(["trusted"]);
   }, 180_000);
 });
@@ -220,7 +220,7 @@ describe.skipIf(!bwrapReady || spawnSync("node", ["--version"]).status !== 0)("J
   it("a check the JS reference agrees with is trusted, one it contradicts is unverified", async () => {
     const replies = ["check P1.T1: splitAmount(50, 4) == 12.5\ncheck P1.T1: splitAmount(50, 4) == 13",
       "```js\nimport { fileURLToPath } from 'node:url'\nexport function splitAmount(total, people) { return total / people }\nif (process.argv[1] === fileURLToPath(import.meta.url)) console.log(splitAmount(50, 4))\n```"];
-    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "javascript", tasksMd: TASKS, milestone: 1, entry: "src/main.js", runCmd: "node src/main.js" });
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "javascript", tasksMd: TASKS, milestone: 1, entry: "src/main.js", runCmd: "node src/main.js", retry: false });
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
   }, 60_000);
 });
@@ -239,4 +239,42 @@ describe("referenceFolder (Phase 8 A1)", () => {
     const rs = referenceFolder({ language: "rust", entry: "src/main.rs", reference: "fn main() {}\n", root });
     try { expect(readFileSync(join(rs, "Cargo.toml"), "utf8")).toContain("mine"); } finally { rmSync(rs, { recursive: true, force: true }); }
   });
+});
+
+// Learner-session fixes Task 4 (spec §3): the checks and the hidden solution share one shape rule; a task left with
+// no confirmed check is asked for once more.
+describe("checks contract and retry (learner-session fixes Task 4)", () => {
+  const TASKS1 = "## Milestone 1: start\n- [ ] P1.T1 Generate random secret number and store in variable src/main.py done when: secret_number is int 1-100\n";
+  it("both prompts carry the same shape rule", () => {
+    expect(checksPrompt({ language: "python", tasksMd: TASKS1, milestone: 1 })).toContain(SHAPE_RULE);
+    expect(referencePrompt({ language: "python", tasksMd: TASKS1, milestone: 1, entry: "src/main.py" })).toContain(SHAPE_RULE);
+    expect(SHAPE_RULE).toMatch(/top-level/);
+    expect(SHAPE_RULE).toMatch(/only run lines/);
+  });
+  const REF = "```python\ndef main():\n    secret_number = 5\n    print('ready')\n\nmain()\n```";
+  it.skipIf(!bwrapReady)("a task left with no confirmed check is asked for once more", async () => {
+    const asked: string[] = [];
+    const replies = ["check P1.T1: isinstance(secret_number, int) == True", REF, 'run P1.T1: stdin "" -> stdout contains "ready"'];
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift() ?? ""; }, exec: realExec, sandbox: host(),
+      language: "python", tasksMd: TASKS1, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks.filter((c) => c.task === "P1.T1" && c.status === "trusted").map((c) => c.kind)).toEqual(["io"]);
+    expect(asked[2]).toContain("isinstance(secret_number, int) == True");
+    expect(asked[2]).toMatch(/could not be confirmed/);
+    expect(m.confirmed).toEqual({ trusted: 1, total: 2 });
+  }, 60_000);
+  it.skipIf(!bwrapReady)("the retry returning the same unconfirmable check is not retried again (Review Focus 4)", async () => {
+    const asked: string[] = [];
+    const replies = ["check P1.T1: isinstance(secret_number, int) == True", REF, "check P1.T1: isinstance(secret_number, int) == True"];
+    const m = await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift() ?? ""; }, exec: realExec, sandbox: host(),
+      language: "python", tasksMd: TASKS1, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(asked).toHaveLength(3);
+    expect(m.confirmed).toEqual({ trusted: 0, total: 2 });
+  }, 60_000);
+  it.skipIf(!bwrapReady)("retry: false (the step-up) asks only once", async () => {
+    const asked: string[] = [];
+    const replies = ["check P1.T1: isinstance(secret_number, int) == True", REF];
+    await writeMilestoneChecks({ complete: async (_s, u) => { asked.push(u); return replies.shift() ?? ""; }, exec: realExec, sandbox: host(),
+      language: "python", tasksMd: TASKS1, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py", retry: false });
+    expect(asked).toHaveLength(2);
+  }, 60_000);
 });

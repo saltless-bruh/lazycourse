@@ -126,6 +126,8 @@ export function renderChecksMd(checks: Check[], ticked: Set<string>, o: { note?:
     "",
   ];
   if (o.note) out.push(o.note, "");
+  // Learner-session fixes (spec §3): how much of this is proven, at a glance.
+  if (checks.length) out.push(`${checks.filter((c) => c.status === "trusted").length} of ${checks.length} checks confirmed`, "");
   const tasks = [...new Set(checks.map((c) => c.task))];
   for (const t of tasks) {
     out.push(`## ${t}${ticked.has(t) ? ` (${HOW[o.how?.[t] ?? "checks"]})` : o.weak?.has(t) ? " (a near miss may pass these checks)" : ""}`);
