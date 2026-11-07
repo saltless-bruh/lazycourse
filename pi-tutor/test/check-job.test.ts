@@ -169,16 +169,22 @@ describe.skipIf(!compiled("python3", ["--version"]))("crossCheckOnReference (spe
 
 describe("writeMilestoneChecks for Rust and Go (spec 2026-10-22 §5.3)", () => {
   it.skipIf(!compiled("cargo", ["--version"]))("Review Focus #2: a Rust reference makes good checks trusted and a broken one unverified; the temp folder is gone", async () => {
-    const before = readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length;
     const replies = [
       "check P1.T1: split_amount(50.0, 3) == 16.666666666666668\ncheck P1.T1: split_amount(50.0, 3, 1) == 1.0",
       "```rust\nfn split_amount(total: f64, people: u32) -> f64 { total / people as f64 }\n\nfn main() {}\n```",
     ];
     const root = mkdtempSync(join(tmpdir(), "rs-proj-"));
-    const m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs", runCmd: "cargo run", retry: false, root });
+    // A private temp folder: other tests make and remove lazycourse-ref-* folders in the shared one at the same time
+    // (counting there raced under load).
+    const own = mkdtempSync(join(tmpdir(), "rs-tmp-")), saved = process.env.TMPDIR;
+    process.env.TMPDIR = own;
+    let m: Awaited<ReturnType<typeof writeMilestoneChecks>>;
+    try {
+      m = await writeMilestoneChecks({ complete: async () => replies.shift()!, exec: realExec, sandbox: host(), language: "rust", tasksMd: TASKS, milestone: 1, entry: "src/main.rs", runCmd: "cargo run", retry: false, root });
+    } finally { process.env.TMPDIR = saved; }
     expect(m.ran).toBe(true);
     expect(m.checks.map((c) => c.status)).toEqual(["trusted", "unverified"]);
-    expect(readdirSync(tmpdir()).filter((f) => f.startsWith("lazycourse-ref-")).length).toBe(before);
+    expect(readdirSync(own).filter((f) => f.startsWith("lazycourse-ref-"))).toEqual([]);
   }, 180_000);
   it.skipIf(!compiled("go", ["version"]))("a Go reference with the project's go.mod makes its checks trusted", async () => {
     const replies = [

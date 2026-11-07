@@ -1130,7 +1130,7 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n",
       [{ task: "P2.T2", kind: "value", expr: "split_amount(48, 3)", expected: "16.0", milestone: 1, status: "unverified" }]);
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
-    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(self-checked: /);
+    expect(b.notes.at(-1)).toMatch(/ticked P2\.T2 \(ticked on trust: I could not build a check that works for P2\.T2/); // learner-session fixes §3 copy
     expect(readFileSync(join(root, "spec", "checks.md"), "utf8")).toContain("## P2.T2 (done, self-checked)");
   }, 30000);
   it("spec/checks.md is written only inside the project (final review I6)", async () => {
