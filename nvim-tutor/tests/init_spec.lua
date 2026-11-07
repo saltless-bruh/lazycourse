@@ -402,6 +402,21 @@ describe("tutor.init", function()
     assert.is_truthy(got.stdout:match("name%? .*age%? .*hi bo 9"), got.stdout)
   end)
 
+  it("review I2: :TutorRun from a lazy keymap (under textlock) runs on the event loop, with no E565", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 5" } })
+    tutor._notify_override = function() end
+    vim.v.errmsg = ""
+    vim.keymap.set("n", "<F13>", function() vim.cmd("TutorRun"); return "" end, { expr = true })
+    local ok = pcall(vim.api.nvim_feedkeys, vim.keycode("<F13>"), "x", false)
+    vim.keymap.del("n", "<F13>")
+    assert.is_true(ok)
+    assert.is_true(vim.wait(1000, function() return term_win() ~= nil and tutor.state.run_job ~= nil end))
+    assert.is_nil(vim.v.errmsg:find("E565"))
+    vim.cmd("TutorRun stop")
+  end)
+
   it(":TutorRun stop stops a running program, reported as stopped", function()
     package.loaded["tutor"] = nil
     local tutor = require("tutor")

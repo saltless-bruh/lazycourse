@@ -79,6 +79,12 @@ end
 ---@param kind? "run"|"test"|"stop"
 function M.run(kind)
   kind = kind or "run"
+  -- Review I2: from a lazy-loaded keymap the command runs under textlock, where splits and jobstart{term} throw
+  -- E565 (CLAUDE.md); the whole run waits for the event loop.
+  if require("tutor.term").textlocked() then
+    vim.schedule(function() M.run(kind) end)
+    return
+  end
   -- Learner-session fixes (spec §1): stop ends the visible run; its exit is not reported.
   if kind == "stop" then
     runpane.stop()

@@ -95,3 +95,24 @@ describe("learner-session fixes §6: plain words and beginner wording", () => {
     expect(recognize(5, "it is weird and there is a star", o)).toBe(false);
   });
 });
+
+describe("final review I3/I4: complaints earn nothing, real attempts are not taken as intents", () => {
+  const o = { language: "python", task: "P1.T1" };
+  it("I3: a complaint is no Shape, Steps or Map", () => {
+    expect(recognize(2, "I get an error and it makes no sense", o)).toBe(false);
+    expect(recognize(2, "I need help and then it returns nothing", o)).toBe(false);
+    expect(recognize(5, "The error is in the loop and the problem is with the input", o)).toBe(false);
+    expect(recognize(4, "first I was confused, then I read it, then I gave up again", o)).toBe(false);
+  });
+  it("I4: hedged or long attempts are no skip and no explain", () => {
+    for (const t of [
+      "let me start by listing the inputs: the total and the people",
+      "could I write it as a loop instead",
+      "I don't want to skip the edge case, zero people should say error",
+      "I'm not sure this is right but my steps are: 1. read the sentence 2. split it 3. print each",
+      "not sure, examples: share(10, 2) gives 5 and share(0, 2) gives error",
+    ]) expect(recipeIntent(t), t).toBeNull();
+    for (const t of ["skip", "can I just try writing the code?", "just let me code", "skip this step"]) expect(recipeIntent(t), t).toBe("skip");
+    for (const t of ["I don't know what a map diagram is", "what is a step?", "what does shape mean?", "I don't understand this step", "I don't understand"]) expect(recipeIntent(t), t).toBe("explain");
+  });
+});

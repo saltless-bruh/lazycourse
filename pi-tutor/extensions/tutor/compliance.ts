@@ -332,15 +332,27 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
  * text — the bold parts with their asterisks, nested fences. Only a fence around the entire reply is removed; a
  * quoted line inside a reply stays.
  */
+const JUDGMENT_TAIL = /\n[ \t]*```tutor-judgment[ \t]*\n[^`]*\n[ \t]*```[ \t]*\s*$/;
+/**
+ * A fence that opens the reply wraps it only when it never closes, or closes at the very end (before or after the
+ * judgment). Review I1: one that closes earlier is a real quote or code block, and the reply after it stays.
+ */
+function unwrapOuter(text: string, opener: RegExp): string {
+  const m = opener.exec(text);
+  if (!m) return text;
+  const rest = text.slice(m[0].length);
+  const j = JUDGMENT_TAIL.exec(rest);
+  const core = j ? rest.slice(0, j.index) : rest, tail = j ? rest.slice(j.index) : "";
+  if ((core.match(/^[ \t]*```/gm) ?? []).length % 2 === 0) return rest; // never closed
+  const close = /\r?\n[ \t]*```[ \t]*\s*$/.exec(core);
+  return close ? core.slice(0, close.index) + (tail ? "\n" + tail : "") : text;
+}
+
 export function cleanReply(text: string): string {
-  const m = /^\s*```(?:markdown|md)[ \t]*\r?\n([\s\S]*)\r?\n```[ \t]*\s*$/.exec(text);
-  if (m) return m[1];
+  const md = unwrapOuter(text, /^\s*```(?:markdown|md)[ \t]*\r?\n/);
+  if (md !== text) return md;
   // Re-run finding: a bare fence opened right before the reply's first heading wraps the reply (often never closed).
-  const open = /^\s*```[ \t]*\r?\n(?=\s*#{1,6} )/.exec(text);
-  if (!open) return text;
-  let rest = text.slice(open[0].length);
-  if ((rest.match(/^[ \t]*```/gm) ?? []).length % 2) rest = rest.replace(/\r?\n[ \t]*```[ \t]*\s*$/, "\n");
-  return rest;
+  return unwrapOuter(text, /^\s*```[ \t]*\r?\n(?=\s*#{1,6} )/);
 }
 
 /** C: a weak model's planning before the reply's first heading is folded away; a reply with no heading stays. */

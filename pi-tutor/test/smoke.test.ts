@@ -1829,6 +1829,17 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       const q = P2.open(file); const ev = q.habitEvents().filter((e) => e.habit === "steps-first"); q.close();
       expect(ev.map((e) => e.ok)).toEqual([false]); // Shape (model) and Steps (skipped) are not the learner's own
     });
+    it("final review I4: a hedged artifact is the learner's own, not an explain request", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      await turn(b.events, b.ctx, "not sure but I think the task is P1.T1", judged("none"));
+      expect(step()).toBe(2);
+      expect((await setting(`recipe:${dir}`)).own["P1.T1"]).toEqual([1]);
+    });
     it("learner-session fixes §6: the kickoff says how to skip and stop", async () => {
       mkdir(pjoin(dir, "spec"));
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");

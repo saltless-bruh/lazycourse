@@ -441,6 +441,18 @@ describe("cleanReply", () => {
     const reply = "```\nx = 1\n```\n\n# What's happening\nx holds one.";
     expect(cleanReply(reply)).toBe(reply);
   });
+  it("review I1: a reply that opens with a quote fence keeps everything after it", () => {
+    const j = "\n\n```tutor-judgment\n{\"judgment\":\"none\"}\n```";
+    const quote = "```markdown\n> it takes the total and gives back each share\n```\n\n**What's happening**: you named both inputs.\n\n**In short**: good shape." + j;
+    expect(cleanReply(quote)).toBe(quote);
+    const code = "```\n# a comment\nx = 1\n```\nEverything after # is ignored." + j;
+    expect(cleanReply(code)).toBe(code);
+  });
+  it("review I1: an outer fence closed at the end, before or after the judgment, is still unwrapped", () => {
+    const j = "```tutor-judgment\n{}\n```";
+    expect(cleanReply("```markdown\n# Title\nbody\n```\n\n" + j)).toBe("# Title\nbody\n\n" + j);
+    expect(cleanReply("```\n# Title\nbody\n" + j + "\n```")).toBe("# Title\nbody\n" + j);
+  });
   it("the reminder states no column count", () => {
     expect(replyReminder("teach")).not.toMatch(/\d+ characters/);
   });

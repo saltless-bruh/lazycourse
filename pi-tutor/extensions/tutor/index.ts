@@ -693,14 +693,16 @@ export default function (pi: ExtensionAPI): void {
   function recipeStep(prompt: string) {
     const w = workflow;
     if (!w || !project) return;
-    const intent = recipeIntent(prompt);
-    if (intent === "skip") { advanceWorkflow(true); recipeMovedByCode = true; paint(); return; }
-    if (intent === "explain") {
-      const spec = STEP_SPECS[w.step - 1];
-      recipeNote = `[workflow] Explain step ${spec.name} in one sentence: ${spec.explain}; then ask for it again (the learner writes: ${spec.learnerWrites}).`;
+    // Final review I4: the learner's artifact first, so a hedged one ("not sure, but my steps are: 1. …") still counts.
+    if (!recognize(w.step, prompt, { language: project.language, task: w.task })) {
+      const intent = recipeIntent(prompt);
+      if (intent === "skip") { advanceWorkflow(true); recipeMovedByCode = true; paint(); }
+      if (intent === "explain") {
+        const spec = STEP_SPECS[w.step - 1];
+        recipeNote = `[workflow] Explain step ${spec.name} in one sentence: ${spec.explain}; then ask for it again (the learner writes: ${spec.learnerWrites}).`;
+      }
       return;
     }
-    if (!recognize(w.step, prompt, { language: project.language, task: w.task })) return;
     if (w.step === 3) void addExampleChecks(prompt, w.task);
     rememberOwnStep(w.task, w.step);
     advanceWorkflow(true);
