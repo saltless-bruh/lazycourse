@@ -18,9 +18,12 @@ const KEYWORDS = new Set([
   "loop", "func", "package", "range", "type", "interface", "go", "defer", "switch", "case", "default",
 ]);
 
+/** Builtins and common methods: the language's names, never the learner's (re-run finding: `split()` in a plan). */
+export const LANGUAGE_NAMES = new Set(["reversed", "lower", "upper", "strip", "replace", "sort", "reverse", "isdigit", "startswith", "endswith", "keys", "items", "get", "pop", "insert", "toUpperCase", "toLowerCase", "trim", "push", "parseInt", "readline", "tostring", "tonumber", "unwrap", "len", "type"]);
 const BUILTINS = ["print", "input", "int", "str", "float", "bool", "list", "dict", "set", "tuple", "len", "range", "open",
   "sum", "min", "max", "sorted", "abs", "round", "enumerate", "zip", "map", "filter", "format", "split", "join", "append",
   "console", "log", "println"];
+for (const b of BUILTINS) LANGUAGE_NAMES.add(b);
 
 const COMMON = ["the", "with", "that", "this", "from", "into", "each", "when", "done", "then", "than", "have", "will",
   "your", "their", "them", "they", "what", "which", "should", "must", "more", "less", "some", "task", "file", "main",

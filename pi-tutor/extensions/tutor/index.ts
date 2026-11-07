@@ -1102,7 +1102,7 @@ export default function (pi: ExtensionAPI): void {
     workflow = startWorkflow(id, Date.now());
     pi.appendEntry("tutor_workflow", workflow);
     paint();
-    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). Tell the learner in one line they can say "skip" to skip a step or "/tutor-plan off" to stop.`;
+    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). (You can say "skip" to skip a step, or "/tutor-plan off" to stop.)`;
     // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
     if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
     else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");

@@ -3,7 +3,7 @@ import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import type { TurnStep } from "./ladder.js";
 import { turnInstruction, TURN_LIMITS } from "./turns.js";
-import { termHits, windowOverlap } from "./similarity.js";
+import { LANGUAGE_NAMES, termHits, windowOverlap } from "./similarity.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -258,7 +258,13 @@ function addSignature(out: Set<string>, name: string, params: string) {
 /** The learner's own names: task signatures in spec/tasks.md backticks and the definitions in their sources. */
 export function ownNames(i: { tasksMd: string | null; sources: string[] }): Set<string> {
   const out = new Set<string>();
-  for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) for (const m of span[1].matchAll(SIGNATURE)) addSignature(out, m[1], m[2]);
+  // Re-run finding: a plan that says "using `split()`" names the language's function, not the learner's.
+  for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) {
+    for (const m of span[1].matchAll(SIGNATURE)) if (!LANGUAGE_NAMES.has(m[1])) addSignature(out, m[1], m[2]);
+    // Re-run finding: a plan that names a variable (`sentence`, `reversed_words`) names the learner's too.
+    const bare = span[1].trim();
+    if (/^[A-Za-z_]\w*$/.test(bare) && !LANGUAGE_NAMES.has(bare)) addSignature(out, bare, "");
+  }
   // Final review I6: from their files only function names; every parameter (`value`, `items`) flagged examples.
   for (const src of i.sources) for (const m of src.matchAll(DEFINITION)) addSignature(out, m[1], "");
   return out;

@@ -467,3 +467,27 @@ describe("checkTurn: structural leaks", () => {
     expect(checkTurn(diagram, { ...base, step: "teach", taskTerms: terms })).not.toContain("own-code");
   });
 });
+
+describe("re-run finding: a builtin the plan names is no name of the learner's", () => {
+  it("`split()` in a task line is the language's, `reverse_words(text)` is the learner's", () => {
+    const names = ownNames({ tasksMd: "- [ ] P2.T1 Split `sentence` into words using `split()`; print with `print()`; then `len()`\n- [ ] P2.T2 write `reverse_words(text)`", sources: [] });
+    for (const b of ["split", "print", "len"]) expect(names.has(b), b).toBe(false);
+    expect(names.has("reverse_words")).toBe(true);
+  });
+});
+
+describe("re-run finding: the plan's named variables are the learner's names", () => {
+  const tasksMd = "- [ ] P1.T1 Ask for a sentence and store in variable `sentence`\n- [ ] P1.T2 Validate `sentence` contains a word; store it in `is_ok`\n- [ ] P2.T1 Split with `split()`";
+  it("`sentence` and `is_ok` from the plan are names; `split` is not", () => {
+    const names = ownNames({ tasksMd, sources: [] });
+    expect(names.has("sentence")).toBe(true);
+    expect(names.has("is_ok")).toBe(true);
+    expect(names.has("split")).toBe(false);
+  });
+  it("a prose answer that uses the plan's variable is held; naming it alone is not", () => {
+    const names = ownNames({ tasksMd, sources: [] });
+    const turn = (t: string) => checkTurn(t + "\n\nWhat would you try? ```tutor-judgment\n{}\n```", { step: "teach", names, sourceLines: [] });
+    expect(turn("Consider the constraint `sentence.strip() != ''`.")).toContain("own-code");
+    expect(turn("Look at where `sentence` gets its value.")).not.toContain("own-code");
+  });
+});

@@ -1837,6 +1837,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       const kickoff = b.sent.at(-1)?.text ?? "";
       expect(kickoff).toMatch(/skip/);
       expect(kickoff).toContain("/tutor-plan off");
+      expect(kickoff).not.toMatch(/tell the learner/i); // the learner sees this bubble (re-run finding)
     });
     it("final review M10: a plan sent as the first message of the talking test is taken as the plan", async () => {
       mkdir(pjoin(dir, "spec"));
