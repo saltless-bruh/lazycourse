@@ -10,7 +10,7 @@ import { bandFor, thresholds, DEFAULT_LEVEL } from "./policy.js";
 import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
-import { guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
+import { cleanReply, guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
 import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply, turnInstruction } from "./turns.js";
 /** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
 const CHECKER_TIMEOUT_MS = 180_000;
@@ -20,17 +20,19 @@ import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.j
 import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
-import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
+import { STEPS, STEP_SPECS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
+import { COMMANDS_NOTE, WELCOME } from "./commands-note.js";
+import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
 import { crossCheckOnReference, currentMilestone, extractCode, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
-import { recognize, examplesToChecks } from "./recipe-steps.js";
+import { recognize, examplesToChecks, recipeIntent, isAttempt } from "./recipe-steps.js";
 import { questionTask, directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
@@ -201,7 +203,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -301,6 +303,7 @@ export default function (pi: ExtensionAPI): void {
 
   function setLevel(n: number) {
     state.level = n;
+    state.levelKnown = true;
     if (episode) {
       episode = { ...episode, band: bandFor(n) };
       pi.appendEntry("tutor_episode", episode);
@@ -470,6 +473,9 @@ export default function (pi: ExtensionAPI): void {
     }
     onboarding = loadOnboarding();
     onboardingHere = false;
+    // Learner-session fixes (spec §2): a first run leads — a welcome line, and no level shown until one is known.
+    state.levelKnown = !(firstRun() || (onboardingActive() && onboarding?.level === undefined));
+    if (firstRun()) pi.sendMessage({ customType: "tutor_welcome", content: WELCOME, display: true }, { triggerTurn: false });
     generation++;
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
@@ -564,6 +570,12 @@ export default function (pi: ExtensionAPI): void {
 
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
+    event.systemPromptOptions.sections["tutor_commands"] = COMMANDS_NOTE;
+    // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
+    if (event.messageType === "user" && firstRun() && !event.prompt.trim().startsWith("/")) {
+      saveOnboarding(newOnboarding(null));
+      onboardingHere = true;
+    }
     if (onboardingActive()) {
       // Spec 2026-10-19 §6: the onboarding rules replace the ladder prompt (no judgment block asked for).
       event.systemPromptOptions.sections["tutor"] = systemText("onboard");
@@ -609,6 +621,12 @@ export default function (pi: ExtensionAPI): void {
       const sources = projectSources(root);
       if (snap && realCwd(snap.path).startsWith(root + "/")) sources.push(snap.lines.join("\n"));
       run.names = ownNames({ tasksMd, sources });
+      // Learner-session fixes (spec §5): the current task's words — the recipe's task, the episode's, else the first
+      // open one — or, before a plan, the README's title and first paragraph (the project's own words).
+      const current = workflow?.task ?? (episode?.spot?.startsWith("check:") ? episode.spot.split(":")[1] : null) ?? (tasksMd ? openTaskIds(tasksMd)[0] ?? null : null);
+      const taskLine = current && tasksMd ? findTask(tasksMd, current) : null;
+      const about = taskLine ?? projectAbout(root);
+      run.taskTerms = about ? taskTerms(about) : undefined;
       // The failed run's output is what the learner saw too: quoting it is not a leak.
       const trace = episode?.trigger.kind === "run" ? episode.trigger.trace : "";
       run.sourceLines = [...sources, trace].flatMap((t) => t.split(/\r?\n/));
@@ -619,6 +637,7 @@ export default function (pi: ExtensionAPI): void {
         profileWrite(() => { state = readChecksState(p.setting(key)); });
         const k = Object.keys(state.milestones).map(Number).filter((n) => n <= now).sort((a, b) => b - a)[0];
         run.referenceLines = k ? state.milestones[k].reference.split(/\r?\n/) : [];
+        run.referenceCode = k ? state.milestones[k].reference : undefined;
         // Final review C1: a fix in words is judged on a failed check only, inside the function it calls.
         const fn = episode?.spot?.startsWith("check:") ? calledName(episode.spot.split(":").slice(2).join(":")) : null;
         run.proseScope = fn ? { referenceLines: functionLines(run.referenceLines, fn), sourceLines: functionLines(sources.flatMap((t) => t.split(/\r?\n/)), fn) } : undefined;
@@ -642,7 +661,10 @@ export default function (pi: ExtensionAPI): void {
     if (stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask")) parts.push(`[step-up] talking test on: ${stepUp.talkTask}\nThe learner plans it in words. Ask at most one short question; never name functions, pieces or code yourself, and never solve it.`);
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     // Phase 1 live check: a right-click question is about the error, so the recipe step stays out of that turn.
-    if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) parts.push(formatWorkflowContext(workflow, band));
+    if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) {
+      parts.push(formatWorkflowContext(workflow, band));
+      if (recipeNote) parts.push(recipeNote);
+    }
     // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
     const mapStep = workflow !== null && role.ladder && STEPS[workflow.step - 1] === "Map";
     if (lang && pack && role.ladder && indexWanted({ prompt, mapStep })) {
@@ -660,10 +682,27 @@ export default function (pi: ExtensionAPI): void {
 
   /** Phase 8 A16: the learner's message moved the recipe since the last judgment. */
   let recipeMovedByCode = false;
-  /** Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. */
+  /** Learner-session fixes §6: this message asked what the step means; the step's explanation, for this turn only. */
+  let recipeNote: string | null = null;
+  /** The learner's latest own message: the model's step_done counts only after a real attempt (spec §6). */
+  let lastLearnerText = "";
+  /**
+   * Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. Spec §6:
+   * plain words first — a skip moves on without counting as the learner's own; "what is …" gets the explanation.
+   */
   function recipeStep(prompt: string) {
     const w = workflow;
-    if (!w || !project || !recognize(w.step, prompt, { language: project.language, task: w.task })) return;
+    if (!w || !project) return;
+    // Final review I4: the learner's artifact first, so a hedged one ("not sure, but my steps are: 1. …") still counts.
+    if (!recognize(w.step, prompt, { language: project.language, task: w.task })) {
+      const intent = recipeIntent(prompt);
+      if (intent === "skip") { advanceWorkflow(true); recipeMovedByCode = true; paint(); }
+      if (intent === "explain") {
+        const spec = STEP_SPECS[w.step - 1];
+        recipeNote = `[workflow] Explain step ${spec.name} in one sentence: ${spec.explain}; then ask for it again (the learner writes: ${spec.learnerWrites}).`;
+      }
+      return;
+    }
     if (w.step === 3) void addExampleChecks(prompt, w.task);
     rememberOwnStep(w.task, w.step);
     advanceWorkflow(true);
@@ -724,8 +763,9 @@ export default function (pi: ExtensionAPI): void {
     // Spec 2026-10-21 §7: tasks are ticked from evidence (/tutor-done), never by the model; task_done_ids is ignored.
     const ladder = roleNamed(activeRole).ladder;
     // Phase 8 A16: one step per reply — when code already moved the recipe on the learner's message, the reply's
-    // step_done is about that same step.
-    if (ladder) advanceWorkflow(j.step_done && !recipeMovedByCode);
+    // step_done is about that same step. Spec §6: the model's word moves the step only after a real attempt, and
+    // never counts toward a habit (no rememberOwnStep) — the model still awards nothing.
+    if (ladder) advanceWorkflow(j.step_done && !recipeMovedByCode && isAttempt(lastLearnerText));
     recipeMovedByCode = false;
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     // M3 #17: the reply answered an episode an editor trigger has since replaced (or, M6c M6, none:
@@ -755,6 +795,8 @@ export default function (pi: ExtensionAPI): void {
    */
   function learnerMessage(prompt: string) {
     recipeMovedByCode = false; // Phase 8 review I4: one judgment cycle per learner message, judged or not
+    recipeNote = null;
+    if (prompt && !prompt.startsWith(TUTOR_PREFIX)) lastLearnerText = prompt.startsWith("[ask-error]") ? "" : prompt; // a right-click ask is a question
     // Final review I6/M10: during the talking test a message is the step-up's (not a recipe step, not chat
     // evidence); a right-click question stays a question.
     const talking = stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask");
@@ -892,7 +934,8 @@ export default function (pi: ExtensionAPI): void {
     if (c.messageType !== "assistant") return md;
     paneWidth = c.availableWidth;
     if (held() && c.isStreaming) return HOLD_TEXT;
-    const shown = hideJudgment(scrubInternals(md));
+    // Learner-session fixes (spec §4): every assistant message, every turn type, onboarding included.
+    const shown = hideJudgment(scrubInternals(cleanReply(md), { intakeJson: onboardingActive() }));
     return folds() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", async (event, ctx) => {
@@ -903,12 +946,14 @@ export default function (pi: ExtensionAPI): void {
     if (onboardingActive()) {
       // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
       const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-      if (text.trim()) intake = parseIntake(text);
+      if (text.trim()) intake = parseIntake(text, { json: true });
     }
     let changed = false;
     let content = m.content.map((c) => {
       if (c.type !== "text") return c;
-      const text = folds() ? foldPreamble(scrubInternals(c.text)) : scrubInternals(c.text);
+      const clean = cleanReply(c.text);
+      const scrubbed = scrubInternals(clean, { intakeJson: onboardingActive() });
+      const text = folds() ? foldPreamble(scrubbed) : scrubbed;
       if (text === c.text) return c;
       changed = true;
       return { ...c, text };
@@ -916,7 +961,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
@@ -940,7 +985,8 @@ export default function (pi: ExtensionAPI): void {
           rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step, ...(reason ? { reason } : {}) };
           pendingRewrite = issues;
         } else if (final) {
-          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined);
+          const inRecipe = workflow && roleNamed(activeRole).ladder ? { n: workflow.step, ...STEP_SPECS[workflow.step - 1] } : undefined;
+          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined, inRecipe);
           rewrite = null;
         }
         // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.
@@ -990,7 +1036,7 @@ export default function (pi: ExtensionAPI): void {
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
   const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
-  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check"]);
+  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check", "tutor_welcome"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
     const last = new Map<string, number>();
@@ -1059,7 +1105,7 @@ export default function (pi: ExtensionAPI): void {
     workflow = startWorkflow(id, Date.now());
     pi.appendEntry("tutor_workflow", workflow);
     paint();
-    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
+    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). (You can say "skip" to skip a step, or "/tutor-plan off" to stop.)`;
     // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
     if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
     else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
@@ -1346,7 +1392,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-thinking", {
-    description: "Show or hide the model's thinking: auto (hidden at pro) | show | hide",
+    description: "Show or hide the model's thinking: auto (hidden) | show | hide",
     handler: async (args, ctx) => {
       const shown = () => (thinkingHidden(thinking, bandFor(level())) ? "hidden" : "shown");
       if (!args.trim()) { ctx.ui.notify(`thinking: ${thinking} (${shown()} now)`, "info"); return; }
@@ -1583,7 +1629,7 @@ export default function (pi: ExtensionAPI): void {
       if (failed.length === 0) {
         const extra = shaky.length ? `; ${shaky.length} unverified check(s) failed and do not block: ${shaky.map((x) => x.check.expr ?? JSON.stringify(x.check.stdin)).join(", ")}` : "";
         // Only a trusted check proves it; unverified ones alone make it self-checked (final review I5).
-        if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `self-checked: none of its checks is verified${extra}`);
+        if (!r.results.some((x) => x.pass && x.check.status === "trusted")) return tick("self", `ticked on trust: I could not build a check that works for ${id}${extra}`);
         const passed = `${r.results.length - shaky.length} check(s) passed${extra}`;
         // Task 16: at pro a tick from checks shows the pro score, built only from facts code checked here.
         // Final review M3: `judged` false when the own tests could not run, so a sandbox failure never suggests a level.
@@ -1788,7 +1834,7 @@ export default function (pi: ExtensionAPI): void {
     const exec = (c: string, a: string[], o: { cwd: string; timeout: number }) => pi.exec(c, a, o);
     try {
       const complete = rawComplete(frozen, AbortSignal.timeout(SPEC_JOB_TIMEOUT_MS));
-      const one = (task: string) => writeMilestoneChecks({ complete, exec, sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${task}\n`, milestone: 1, entry, runCmd: null, root });
+      const one = (task: string) => writeMilestoneChecks({ complete, exec, sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${task}\n`, milestone: 1, entry, runCmd: null, root, retry: false });
       // Phase 7 live run (Rust, nemotron): checks the hidden solution never confirms (a HashMap printed in random
       // order) aborted the whole step-up. A part with none confirmed is asked for once more.
       const sure = async (task: string) => { const r = await one(task); return trustedOnly(r.checks).length ? r : one(task); };
@@ -2006,7 +2052,7 @@ export default function (pi: ExtensionAPI): void {
           const json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as { talk?: unknown; solve?: unknown; fix?: unknown };
           if (typeof json.talk !== "string" || typeof json.solve !== "string") throw new Error("the problems came back incomplete");
           const entry = projectRun(root, lang).entry ?? "src/main.py";
-          const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
+          const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root, retry: false });
           const given = typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve.trim() : "";
           // Phase 8 A8, option C: no improve-it problem from the model is a ready-made one's task, not a failed setup.
           const improveTask = band === "intermediate" ? given || pickFallback(lastFallback()).task : undefined;
@@ -2109,6 +2155,25 @@ export default function (pi: ExtensionAPI): void {
     if (o.stage === "choose") return !!project && project.path === o.dir;
     return onboardingHere || !project;
   };
+  /** The project README's title and first paragraph (front matter skipped): its own words before a plan exists. */
+  function projectAbout(root: string): string | null {
+    let text: string;
+    try { text = readFileSync(join(root, "README.md"), "utf8"); } catch { return null; }
+    const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+    const paras = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    return paras.length ? paras.slice(0, 2).join("\n") : null;
+  }
+  /**
+   * Spec §2: nothing known yet — onboarding never written (a finished one is saved as ""), no project here, no
+   * language in the profile.
+   */
+  function firstRun(): boolean {
+    if (onboarding || project || !profile) return false;
+    let none = false;
+    const p = profile;
+    profileWrite(() => { none = p.setting("onboarding") === null && p.languages().length === 0; });
+    return none;
+  }
   function loadOnboarding(): Onboarding | null {
     let o: Onboarding | null = null;
     if (profile) { const p = profile; profileWrite(() => { const raw = p.setting("onboarding"); if (raw) { try { o = JSON.parse(raw) as Onboarding; } catch { o = null; } } }); }

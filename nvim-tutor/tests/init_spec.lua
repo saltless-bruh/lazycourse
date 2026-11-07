@@ -315,7 +315,7 @@ describe("tutor.init", function()
     got = nil
     vim.cmd("TutorRun")
     vim.wait(2000, function() return got ~= nil end)
-    assert.equals("running\n", got.stdout)
+    assert.equals("running", got.stdout) -- the visible split's lines (learner-session fixes §1)
   end)
 
   it(":TutorRun test with no test: anywhere says where to add it; a bad kind shows usage (M8)", function()
@@ -329,7 +329,7 @@ describe("tutor.init", function()
     vim.cmd("TutorRun bogus")
     vim.notify = orig
     assert.is_truthy(msgs[1]:find("add `test:` to README.md", 1, true))
-    assert.is_truthy(msgs[2]:find("usage: :TutorRun [run|test]", 1, true))
+    assert.is_truthy(msgs[2]:find("usage: :TutorRun [run|test|stop]", 1, true))
     assert.is_nil(tutor.state.run_job)
   end)
 
@@ -341,22 +341,23 @@ describe("tutor.init", function()
     vim.wait(2000, function() return got ~= nil end)
     assert.equals("run_output", got.kind)
     assert.equals(3, got.code)
-    assert.equals("out\n", got.stdout)
-    assert.equals("err\n", got.stderr)
+    -- the visible split is one terminal: what the learner saw, output and errors together (learner-session fixes §1)
+    assert.is_truthy(got.stdout:find("out", 1, true) and got.stdout:find("err", 1, true), got.stdout)
+    assert.equals("", got.stderr)
   end)
 
-  it(":TutorRun refuses a second run while one is pending (real job, M1b #3)", function()
+  it(":TutorRun test refuses a second hidden test run while one is pending (real job, M1b #3)", function()
     package.loaded["tutor"] = nil
     local tutor = require("tutor")
-    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 2" } })
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, test_cmd = { "sh", "-c", "sleep 2" } })
     tutor._notify_override = function() end
     local msgs = {}
     local orig = vim.notify
     vim.notify = function(m) table.insert(msgs, m) end
-    vim.cmd("TutorRun")
-    vim.cmd("TutorRun")
+    vim.cmd("TutorRun test")
+    vim.cmd("TutorRun test")
     vim.notify = orig
-    assert.is_true(#msgs == 1 and msgs[1]:find("already running") ~= nil)
+    assert.is_true(#msgs == 1 and msgs[1]:find("still running") ~= nil)
     vim.fn.jobstop(tutor.state.run_job)
   end)
 
@@ -373,6 +374,128 @@ describe("tutor.init", function()
     assert.is_nil(tutor.state.run_job)
   end)
 
+  -- Learner-session fixes Task 1 (spec §1): the run is a visible split the learner can type into.
+  local function term_win()
+    local job = require("tutor").state.run_job
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      local b = vim.api.nvim_win_get_buf(w)
+      if vim.b[b].tutor_run and vim.b[b].terminal_job_id == job then return w end
+    end
+  end
+  it(":TutorRun shows the program in a split and takes typed input", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false,
+      run_cmd = { "sh", "-c", 'printf "name? "; read x; printf "age? "; read y; echo "hi $x $y"; exit 3' } })
+    local got
+    tutor._notify_override = function(p) got = p end
+    vim.cmd("TutorRun")
+    assert.is_truthy(term_win())
+    local job = tutor.state.run_job
+    vim.wait(300)
+    vim.fn.chansend(job, "bo\n")
+    vim.wait(200)
+    vim.fn.chansend(job, "9\n")
+    vim.wait(3000, function() return got ~= nil end)
+    assert.is_truthy(got)
+    assert.equals(3, got.code)
+    assert.is_truthy(got.stdout:match("name%? .*age%? .*hi bo 9"), got.stdout)
+  end)
+
+  it("review I2: :TutorRun from a lazy keymap (under textlock) runs on the event loop, with no E565", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 5" } })
+    tutor._notify_override = function() end
+    vim.v.errmsg = ""
+    vim.keymap.set("n", "<F13>", function() vim.cmd("TutorRun"); return "" end, { expr = true })
+    local ok = pcall(vim.api.nvim_feedkeys, vim.keycode("<F13>"), "x", false)
+    vim.keymap.del("n", "<F13>")
+    assert.is_true(ok)
+    assert.is_true(vim.wait(1000, function() return term_win() ~= nil and tutor.state.run_job ~= nil end))
+    assert.is_nil(vim.v.errmsg:find("E565"))
+    vim.cmd("TutorRun stop")
+  end)
+
+  it(":TutorRun stop stops a running program, reported as stopped", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 30" } })
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("TutorRun")
+    local job = tutor.state.run_job
+    vim.cmd("TutorRun stop")
+    vim.fn.jobwait({ job }, 1000)
+    vim.wait(300)
+    assert.same({}, sent)
+    assert.is_nil(tutor.state.run_job)
+  end)
+
+  it("a second :TutorRun restarts instead of refusing", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 30" } })
+    local notes = {}
+    local orig = vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    tutor._notify_override = function() end
+    vim.cmd("TutorRun")
+    local first = tutor.state.run_job
+    vim.cmd("TutorRun")
+    local second = tutor.state.run_job
+    vim.notify = orig
+    assert.are_not.equal(first, second)
+    assert.are_not.equal(-1, vim.fn.jobwait({ first }, 1000)[1])
+    for _, m in ipairs(notes) do assert.is_nil(m:match("already running")) end
+    vim.cmd("TutorRun stop")
+  end)
+
+  it("closing the split stops the program (Review Focus 2)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 30" } })
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("TutorRun")
+    local job = tutor.state.run_job
+    vim.api.nvim_win_close(term_win(), true)
+    assert.are_not.equal(-1, vim.fn.jobwait({ job }, 1000)[1])
+    vim.wait(300)
+    assert.same({}, sent)
+    assert.is_nil(tutor.state.run_job)
+  end)
+
+  it("quitting a run with Ctrl+C is not a failed try (side-agent note)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    -- a loop that only ends when the learner quits it, like a guessing game
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false,
+      run_cmd = { "sh", "-c", 'trap "exit 130" INT; while true; do sleep 0.1; done' } })
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("TutorRun")
+    local job = tutor.state.run_job
+    vim.wait(300)
+    vim.fn.chansend(job, "\3")
+    assert.are_not.equal(-1, vim.fn.jobwait({ job }, 2000)[1])
+    vim.wait(300)
+    assert.same({}, sent)
+    assert.is_nil(tutor.state.run_job)
+  end)
+
+  it(":TutorRun test can never hang (stdin is empty)", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, test_cmd = { "sh", "-c", "read x || exit 7" } })
+    local got
+    tutor._notify_override = function(p) got = p end
+    vim.cmd("TutorRun test")
+    vim.wait(2000, function() return got ~= nil end)
+    assert.is_truthy(got)
+    assert.equals(7, got.code)
+  end)
+
   it(":TutorRun accepts a string run_cmd (run through the shell) (M6c M3)", function()
     package.loaded["tutor"] = nil
     local tutor = require("tutor")
@@ -382,7 +505,7 @@ describe("tutor.init", function()
     assert.has_no.errors(function() vim.cmd("TutorRun") end)
     vim.wait(2000, function() return got ~= nil end)
     assert.equals(4, got.code)
-    assert.equals("hi\n", got.stdout)
+    assert.equals("hi", got.stdout)
     assert.same({ "echo hi; exit 4" }, got.cmd)
   end)
 
@@ -399,7 +522,7 @@ describe("tutor.init", function()
     vim.cmd("TutorRun")
     vim.wait(2000, function() return got ~= nil end)
     assert.is_truthy(got)
-    assert.equals("ran\n", got.stdout)
+    assert.equals("ran", got.stdout)
   end)
 
   it("setup again stops a pending run; the old run's exit does not clear a newer one (pane #10)", function()

@@ -16,7 +16,9 @@ import type { SandboxHost } from "./exam/sandbox.js";
 import type { LessonState } from "./lessons.js";
 
 /** `weak`: tasks whose checks a near miss may still pass after the guard's one extra ask (spec 2026-10-22 §5.5). */
-export interface MilestoneChecks { checks: Check[]; reference: string; ran: boolean; weak?: string[] }
+export interface MilestoneChecks { checks: Check[]; reference: string; ran: boolean; weak?: string[];
+  /** Learner-session fixes (spec §3): how many checks the hidden solution confirmed. */
+  confirmed?: { trusted: number; total: number } }
 export interface ChecksState {
   milestones: Record<string, MilestoneChecks>;
   /** How each task was ticked by /tutor-done (spec §7: self-checked and "ticked by you" are labelled). */
@@ -74,6 +76,12 @@ const BUILDS_AS: Record<string, string> = {
   typescript: `${JS_MODULE} Node runs it as it is (it strips the types), so use only type annotations, no enums or namespaces.`,
 };
 
+/**
+ * Learner-session fixes (spec §3): the checks and the hidden solution are two model calls; without one shape both
+ * follow, the checks named top-level variables that the solution kept inside functions, and nothing was confirmed.
+ */
+export const SHAPE_RULE = "Program shape: unless a task names a function signature (like `split_amount(total, people)`), the program is a top-level script in task order, and every name a task mentions (like `secret_number`) is a top-level variable, never inside a function. For a task that names no function signature, write only run lines (typed input -> printed text).";
+
 export function checksPrompt(i: { language: string; tasksMd: string; milestone: number }): string {
   const value = VALUE_LANGUAGES.has(i.language);
   return [
@@ -86,6 +94,7 @@ export function checksPrompt(i: { language: string; tasksMd: string; milestone: 
     ...(VALUE_EXAMPLE[i.language] ? [`for example: check P1.T1: ${VALUE_EXAMPLE[i.language]}`] : []),
     'run <task id>: stdin "<typed input>" -> stdout contains "<printed text>"',
     ...(value ? [] : ["", `Write only run lines: ${i.language} functions cannot be called directly here.`]),
+    "", SHAPE_RULE,
   ].join("\n");
 }
 
@@ -93,7 +102,7 @@ export function checksPrompt(i: { language: string; tasksMd: string; milestone: 
 export function referencePrompt(i: { language: string; tasksMd: string; milestone: number; entry: string }): string {
   const tasks = milestoneText(i.tasksMd, i.milestone, { upTo: true })
     .split("\n").map((l) => l.replace(/[;,.]?\s*done when:.*$/i, "")).join("\n");
-  return [`Language: ${i.language}. File: ${i.entry}.`, ...(BUILDS_AS[i.language] ? [BUILDS_AS[i.language]] : []), `Write the whole file as it is at the end of milestone ${i.milestone}. The tasks so far:`, tasks].join("\n");
+  return [`Language: ${i.language}. File: ${i.entry}.`, ...(BUILDS_AS[i.language] ? [BUILDS_AS[i.language]] : []), SHAPE_RULE, `Write the whole file as it is at the end of milestone ${i.milestone}. The tasks so far:`, tasks].join("\n");
 }
 
 /** The largest fenced block of the reply, or the whole reply; always ends with a newline. */
@@ -147,6 +156,8 @@ export async function writeMilestoneChecks(d: {
   language: string; tasksMd: string; milestone: number; entry: string | null; runCmd: string | null;
   /** The project folder, whose Cargo.toml / go.mod the reference builds with (spec 2026-10-22 §5.3). */
   root?: string;
+  /** Learner-session fixes (spec §3): ask once more for tasks left with no confirmed check (the step-up has its own). */
+  retry?: boolean;
 }): Promise<MilestoneChecks> {
   const ids = taskIds(milestoneText(d.tasksMd, d.milestone));
   const ask = checksPrompt({ language: d.language, tasksMd: d.tasksMd, milestone: d.milestone });
@@ -166,6 +177,21 @@ export async function writeMilestoneChecks(d: {
     if (r.missing) return { checks: parsed.checks, reference, ran: false };
     let checks = crossCheck(r.results);
     const types = new Map(r.results.flatMap((x) => (x.valueType && x.check.expr ? [[x.check.expr, x.valueType] as const] : [])));
+    // Spec §3: a task left with no confirmed check is asked for once more, with what failed and the shape rule.
+    const lacking = d.retry === false ? [] : ids.filter((t) => !checks.some((c) => c.task === t && c.status === "trusted"));
+    if (lacking.length) {
+      const failed = checks.filter((c) => lacking.includes(c.task)).map((c) => (c.kind === "io" ? `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}` : `check ${c.task}: ${c.expr} == ${c.expected}`));
+      const again = `${ask}\n\nThese checks could not be confirmed on a working solution${failed.length ? ":\n" + failed.join("\n") : " (there were none)"}\n` +
+        `Write new lines for ${lacking.join(", ")} that a working solution passes. ${SHAPE_RULE}`;
+      const more = parseChecks(await d.complete(systemText("checks"), again), { language: d.language, taskIds: lacking, milestone: d.milestone }).checks;
+      if (more.length) {
+        const r2 = await run(more);
+        if (!r2.missing) {
+          checks = [...checks, ...crossCheck(r2.results)];
+          for (const x of r2.results) if (x.valueType && x.check.expr) types.set(x.check.expr, x.valueType);
+        }
+      }
+    }
     // Spec §5.5: a near miss that passes every trusted check of a task gets that task one more check, asked once.
     const probe = async (all: Check[]): Promise<Map<string, string>> => {
       const weak = new Map(roundingWeakTasks(all, types).map((t) => [t, ROUNDED]));
@@ -195,6 +221,7 @@ export async function writeMilestoneChecks(d: {
         if (added.some((c) => c.status === "trusted")) weak = await probe(checks);
       }
     }
-    return { checks, reference, ran: true, ...(weak.size ? { weak: [...weak.keys()] } : {}) };
+    const confirmed = { trusted: checks.filter((c) => c.status === "trusted").length, total: checks.length };
+    return { checks, reference, ran: true, confirmed, ...(weak.size ? { weak: [...weak.keys()] } : {}) };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }

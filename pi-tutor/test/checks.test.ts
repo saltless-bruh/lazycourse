@@ -60,6 +60,8 @@ describe("renderChecksMd", () => {
       "",
       "Run `:TutorDone <task>` when a task works. Checks marked (unverified) are shown but never block a tick.",
       "",
+      "2 of 3 checks confirmed",
+      "",
       "## P2.T2",
       "- tip_amount(40, 0.2) == 8.0",
       "- tip_amount(10, 0) == 0 (unverified)",
@@ -149,5 +151,13 @@ describe("Phase 8 A6: brackets and == inside a JS template, a Go raw string or a
     expect(one("check P1.T1: flat([[1, 2], [3]]) == [1, 2, 3]", "python")).toMatchObject({ expr: "flat([[1, 2], [3]])", expected: "[1, 2, 3]" });
     expect(one("check P1.T1: wrap(`(a`) == (1", "javascript")).toBeUndefined();
     expect(one("check P1.T1: wrap([[(a]] == 1", "lua")).toBeUndefined();
+  });
+});
+
+describe("renderChecksMd confirmed count (learner-session fixes Task 4)", () => {
+  it("says how many checks are confirmed", () => {
+    const c = (status: "trusted" | "unverified"): Check => ({ task: "P1.T1", kind: "value", expr: "f()", expected: "1", milestone: 1, status });
+    expect(renderChecksMd([c("unverified"), c("unverified")], new Set())).toContain("0 of 2 checks confirmed");
+    expect(renderChecksMd([c("trusted"), c("unverified")], new Set())).toContain("1 of 2 checks confirmed");
   });
 });

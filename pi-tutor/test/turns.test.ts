@@ -26,3 +26,14 @@ describe("turns (spec 2026-10-21 §6)", () => {
     expect(fallbackReply("ask")).toMatch(/\?$/);
   });
 });
+
+describe("re-run finding: the recipe's teach fallback", () => {
+  it("names the step, explains it in its one sentence and asks for it, with no code marks", async () => {
+    const { STEP_SPECS } = await import("../extensions/tutor/workflow.js");
+    const t = fallbackReply("teach", undefined, { n: 1, ...STEP_SPECS[0] });
+    expect(t).toContain("Step 1, Find");
+    expect(t).toContain(STEP_SPECS[0].explain);
+    expect(t).not.toMatch(/`/);
+    expect(fallbackReply("teach")).toMatch(/^Tell me which step/);
+  });
+});

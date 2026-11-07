@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STEPS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, recipeAutoStart } from "../extensions/tutor/workflow.js";
+import { STEPS, STEP_SPECS, TASK_ID, startWorkflow, advance, workflowLabel, formatWorkflowContext, findTask, recipeAutoStart } from "../extensions/tutor/workflow.js";
 
 describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
   it("has the six steps in order", () => {
@@ -26,6 +26,16 @@ describe("design-recipe workflow (spec 2026-10-13 §4)", () => {
     expect(formatWorkflowContext(w, "pro")).toMatch(/name the step only/i);
     expect(b).toContain("step_done");
     expect(b).toContain("tutor-design-recipe");
+  });
+  it("each step is defined once and Find asks for the task in the learner's words (learner-session fixes §6)", () => {
+    expect(STEP_SPECS.map((s) => s.name)).toEqual([...STEPS]);
+    expect(STEP_SPECS[0].learnerWrites).toContain("which task");
+    for (const [i, s] of STEP_SPECS.entries()) {
+      const text = [s.learnerWrites, s.explain, i === 4 ? "" : s.name].join(" ");
+      expect(text, s.name).not.toMatch(/blueprint|\bmap\b/i);
+      expect(s.explain.length, s.name).toBeGreaterThan(10);
+    }
+    expect(formatWorkflowContext({ task: "P1.T1", step: 1, started: 1 }, "beginner")).toContain(STEP_SPECS[0].learnerWrites);
   });
   it("at Map the step points at the language card's cookbook skill (M7)", () => {
     const atMap = { task: "P1.T1", step: 5, started: 1 };

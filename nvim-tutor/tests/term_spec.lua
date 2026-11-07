@@ -210,4 +210,22 @@ describe("tutor.term minors (M6c)", function()
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
     assert.is_false(vim.api.nvim_win_is_valid(win))
   end)
+  it("learner-session fixes Task 2: entering the pane by keyboard or mouse asks for input mode", function()
+    -- Headless, :startinsert only takes effect back in the input loop, which vim.wait is not; the test checks the
+    -- request, and the live learner session (screen-replay) checks the effect.
+    local t = new()
+    t:show()
+    vim.wait(100)
+    vim.cmd("wincmd p")
+    vim.wait(100)
+    local asked = 0
+    local real = vim.cmd
+    vim.cmd = setmetatable({}, { __call = function(_, c, ...) if c == "startinsert" then asked = asked + 1 end return real(c, ...) end,
+      __index = function(_, k) return real[k] end })
+    vim.api.nvim_set_current_win(t.win)
+    vim.wait(300, function() return asked > 0 end)
+    vim.cmd = real
+    assert.is_true(asked > 0)
+    t:close()
+  end)
 end)

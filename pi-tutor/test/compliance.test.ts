@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
+import { readFileSync } from "node:fs";
+import { taskTerms } from "../extensions/tutor/similarity.js";
+import { cleanReply, proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -408,5 +410,96 @@ describe("checkTurn and the hidden reference (spec 2026-10-21 §6, §7)", () => 
     expect(checkTurn("Your `return total / people` is right.", { step: "hint", names: new Set(), sourceLines: ["    return total / people"], referenceLines: reference })).not.toContain("own-code");
     expect(checkTurn("Use `x`.", { step: "hint", names: new Set(), sourceLines: [], referenceLines: ["x"] })).not.toContain("own-code");
     expect(checkTurn("Change it to `return total / people`.", { step: "fix", names: new Set(), sourceLines: [], referenceLines: reference })).not.toContain("own-code");
+  });
+});
+
+// Learner-session fixes Task 5 (spec §4): a reply the model wrapped whole in a markdown fence showed raw.
+describe("cleanReply", () => {
+  const fixture = (name: string) => readFileSync(new URL(`./fixtures/replies/${name}`, import.meta.url), "utf8");
+  it("unwraps an outer markdown fence (a real nemotron reply from the learner session)", () => {
+    const out = cleanReply(fixture("outer-markdown-fence.md"));
+    expect(out.trimStart().startsWith("**What's happening**")).toBe(true);
+    expect(out).not.toContain("```markdown");
+    expect(out).toContain("**In short**");
+  });
+  it("leaves a reply whose only fence is an inner one-line quote alone (Review Focus 5)", () => {
+    const reply = "**What's happening**: look at this line:\n\n```markdown\ntotal = price * qty\n```\n\n**In short**: the star multiplies.";
+    expect(cleanReply(reply)).toBe(reply);
+  });
+  it("a reply that only starts with a fence but goes on after it is not unwrapped", () => {
+    const reply = "```markdown\nquote\n```\nThen prose follows.";
+    expect(cleanReply(reply)).toBe(reply);
+  });
+  it("re-run finding: an untagged fence opened before the reply's first heading is dropped (a real nemotron reply)", () => {
+    const out = cleanReply(fixture("untagged-outer-fence.md"));
+    expect(out.trimStart().startsWith("# Sentence Word Reverser")).toBe(true);
+    expect((out.match(/^\s*```/gm) ?? []).length % 2).toBe(0);
+    expect(out).toContain("```python\ntext = ");
+    expect(out).toContain("```tutor-judgment");
+  });
+  it("a reply that starts with a real code fence keeps it", () => {
+    const reply = "```\nx = 1\n```\n\n# What's happening\nx holds one.";
+    expect(cleanReply(reply)).toBe(reply);
+  });
+  it("review I1: a reply that opens with a quote fence keeps everything after it", () => {
+    const j = "\n\n```tutor-judgment\n{\"judgment\":\"none\"}\n```";
+    const quote = "```markdown\n> it takes the total and gives back each share\n```\n\n**What's happening**: you named both inputs.\n\n**In short**: good shape." + j;
+    expect(cleanReply(quote)).toBe(quote);
+    const code = "```\n# a comment\nx = 1\n```\nEverything after # is ignored." + j;
+    expect(cleanReply(code)).toBe(code);
+  });
+  it("review I1: an outer fence closed at the end, before or after the judgment, is still unwrapped", () => {
+    const j = "```tutor-judgment\n{}\n```";
+    expect(cleanReply("```markdown\n# Title\nbody\n```\n\n" + j)).toBe("# Title\nbody\n\n" + j);
+    expect(cleanReply("```\n# Title\nbody\n" + j + "\n```")).toBe("# Title\nbody\n" + j);
+  });
+  it("the reminder states no column count", () => {
+    expect(replyReminder("teach")).not.toMatch(/\d+ characters/);
+  });
+});
+
+// Learner-session fixes Task 6 (spec §5): an example that is the task, renamed, is held outside the fix step.
+describe("checkTurn: structural leaks", () => {
+  const terms = taskTerms("generate a random secret number"); // through the real stem, as index.ts builds them
+  const base = { names: new Set<string>(), sourceLines: [] as string[] };
+  const reply = (code: string) => `**Example**: a small unrelated example:\n\n\`\`\`python\n${code}\n\`\`\`\n\nWhat would you write? ` + "```tutor-judgment\n{}\n```";
+  it("holds an 'unrelated' example that uses the task's words", () => {
+    expect(checkTurn(reply("number = random.randint(1, 100)"), { ...base, step: "teach", taskTerms: terms })).toContain("own-code");
+  });
+  it("holds an example whose structure is the hidden solution's", () => {
+    const ref = "secret_number = random.randint(1, 100)\nguess = int(input('Enter: '))";
+    expect(checkTurn(reply("x = random.randint(1, 100)\ny = int(input('Go: '))"), { ...base, step: "teach", referenceCode: ref })).toContain("own-code");
+  });
+  it("lets a concept example on another domain through, and never holds the fix step", () => {
+    expect(checkTurn(reply("die = random.randint(1, 6)"), { ...base, step: "teach", taskTerms: terms })).not.toContain("own-code");
+    expect(checkTurn(reply("number = random.randint(1, 100)"), { ...base, step: "fix", taskTerms: terms })).not.toContain("own-code");
+  });
+  it("a diagram that names the task's words is not code", () => {
+    const diagram = "**What's happening**:\n\n```\npick a random secret number\n  v\nstore it\n```\n\nWhat comes next? ```tutor-judgment\n{}\n```";
+    expect(checkTurn(diagram, { ...base, step: "teach", taskTerms: terms })).not.toContain("own-code");
+  });
+});
+
+describe("re-run finding: a builtin the plan names is no name of the learner's", () => {
+  it("`split()` in a task line is the language's, `reverse_words(text)` is the learner's", () => {
+    const names = ownNames({ tasksMd: "- [ ] P2.T1 Split `sentence` into words using `split()`; print with `print()`; then `len()`\n- [ ] P2.T2 write `reverse_words(text)`", sources: [] });
+    for (const b of ["split", "print", "len"]) expect(names.has(b), b).toBe(false);
+    expect(names.has("reverse_words")).toBe(true);
+  });
+});
+
+describe("re-run finding: the plan's named variables are the learner's names", () => {
+  const tasksMd = "- [ ] P1.T1 Ask for a sentence and store in variable `sentence`\n- [ ] P1.T2 Validate `sentence` contains a word; store it in `is_ok`\n- [ ] P2.T1 Split with `split()`";
+  it("`sentence` and `is_ok` from the plan are names; `split` is not", () => {
+    const names = ownNames({ tasksMd, sources: [] });
+    expect(names.has("sentence")).toBe(true);
+    expect(names.has("is_ok")).toBe(true);
+    expect(names.has("split")).toBe(false);
+  });
+  it("a prose answer that uses the plan's variable is held; naming it alone is not", () => {
+    const names = ownNames({ tasksMd, sources: [] });
+    const turn = (t: string) => checkTurn(t + "\n\nWhat would you try? ```tutor-judgment\n{}\n```", { step: "teach", names, sourceLines: [] });
+    expect(turn("Consider the constraint `sentence.strip() != ''`.")).toContain("own-code");
+    expect(turn("Look at where `sentence` gets its value.")).not.toContain("own-code");
   });
 });

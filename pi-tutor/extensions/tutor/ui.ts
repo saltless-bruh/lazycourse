@@ -9,6 +9,8 @@ export interface TutorState {
   /** Active role when it is not the default coding tutor (spec 2026-10-13 §3). */
   role?: string;
   language?: string; level?: number; task?: string;
+  /** Learner-session fixes (spec §2): false until a level is known (first run, onboarding): "level not set". */
+  levelKnown?: boolean;
   /** Failed graded tries on the current spot (spec 2026-10-21 §5); shown only when > 0. */
   attempt?: number;
   state: string; connected: boolean;
@@ -43,7 +45,8 @@ export function renderWidget(s: TutorState): string[] {
   if (s.task) parts.push(s.task);
   if (s.role) parts.push(s.role);
   if (s.language) parts.push(s.language);
-  if (s.level !== undefined) parts.push(`lvl ${s.level}`);
+  if (s.levelKnown === false) parts.push("level not set");
+  else if (s.level !== undefined) parts.push(`lvl ${s.level}`);
   const line1 = parts.length ? `tutor  ${parts.join(" · ")}` : "tutor";
   // Off Neovim the state and judgment still show; the prefix says why (M1b #2, M2 #10, M3 #23).
   // The state is clipped to the room the prefix and the judgment leave, so "· judged X" always shows (M6c I2).
@@ -54,5 +57,6 @@ export function renderWidget(s: TutorState): string[] {
 }
 
 export function renderStatus(s: TutorState): string {
+  if (s.levelKnown === false) return "tutor · level not set";
   return s.level !== undefined ? `tutor lvl ${s.level} · ${bandFor(s.level)}` : "tutor";
 }

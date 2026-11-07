@@ -165,3 +165,19 @@ describe("final review", () => {
     expect(o.fields.target).toBe("python");
   });
 });
+
+describe("re-run finding: during onboarding a ```json note with only intake fields is the intake note", () => {
+  const note = 'Does that level feel right?\n\n```json\n{\n  "experience": "none yet",\n  "known": [],\n  "target": "Python"\n}\n```';
+  it("is read and hidden while onboarding", () => {
+    expect(parseIntake(note, { json: true })).toMatchObject({ experience: "none yet", known: [], target: "python" });
+    expect(stripIntake(note, { json: true }).trimEnd()).toBe("Does that level feel right?");
+    expect(stripIntake("Sound good?\n\n```json\n{}\n```", { json: true }).trimEnd()).toBe("Sound good?");
+    expect(scrubInternals(note, { intakeJson: true })).not.toContain("```json");
+  });
+  it("is left alone outside onboarding, and a json fence with other keys always stays", () => {
+    expect(stripIntake(note)).toBe(note);
+    expect(parseIntake(note)).toBeNull();
+    const lesson = 'A JSON object:\n\n```json\n{"name": "Ada", "age": 36}\n```';
+    expect(stripIntake(lesson, { json: true })).toBe(lesson);
+  });
+});

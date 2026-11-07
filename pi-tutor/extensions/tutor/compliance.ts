@@ -3,6 +3,7 @@ import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import type { TurnStep } from "./ladder.js";
 import { turnInstruction, TURN_LIMITS } from "./turns.js";
+import { LANGUAGE_NAMES, termHits, windowOverlap } from "./similarity.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
 export type Issue = "missing-judgment" | "code-above-rung" | "wide-diagram" | "internals" | "no-summary";
@@ -140,9 +141,9 @@ function scrubLine(line: string): string {
  * It must never cost a judgment: when parseJudgment would read the result differently, the original
  * text is kept and the [tutor-check] path reports the leak instead.
  */
-export function scrubInternals(raw: string): string {
+export function scrubInternals(raw: string, o: { intakeJson?: boolean } = {}): string {
   // Spec 2026-10-19 §6: intake notes are for the extension only, however loosely the model fenced them.
-  const text = stripIntake(raw);
+  const text = stripIntake(raw, { json: o.intakeJson });
   const prose = (p: string) => p.split("\n")
     .filter((l) => KEEP_LINE.test(l) || !META_LINE.test(l))
     .map((l) => (KEEP_LINE.test(l) ? l : scrubLine(l))).join("\n");
@@ -173,7 +174,7 @@ export function replyReminder(step: TurnStep | null, recipe = false): string {
   // Final review I5: a hint or a question is a few plain sentences; the five parts would fail its length check.
   const shape = step === "hint" || step === "ask"
     ? "Reply in plain sentences, no bold parts,"
-    : "Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagram lines ≤ 40 characters,";
+    : "Use the bold parts (What's happening, Why, Example, What to try, In short), keep diagrams narrow,";
   return `[tutor-reply] ${shape} and end with the \`\`\`tutor-judgment block.${hold}${turn}`;
 }
 
@@ -257,7 +258,13 @@ function addSignature(out: Set<string>, name: string, params: string) {
 /** The learner's own names: task signatures in spec/tasks.md backticks and the definitions in their sources. */
 export function ownNames(i: { tasksMd: string | null; sources: string[] }): Set<string> {
   const out = new Set<string>();
-  for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) for (const m of span[1].matchAll(SIGNATURE)) addSignature(out, m[1], m[2]);
+  // Re-run finding: a plan that says "using `split()`" names the language's function, not the learner's.
+  for (const span of (i.tasksMd ?? "").matchAll(/`([^`\n]+)`/g)) {
+    for (const m of span[1].matchAll(SIGNATURE)) if (!LANGUAGE_NAMES.has(m[1])) addSignature(out, m[1], m[2]);
+    // Re-run finding: a plan that names a variable (`sentence`, `reversed_words`) names the learner's too.
+    const bare = span[1].trim();
+    if (/^[A-Za-z_]\w*$/.test(bare) && !LANGUAGE_NAMES.has(bare)) addSignature(out, bare, "");
+  }
   // Final review I6: from their files only function names; every parameter (`value`, `items`) flagged examples.
   for (const src of i.sources) for (const m of src.matchAll(DEFINITION)) addSignature(out, m[1], "");
   return out;
@@ -276,7 +283,12 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 
 /** Spec §6: what code can check about one reply before the learner sees it. `sourceLines`: what the learner already
  *  saw (their files, and the failed run's output); quoting it is not giving the fix. */
-export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] } }): TurnIssue[] {
+/** Fence tags that mark code (not a diagram, a quote or a note) for the structural leak check (spec §5). */
+const CODE_TAGS = new Set(["python", "py", "javascript", "js", "typescript", "ts", "lua", "rust", "rs", "go", "golang"]);
+
+export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] };
+  /** Learner-session fixes (spec §5): the hidden solution's code, and the task's (or project's) content words. */
+  referenceCode?: string; taskTerms?: Set<string> }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
@@ -296,6 +308,8 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     // Final review I1: a ```markdown fence is checked too (style.md asks for quotes in one); its text also counts as prose.
     if (QUOTES.has(tag)) quotedProse += `\n${m[3]}`;
     if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
+    // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
+    if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }
   const prose = text.replace(FENCES, "") + quotedProse;
   // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
@@ -311,6 +325,34 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   // Final review C1: only on a graded try with a checked function, comparing that function's lines on both sides.
   if (o.step !== "fix" && !issues.has("own-code") && o.proseScope?.referenceLines.length && proseFixLeak(raw, { ...o.proseScope, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
   return [...issues];
+}
+
+/**
+ * Learner-session fixes (spec §4): a reply the model wrapped whole in a ```markdown (or ```md) fence showed as raw
+ * text — the bold parts with their asterisks, nested fences. Only a fence around the entire reply is removed; a
+ * quoted line inside a reply stays.
+ */
+const JUDGMENT_TAIL = /\n[ \t]*```tutor-judgment[ \t]*\n[^`]*\n[ \t]*```[ \t]*\s*$/;
+/**
+ * A fence that opens the reply wraps it only when it never closes, or closes at the very end (before or after the
+ * judgment). Review I1: one that closes earlier is a real quote or code block, and the reply after it stays.
+ */
+function unwrapOuter(text: string, opener: RegExp): string {
+  const m = opener.exec(text);
+  if (!m) return text;
+  const rest = text.slice(m[0].length);
+  const j = JUDGMENT_TAIL.exec(rest);
+  const core = j ? rest.slice(0, j.index) : rest, tail = j ? rest.slice(j.index) : "";
+  if ((core.match(/^[ \t]*```/gm) ?? []).length % 2 === 0) return rest; // never closed
+  const close = /\r?\n[ \t]*```[ \t]*\s*$/.exec(core);
+  return close ? core.slice(0, close.index) + (tail ? "\n" + tail : "") : text;
+}
+
+export function cleanReply(text: string): string {
+  const md = unwrapOuter(text, /^\s*```(?:markdown|md)[ \t]*\r?\n/);
+  if (md !== text) return md;
+  // Re-run finding: a bare fence opened right before the reply's first heading wraps the reply (often never closed).
+  return unwrapOuter(text, /^\s*```[ \t]*\r?\n(?=\s*#{1,6} )/);
 }
 
 /** C: a weak model's planning before the reply's first heading is folded away; a reply with no heading stays. */

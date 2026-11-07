@@ -67,7 +67,26 @@ function objectEnd(t: string, open: number): number {
  * a note is any line holding only backticks and `tutor-intake` (or the tag alone, right after a line of
  * backticks), followed by a JSON object. The tag inside prose never counts.
  */
-export function intakeSpans(text: string): { start: number; end: number; json: string }[] {
+// Re-run finding: during onboarding a weak model tags the note `json`; a json fence holding only intake fields is it.
+const INTAKE_KEYS = new Set(["experience", "known", "target", "selfScore", "confidence", "idea", "path"]);
+function jsonIntakeSpans(text: string): { start: number; end: number; json: string }[] {
+  const out: { start: number; end: number; json: string }[] = [];
+  for (const m of text.matchAll(/(^|\n)[ \t]*```json[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)\n?/g)) {
+    let v: unknown;
+    try { v = JSON.parse(m[2]); } catch { continue; }
+    if (!v || typeof v !== "object" || Array.isArray(v) || !Object.keys(v).every((k) => INTAKE_KEYS.has(k))) continue;
+    out.push({ start: m.index + m[1].length, end: m.index + m[0].length, json: m[2] });
+  }
+  return out;
+}
+
+export function intakeSpans(text: string, o: { json?: boolean } = {}): { start: number; end: number; json: string }[] {
+  const tagged = taggedIntakeSpans(text);
+  if (!o.json) return tagged;
+  return [...tagged, ...jsonIntakeSpans(text).filter((j) => !tagged.some((t) => j.start < t.end && t.start < j.end))].sort((a, b) => a.start - b.start);
+}
+
+function taggedIntakeSpans(text: string): { start: number; end: number; json: string }[] {
   const out: { start: number; end: number; json: string }[] = [];
   for (let i = text.indexOf("tutor-intake"); i >= 0; i = text.indexOf("tutor-intake", i + 1)) {
     const ls = text.lastIndexOf("\n", i - 1) + 1, le = text.indexOf("\n", i) < 0 ? text.length : text.indexOf("\n", i);
@@ -95,9 +114,9 @@ export function intakeSpans(text: string): { start: number; end: number; json: s
 }
 
 /** The reply without its intake notes (the learner never sees them). */
-export function stripIntake(text: string): string {
+export function stripIntake(text: string, o: { json?: boolean } = {}): string {
   let out = "", last = 0;
-  for (const sp of intakeSpans(text)) { out += text.slice(last, sp.start); last = sp.end; }
+  for (const sp of intakeSpans(text, o)) { out += text.slice(last, sp.start); last = sp.end; }
   return out + text.slice(last);
 }
 
@@ -113,8 +132,8 @@ function experienceBand(s: string): string | null {
 }
 
 /** The last `tutor-intake` fence as validated fields; null when there is no fence or its JSON is broken. */
-export function parseIntake(text: string): Partial<Fields> | null {
-  const notes = intakeSpans(text);
+export function parseIntake(text: string, o: { json?: boolean } = {}): Partial<Fields> | null {
+  const notes = intakeSpans(text, o);
   if (!notes.length) return null;
   let raw: unknown;
   try { raw = JSON.parse(notes[notes.length - 1].json); } catch { return null; }

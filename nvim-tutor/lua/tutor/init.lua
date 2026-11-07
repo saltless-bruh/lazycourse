@@ -1,4 +1,5 @@
 local term = require("tutor.term")
+local runpane = require("tutor.runpane")
 
 local M = {}
 M.state = { term = nil, run_job = nil }
@@ -75,15 +76,32 @@ function M.open_tasks(dir)
   return ids
 end
 
----@param kind? "run"|"test"
+---@param kind? "run"|"test"|"stop"
 function M.run(kind)
   kind = kind or "run"
-  if not KINDS[kind] then
-    vim.notify("[tutor] usage: :TutorRun [run|test]", vim.log.levels.WARN)
+  -- Review I2: from a lazy-loaded keymap the command runs under textlock, where splits and jobstart{term} throw
+  -- E565 (CLAUDE.md); the whole run waits for the event loop.
+  if require("tutor.term").textlocked() then
+    vim.schedule(function() M.run(kind) end)
     return
   end
+  -- Learner-session fixes (spec §1): stop ends the visible run; its exit is not reported.
+  if kind == "stop" then
+    runpane.stop()
+    M.state.run_job = nil
+    return
+  end
+  if not KINDS[kind] then
+    vim.notify("[tutor] usage: :TutorRun [run|test|stop]", vim.log.levels.WARN)
+    return
+  end
+  -- A second run replaces the visible one (no "already running" dead end); a hidden test run is still one at a time.
+  if kind == "run" and runpane.running() then
+    runpane.stop()
+    M.state.run_job = nil
+  end
   if M.state.run_job then
-    vim.notify("[tutor] a run is already running", vim.log.levels.WARN)
+    vim.notify("[tutor] a test run is still running", vim.log.levels.WARN)
     return
   end
   -- M8: the project's own README names its commands; the plugin option is the fallback.
@@ -108,9 +126,37 @@ function M.run(kind)
     end
   end
   local payload_cmd = type(cmd) == "table" and cmd or { cmd }
+  local function report(code, stdout, stderr)
+    local payload = { kind = "run_output", cmd = payload_cmd, code = code, stdout = stdout, stderr = stderr }
+    if not M.notify_tutor(payload) then
+      vim.notify("[tutor] run finished (exit " .. code .. ") but pi-tutor is not connected", vim.log.levels.INFO)
+    end
+  end
+  if kind == "run" then
+    local pane, why = runpane.start(argv, opts.cwd, function(code, lines, id)
+      if stopped[id] then stopped[id] = nil return end
+      -- Side-agent note: Ctrl+C in the split (exit 130, Python's KeyboardInterrupt) is the learner quitting the
+      -- program, like :TutorRun stop: never a failed try.
+      if code == 130 then
+        vim.notify("[tutor] run stopped", vim.log.levels.INFO)
+        return
+      end
+      report(code, table.concat(lines, "\n"), "")
+    end, function(id)
+      if M.state.run_job == id then M.state.run_job = nil end
+    end)
+    if not pane then
+      vim.notify("[tutor] could not start run_cmd: " .. tostring(why), vim.log.levels.WARN)
+      return
+    end
+    M.state.run_job = pane.job
+    return
+  end
+  -- The hidden test run gets no input (a read fails at once) and at most 60 s.
   local out, err = {}, {}
   local ok, job = pcall(vim.fn.jobstart, argv, {
     cwd = opts.cwd,
+    stdin = "null",
     stdout_buffered = true, stderr_buffered = true,
     on_stdout = function(_, d) out = d end,
     on_stderr = function(_, d) err = d end,
@@ -119,11 +165,7 @@ function M.run(kind)
       if M.state.run_job == id then M.state.run_job = nil end
       -- Phase 8 D (M6c parked): a run setup() stopped (exit 143) is no failed run of the learner's.
       if stopped[id] then stopped[id] = nil return end
-      local payload = { kind = "run_output", cmd = payload_cmd, code = code,
-        stdout = table.concat(out, "\n"), stderr = table.concat(err, "\n") }
-      if not M.notify_tutor(payload) then
-        vim.notify("[tutor] run finished (exit " .. code .. ") but pi-tutor is not connected", vim.log.levels.INFO)
-      end
+      report(code, table.concat(out, "\n"), table.concat(err, "\n"))
     end,
   })
   if not ok or type(job) ~= "number" or job <= 0 then
@@ -131,6 +173,7 @@ function M.run(kind)
     return
   end
   M.state.run_job = job
+  vim.defer_fn(function() if M.state.run_job == job then pcall(vim.fn.jobstop, job) end end, 60000)
 end
 
 local function slash(text)
@@ -210,12 +253,13 @@ function M.setup(user_opts)
   M.state.term = term.new({ cmd = M.build_cmd(opts.pi_cmd), cwd = opts.cwd, width = opts.width, env = { PI_TUTOR = "1" } })
   -- A pending run is stopped, not orphaned: its exit would otherwise land after a newer run started.
   if M.state.run_job then stopped[M.state.run_job] = true pcall(vim.fn.jobstop, M.state.run_job) end
+  runpane.stop()
   M.state.run_job = nil
   local cmd = vim.api.nvim_create_user_command
   cmd("Tutor", function() M.state.term:toggle() end, {})
   cmd("TutorRestart", function() M.state.term:restart() end, {})
   cmd("TutorRun", function(a) M.run(a.args ~= "" and a.args or "run") end,
-    { nargs = "?", complete = function() return { "run", "test" } end })
+    { nargs = "?", complete = function() return { "run", "test", "stop" } end })
   cmd("TutorStart", slash("/tutor-start"), { nargs = "?",
     complete = function() return { "python", "rust", "go", "typescript", "lua", "javascript", "check", "off", "spec" } end })
   cmd("TutorLesson", slash("/tutor-lesson"), { nargs = "?",
