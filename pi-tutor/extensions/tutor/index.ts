@@ -933,7 +933,7 @@ export default function (pi: ExtensionAPI): void {
     paneWidth = c.availableWidth;
     if (held() && c.isStreaming) return HOLD_TEXT;
     // Learner-session fixes (spec §4): every assistant message, every turn type, onboarding included.
-    const shown = hideJudgment(scrubInternals(cleanReply(md)));
+    const shown = hideJudgment(scrubInternals(cleanReply(md), { intakeJson: onboardingActive() }));
     return folds() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", async (event, ctx) => {
@@ -944,13 +944,14 @@ export default function (pi: ExtensionAPI): void {
     if (onboardingActive()) {
       // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
       const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-      if (text.trim()) intake = parseIntake(text);
+      if (text.trim()) intake = parseIntake(text, { json: true });
     }
     let changed = false;
     let content = m.content.map((c) => {
       if (c.type !== "text") return c;
       const clean = cleanReply(c.text);
-      const text = folds() ? foldPreamble(scrubInternals(clean)) : scrubInternals(clean);
+      const scrubbed = scrubInternals(clean, { intakeJson: onboardingActive() });
+      const text = folds() ? foldPreamble(scrubbed) : scrubbed;
       if (text === c.text) return c;
       changed = true;
       return { ...c, text };

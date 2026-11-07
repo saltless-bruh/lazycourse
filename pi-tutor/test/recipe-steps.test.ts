@@ -88,5 +88,10 @@ describe("learner-session fixes §6: plain words and beginner wording", () => {
     expect(recognize(3, "if the total is 48 it should give 16", o)).toBe(false); // one case, no edge
     expect(recognize(4, "first I am confused", o)).toBe(false);
     expect(recognize(5, "this is hard", o)).toBe(false);
+    // side-agent note: casual sentences must not earn the steps-first habit
+    expect(recognize(4, "the bill comes in first and then the friends", o)).toBe(false);
+    expect(recognize(4, "first I tried it and then it broke", o)).toBe(false);
+    expect(recognize(5, "this is a loop, that is print", o)).toBe(false);
+    expect(recognize(5, "it is weird and there is a star", o)).toBe(false);
   });
 });

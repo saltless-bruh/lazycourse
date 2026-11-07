@@ -141,9 +141,9 @@ function scrubLine(line: string): string {
  * It must never cost a judgment: when parseJudgment would read the result differently, the original
  * text is kept and the [tutor-check] path reports the leak instead.
  */
-export function scrubInternals(raw: string): string {
+export function scrubInternals(raw: string, o: { intakeJson?: boolean } = {}): string {
   // Spec 2026-10-19 §6: intake notes are for the extension only, however loosely the model fenced them.
-  const text = stripIntake(raw);
+  const text = stripIntake(raw, { json: o.intakeJson });
   const prose = (p: string) => p.split("\n")
     .filter((l) => KEEP_LINE.test(l) || !META_LINE.test(l))
     .map((l) => (KEEP_LINE.test(l) ? l : scrubLine(l))).join("\n");
@@ -328,7 +328,13 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
  */
 export function cleanReply(text: string): string {
   const m = /^\s*```(?:markdown|md)[ \t]*\r?\n([\s\S]*)\r?\n```[ \t]*\s*$/.exec(text);
-  return m ? m[1] : text;
+  if (m) return m[1];
+  // Re-run finding: a bare fence opened right before the reply's first heading wraps the reply (often never closed).
+  const open = /^\s*```[ \t]*\r?\n(?=\s*#{1,6} )/.exec(text);
+  if (!open) return text;
+  let rest = text.slice(open[0].length);
+  if ((rest.match(/^[ \t]*```/gm) ?? []).length % 2) rest = rest.replace(/\r?\n[ \t]*```[ \t]*\s*$/, "\n");
+  return rest;
 }
 
 /** C: a weak model's planning before the reply's first heading is folded away; a reply with no heading stays. */

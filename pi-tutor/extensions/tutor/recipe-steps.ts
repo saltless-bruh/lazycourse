@@ -31,7 +31,8 @@ const EDGE = /\b(?:edge|zero|0|empty|nothing|none|error|negative|wrong|invalid|b
 const ORDER = /\b(?:first|then|next|after that|afterwards|finally|lastly|last)\b/gi;
 // Map: "<step> is <construct>" pairs, the construct a symbol, a call or a construct's plain name.
 const CONSTRUCT = /[()`/*+%<>=[\]]|\b(?:slash|star|plus|minus|times|percent|modulo|loop|for|while|if|else|function|def|list|dict|dictionary|variable|input|print|round|int|float|str|string|len|range|split|join|return|comparison|import|random|f-string|format|append)\b/i;
-const MAP_PAIR = /^\s*[A-Za-z][\w' -]*?\s+(?:is|are|uses?|means?|becomes?|with|by)\s+(.+)$/i;
+// The left side names an action of the learner's steps (1-4 words), never "this", "that", "it", "there".
+const MAP_PAIR = /^\s*(?!(?:this|that|it|there|these|those)\b)[A-Za-z][\w'-]*(?:\s+[\w'-]+){0,3}?\s+(?:is|are|uses?|means?|becomes?|with|by)\s+(.+)$/i;
 
 export function recognize(step: number, learnerText: string, o: { language: string; task: string }): boolean {
   const ls = lines(learnerText);
@@ -53,7 +54,9 @@ export function recognize(step: number, learnerText: string, o: { language: stri
       const numbered = ls.filter((l) => /^\d+[.)]\s+\S/.test(l));
       // Phase 8 A15: a numbered question ("1. what do I take first?") asks, it is no step.
       if (numbered.length >= 2) return !numbered.some((l) => /[A-Za-z_]\w*\s*\(|[=*/+]|\breturn\b|\?$/.test(l.replace(/^\d+[.)]\s+/, "")));
-      return plain && (learnerText.match(ORDER) ?? []).length >= 2 && !/[A-Za-z_]\w*\s*\(|[=*/+`]/.test(learnerText);
+      // Side-agent note: three ordered parts of two words or more, so "it comes first and then …" is no plan.
+      const parts = learnerText.split(ORDER).map((x) => x.replace(/[,.;]/g, " ").trim()).filter((x) => x.split(/\s+/).length >= 2);
+      return plain && (learnerText.match(ORDER) ?? []).length >= 3 && parts.length >= 3 && !/[A-Za-z_]\w*\s*\(|[=*/+`]/.test(learnerText);
     }
     case 5: {
       if (ls.filter((l) => /^[A-Za-z][\w ,'-]*[A-Za-z]\s+(?:→|->)\s+\S/.test(l) && l.split(/\s+/).length >= 3).length >= 2) return true;

@@ -55,13 +55,17 @@ export function windowOverlap(code: string, reference: string, n = 5): number {
   return mine.filter((w) => theirs.has(w)).length / mine.length;
 }
 
-/** A light stem so "guessing", "guesses", "randomly", "generated" meet "guess", "random", "generate"'s stem. */
+/**
+ * A light stem so a word family meets: "guessing", "guesses" → "guess"; "randomly" → "random"; re-run finding:
+ * "reverse", "reversed", "reverser" → "revers" and "numbers", "number" → "numb". Up to two suffixes, then a final "e".
+ */
 function stem(w: string): string {
-  for (const suffix of ["ing", "ly", "ed", "es", "s"]) {
-    if (suffix === "s" && w.endsWith("ss")) continue; // "guess", not "gues"
-    if (w.length - suffix.length >= 4 && w.endsWith(suffix)) return w.slice(0, -suffix.length);
+  for (let round = 0; round < 2; round++) {
+    const suffix = ["ing", "ly", "ed", "er", "es", "s"].find((x) => !(x === "s" && w.endsWith("ss")) && w.length - x.length >= 4 && w.endsWith(x));
+    if (!suffix) break;
+    w = w.slice(0, -suffix.length);
   }
-  return w;
+  return w.length >= 5 && w.endsWith("e") ? w.slice(0, -1) : w;
 }
 
 const words = (text: string) => (text.match(/[A-Za-z]+/g) ?? []).flatMap((w) => w.split(/(?<=[a-z])(?=[A-Z])/)).map((w) => w.toLowerCase());

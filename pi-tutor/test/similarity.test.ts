@@ -41,3 +41,11 @@ describe("taskTerms and termHits", () => {
     expect(t.has("guess")).toBe(true);
   });
 });
+
+describe("re-run finding: a word family meets one stem", () => {
+  it("reverse / reversed / reverser and word / words are one term each (the Sentence Word Reverser leak)", () => {
+    const terms = taskTerms("Sentence Word Reverser and Counter. Asks for a sentence, then prints each word on a new line in reverse order with total character count");
+    const code = 'text = "hello world test"\nwords = text.split()\nfor w in reversed(words):\n    print(w)\nprint("chars:", len(text))';
+    expect(termHits(code, terms)).toBeGreaterThanOrEqual(2);
+  });
+});

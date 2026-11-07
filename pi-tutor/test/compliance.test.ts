@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { taskTerms } from "../extensions/tutor/similarity.js";
 import { cleanReply, proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
@@ -429,6 +430,17 @@ describe("cleanReply", () => {
     const reply = "```markdown\nquote\n```\nThen prose follows.";
     expect(cleanReply(reply)).toBe(reply);
   });
+  it("re-run finding: an untagged fence opened before the reply's first heading is dropped (a real nemotron reply)", () => {
+    const out = cleanReply(fixture("untagged-outer-fence.md"));
+    expect(out.trimStart().startsWith("# Sentence Word Reverser")).toBe(true);
+    expect((out.match(/^\s*```/gm) ?? []).length % 2).toBe(0);
+    expect(out).toContain("```python\ntext = ");
+    expect(out).toContain("```tutor-judgment");
+  });
+  it("a reply that starts with a real code fence keeps it", () => {
+    const reply = "```\nx = 1\n```\n\n# What's happening\nx holds one.";
+    expect(cleanReply(reply)).toBe(reply);
+  });
   it("the reminder states no column count", () => {
     expect(replyReminder("teach")).not.toMatch(/\d+ characters/);
   });
@@ -436,7 +448,7 @@ describe("cleanReply", () => {
 
 // Learner-session fixes Task 6 (spec §5): an example that is the task, renamed, is held outside the fix step.
 describe("checkTurn: structural leaks", () => {
-  const terms = new Set(["generate", "random", "secret", "number"]);
+  const terms = taskTerms("generate a random secret number"); // through the real stem, as index.ts builds them
   const base = { names: new Set<string>(), sourceLines: [] as string[] };
   const reply = (code: string) => `**Example**: a small unrelated example:\n\n\`\`\`python\n${code}\n\`\`\`\n\nWhat would you write? ` + "```tutor-judgment\n{}\n```";
   it("holds an 'unrelated' example that uses the task's words", () => {
