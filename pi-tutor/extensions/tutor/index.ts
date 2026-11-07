@@ -25,6 +25,7 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
+import { COMMANDS_NOTE, WELCOME } from "./commands-note.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
@@ -301,6 +302,7 @@ export default function (pi: ExtensionAPI): void {
 
   function setLevel(n: number) {
     state.level = n;
+    state.levelKnown = true;
     if (episode) {
       episode = { ...episode, band: bandFor(n) };
       pi.appendEntry("tutor_episode", episode);
@@ -470,6 +472,9 @@ export default function (pi: ExtensionAPI): void {
     }
     onboarding = loadOnboarding();
     onboardingHere = false;
+    // Learner-session fixes (spec §2): a first run leads — a welcome line, and no level shown until one is known.
+    state.levelKnown = !(firstRun() || (onboardingActive() && onboarding?.level === undefined));
+    if (firstRun()) pi.sendMessage({ customType: "tutor_welcome", content: WELCOME, display: true }, { triggerTurn: false });
     generation++;
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
@@ -564,6 +569,12 @@ export default function (pi: ExtensionAPI): void {
 
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
+    event.systemPromptOptions.sections["tutor_commands"] = COMMANDS_NOTE;
+    // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
+    if (event.messageType === "user" && firstRun() && !event.prompt.trim().startsWith("/")) {
+      saveOnboarding(newOnboarding(null));
+      onboardingHere = true;
+    }
     if (onboardingActive()) {
       // Spec 2026-10-19 §6: the onboarding rules replace the ladder prompt (no judgment block asked for).
       event.systemPromptOptions.sections["tutor"] = systemText("onboard");
@@ -990,7 +1001,7 @@ export default function (pi: ExtensionAPI): void {
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
   const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
-  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check"]);
+  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check", "tutor_welcome"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
     const last = new Map<string, number>();
@@ -2109,6 +2120,17 @@ export default function (pi: ExtensionAPI): void {
     if (o.stage === "choose") return !!project && project.path === o.dir;
     return onboardingHere || !project;
   };
+  /**
+   * Spec §2: nothing known yet — onboarding never written (a finished one is saved as ""), no project here, no
+   * language in the profile.
+   */
+  function firstRun(): boolean {
+    if (onboarding || project || !profile) return false;
+    let none = false;
+    const p = profile;
+    profileWrite(() => { none = p.setting("onboarding") === null && p.languages().length === 0; });
+    return none;
+  }
   function loadOnboarding(): Onboarding | null {
     let o: Onboarding | null = null;
     if (profile) { const p = profile; profileWrite(() => { const raw = p.setting("onboarding"); if (raw) { try { o = JSON.parse(raw) as Onboarding; } catch { o = null; } } }); }

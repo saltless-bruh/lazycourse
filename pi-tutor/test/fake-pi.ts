@@ -78,15 +78,29 @@ export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
   };
 }
 
-/** Boot the extension. Detached (no $NVIM) unless `nvim` names a socket. */
+/**
+ * Boot the extension. Detached (no $NVIM) unless `nvim` names a socket. The default learner is one who has been
+ * through onboarding (learner-session fixes §2: a never-onboarded, empty profile is a first run); a test that sets
+ * PI_TUTOR_PROFILE to a file chooses its own learner, a first run included.
+ */
 export async function boot(opts: { branch?: unknown[]; cwd?: string; nvim?: string } = {}) {
   const f = fakePi();
   extension(f.pi as never);
   const c = fakeCtx(opts.branch ?? [], opts.cwd);
-  const saved = process.env.NVIM;
+  const saved = process.env.NVIM, profileEnv = process.env.PI_TUTOR_PROFILE;
+  if (profileEnv === ":memory:") {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const file = __join(__mk(__join(__tmp(), "pitutor-prof-")), "p.sqlite");
+    const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+    process.env.PI_TUTOR_PROFILE = file;
+  }
   if (opts.nvim) process.env.NVIM = opts.nvim; else delete process.env.NVIM;
-  await f.events["session_start"]({ type: "session_start", reason: "startup" }, c.ctx);
-  if (saved) process.env.NVIM = saved; else delete process.env.NVIM;
+  try {
+    await f.events["session_start"]({ type: "session_start", reason: "startup" }, c.ctx);
+  } finally {
+    if (saved) process.env.NVIM = saved; else delete process.env.NVIM;
+    if (profileEnv !== undefined) process.env.PI_TUTOR_PROFILE = profileEnv;
+  }
   return { ...f, ...c };
 }
 

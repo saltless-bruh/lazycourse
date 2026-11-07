@@ -86,4 +86,10 @@ describe("lesson label (spec 2026-10-19 Q15)", () => {
     const [, l2] = renderWidget({ state: "spec error: /tutor-start spec", connected: false });
     expect(l2).toBe("outside nvim · spec error: /tutor-start spec");
   });
+  it("learner-session fixes Task 3: level not set until a level is known", () => {
+    expect(renderWidget({ state: "idle", connected: true, level: 50, levelKnown: false })[0]).toMatch(/level not set/);
+    expect(renderWidget({ state: "idle", connected: true, level: 50, levelKnown: false })[0]).not.toMatch(/lvl/);
+    expect(renderStatus({ state: "idle", connected: true, level: 50, levelKnown: false })).toBe("tutor · level not set");
+    expect(renderStatus({ state: "idle", connected: true, level: 10 })).toBe("tutor lvl 10 · beginner");
+  });
 });

@@ -983,6 +983,9 @@ describe("language card in the system prompt (spec §5.4)", () => {
     expect(t.message?.content).toContain("[index: python]");
   });
   it("no language known: only the editor card; a language with no pack: only the editor card", async () => {
+    // a learner past onboarding with no language yet (an empty, never-onboarded profile is a first run: spec §2)
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!); p.setSetting("onboarding", ""); p.close();
     const b = await boot();
     const t = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(t.sections["tutor_lang"]).toMatch(/^\[editor card: LazyVim\]/);
@@ -1304,6 +1307,59 @@ describe("/tutor-progress (gap #8)", () => {
     const text = String((b.messages.at(-1)?.message as { content: string }).content);
     expect(text).toMatch(/Habits \(beginner\)/);
     expect(text).toMatch(/no level for lua yet/);
+  });
+});
+
+describe("first run (learner-session fixes Task 3, spec §2)", () => {
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "first-")), "p.sqlite"); });
+  afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
+  const WELCOME = "New here? Tell me what you'd like to learn — or type /tutor-start.";
+  const shownTexts = (b: Awaited<ReturnType<typeof boot>>) => b.messages.map((m) => String((m.message as { content: string }).content));
+  const userTurn = async (b: Awaited<ReturnType<typeof boot>>, prompt: string) => {
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: opts }, b.ctx);
+    return opts.sections;
+  };
+  it("a brand-new learner is welcomed and their first message starts onboarding", async () => {
+    const b = await boot();
+    expect(shownTexts(b)).toContain(WELCOME);
+    const sections = await userTurn(b, "hi, I want to learn Python. I have never programmed before.");
+    expect(sections["tutor_onboard"]).toBeTruthy();
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const o = JSON.parse(p.setting("onboarding") ?? "null");
+    p.close();
+    expect(o?.stage).not.toBe("done");
+  });
+  it("an off-topic first message also starts onboarding (Review Focus 3)", async () => {
+    const b = await boot();
+    expect((await userTurn(b, "what is LazyVim?"))["tutor_onboard"]).toBeTruthy();
+  });
+  it("a learner with a profile language is not welcomed", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!); p.saveLanguage("python", 10, {}, 1); p.close();
+    const b = await boot();
+    expect(shownTexts(b)).not.toContain(WELCOME);
+    expect((await userTurn(b, "hello"))["tutor_onboard"]).toBeUndefined();
+  });
+  it("the welcome stays out of the model's context", async () => {
+    const b = await boot();
+    const welcome = b.messages.find((m) => (m.message as { customType: string }).customType === "tutor_welcome")!;
+    expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...(welcome.message as object), timestamp: 1 }] })).toMatchObject({ messages: [] });
+  });
+  it("every turn carries the tutor's commands, onboarding turns too", async () => {
+    const b = await boot();
+    const s = await userTurn(b, "hi");
+    expect(s["tutor_commands"]).toMatch(/:TutorRun/);
+    expect(s["tutor_commands"]).toMatch(/\/tutor-start/);
+    expect(s["tutor_commands"]).toMatch(/say "skip" to skip a step or "\/tutor-plan off" to stop/);
+  });
+  it("the widget says level not set until a level is known", async () => {
+    const b = await boot();
+    expect(b.widgets["tutor"]?.[0]).toMatch(/level not set/);
+    expect(b.widgets["tutor"]?.[0]).not.toMatch(/lvl/);
+    expect(b.statuses["tutor"]).toMatch(/level not set/);
   });
 });
 
