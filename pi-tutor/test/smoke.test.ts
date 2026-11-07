@@ -2542,6 +2542,24 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     expect(textOf(good)).toContain("Look at the operator inside `split_amount`.");
     expect(judgments(b)).toBe(1);
   });
+  it("re-run finding: inside the recipe a teach fallback explains the step (spec §6: 'I don't understand' gets the explanation)", async () => {
+    const { STEP_SPECS } = await import("../extensions/tutor/workflow.js");
+    const b = await boot({ cwd: project(), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 2, started: 1 } }] });
+    await level10(b);
+    const shown: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const leak = reply("Write `return total / people`.");
+      const rewrites = b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite");
+      if (i === 0) await turn(b.events, b.ctx, "I don't understand this step", leak);
+      else await customTurn(b, (rewrites.at(-1) as { message: object }).message, leak);
+      shown.push(textOf(leak));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+    }
+    expect(shown[2]).toContain("Step 2, Shape");
+    expect(shown[2]).toContain(STEP_SPECS[1].explain);
+    expect(shown[2]).not.toMatch(/`/);
+  });
   it("Review Focus #2/#5: after two failed re-asks the learner sees the fallback, with no code, and no fourth ask", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);

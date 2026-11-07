@@ -983,7 +983,8 @@ export default function (pi: ExtensionAPI): void {
           rewrite = { reasks: (cur.reasks ?? 0) + 1, issues, step: cur.step, ...(reason ? { reason } : {}) };
           pendingRewrite = issues;
         } else if (final) {
-          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined);
+          const inRecipe = workflow && roleNamed(activeRole).ladder ? { n: workflow.step, ...STEP_SPECS[workflow.step - 1] } : undefined;
+          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined, inRecipe);
           rewrite = null;
         }
         // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.
