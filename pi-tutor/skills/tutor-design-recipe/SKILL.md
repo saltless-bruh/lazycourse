@@ -8,11 +8,11 @@ The learner turns a written task into code one artifact at a time. The tutor ask
 
 ```
 1 Find
-  task + requirements + blueprint
+  which task, in your own words
   │
   ▼
 2 Shape
-  inputs → outputs (types)
+  what goes in, what comes back
   │
   ▼
 3 Examples
@@ -33,20 +33,22 @@ The learner turns a written task into code one artifact at a time. The tutor ask
 
 ## The steps
 
-1. Find: locate the task line in `spec/tasks.md`, its requirements, and its box in the blueprint. Artifact: a small map diagram showing this task, what feeds it, and what uses it.
-2. Shape: name the inputs and outputs with their types. Artifact: one line such as `argv: list[str] → Command`.
-3. Examples: 2-3 concrete input → output cases, one of them an edge case. They become runnable checks in step 6.
-4. Steps: the job as numbered plain sentences, no code.
-5. Map: each step → the language construct that does it (loop, dict lookup, `match`, …). Load the cookbook skill the language card lists (`tutor-<lang>-cookbook`): its recipes are indexed by the same plain steps the learner wrote in step 4, so find each step there and show that recipe's example, never their task.
+The `[workflow]` line gives each step's "the learner writes" and its one-sentence meaning; use those words.
+
+1. Find: the learner says which task they are on and what it should do, in their own words ("I'm doing P1.T1, it makes the secret number").
+2. Shape: what goes in and what comes back. Plain words are enough ("it takes the total and the people and gives back each share"); a typed line such as `argv: list[str] → Command` is welcome, not required.
+3. Examples: 2-3 concrete cases of what goes in and what should come out, one of them an edge case. Rows like `f(48, 3) → 16` become runnable checks in step 6.
+4. Steps: the job as plain sentences in order ("first …, then …"), numbered or not, no code.
+5. Map: each step → the piece of the language that does it (loop, dict lookup, `match`, …). Load the cookbook skill the language card lists (`tutor-<lang>-cookbook`): its recipes are indexed by the same plain steps the learner wrote in step 4, so find each step there and show that recipe's example, never their task.
 6. Build: the learner writes one step, runs it, compares with the examples, then moves to the next step.
 
-Finish a step only when the learner has produced its artifact; then set `step_done` to true in the judgment block. The extension moves the workflow to the next step, and the next `[workflow]` line names it.
+Finish a step only when the learner has written its artifact themselves; then set `step_done` to true in the judgment block. A question, "skip" or "I don't understand" is no artifact: the extension handles a skip and asks you to explain the step when they are lost. The extension moves the workflow to the next step, and the next `[workflow]` line names it.
 
 ## Per band
 
 | Band | Tutor | Learner |
 |---|---|---|
-| beginner | half-fills each artifact as a model; at step 5 shows an unrelated mini example per construct | completes each artifact |
+| beginner | shows the step on an unrelated example, never the learner's own; at step 5 shows an unrelated mini example per construct | writes each artifact |
 | intermediate | asks one question per step and checks the answer | writes each artifact in full |
 | pro | names the step only | does everything; the tutor reviews |
 
@@ -54,9 +56,8 @@ Finish a step only when the learner has produced its artifact; then set `step_do
 
 Task: "P1.T1 Parse the command line into a Command".
 
-> **What to try**: fill in the blanks of the shape:
-> `parse(argv: ____) → ____`
-> Look at how `main` calls it in `spec/blueprint.md`.
+> **What to try**: for a different job, "add up a shopping list", the shape is: it takes the prices and gives back the total.
+> Now yours: what does your task take, and what does it give back?
 > **In short**: name what goes in and what comes out.
 
-The tutor never fills in the learner's real types: it shows the form on the task's own function and leaves the content to the learner.
+The tutor never fills in the learner's own shape: it shows the form on an unrelated job and leaves their task to them.

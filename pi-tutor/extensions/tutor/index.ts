@@ -20,7 +20,7 @@ import { rememberTool, recallTool, memorySnapshot, memoryLine } from "./memory.j
 import { writeInRoot } from "./files.js";
 import { progressReport } from "./report.js";
 import { tickTasks } from "./tasks.js";
-import { STEPS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
+import { STEPS, STEP_SPECS, TASK_ID, startWorkflow, recipeAutoStart, advance, workflowLabel, formatWorkflowContext, findTask, type Workflow } from "./workflow.js";
 import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
@@ -32,7 +32,7 @@ import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
 import { crossCheckOnReference, currentMilestone, extractCode, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
-import { recognize, examplesToChecks } from "./recipe-steps.js";
+import { recognize, examplesToChecks, recipeIntent, isAttempt } from "./recipe-steps.js";
 import { questionTask, directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
@@ -661,7 +661,10 @@ export default function (pi: ExtensionAPI): void {
     if (stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask")) parts.push(`[step-up] talking test on: ${stepUp.talkTask}\nThe learner plans it in words. Ask at most one short question; never name functions, pieces or code yourself, and never solve it.`);
     // The architect suspends the recipe (M6a minor): no step context for a role that must not write code.
     // Phase 1 live check: a right-click question is about the error, so the recipe step stays out of that turn.
-    if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) parts.push(formatWorkflowContext(workflow, band));
+    if (workflow && role.ladder && !prompt.startsWith("[ask-error]")) {
+      parts.push(formatWorkflowContext(workflow, band));
+      if (recipeNote) parts.push(recipeNote);
+    }
     // Option 2: the idiom index only at the recipe's Map step or on a how-do-I question, this turn only.
     const mapStep = workflow !== null && role.ladder && STEPS[workflow.step - 1] === "Map";
     if (lang && pack && role.ladder && indexWanted({ prompt, mapStep })) {
@@ -679,10 +682,25 @@ export default function (pi: ExtensionAPI): void {
 
   /** Phase 8 A16: the learner's message moved the recipe since the last judgment. */
   let recipeMovedByCode = false;
-  /** Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. */
+  /** Learner-session fixes §6: this message asked what the step means; the step's explanation, for this turn only. */
+  let recipeNote: string | null = null;
+  /** The learner's latest own message: the model's step_done counts only after a real attempt (spec §6). */
+  let lastLearnerText = "";
+  /**
+   * Spec 2026-10-26 §5.1: the learner's own message advances the step when it has the step's artifact. Spec §6:
+   * plain words first — a skip moves on without counting as the learner's own; "what is …" gets the explanation.
+   */
   function recipeStep(prompt: string) {
     const w = workflow;
-    if (!w || !project || !recognize(w.step, prompt, { language: project.language, task: w.task })) return;
+    if (!w || !project) return;
+    const intent = recipeIntent(prompt);
+    if (intent === "skip") { advanceWorkflow(true); recipeMovedByCode = true; paint(); return; }
+    if (intent === "explain") {
+      const spec = STEP_SPECS[w.step - 1];
+      recipeNote = `[workflow] Explain step ${spec.name} in one sentence: ${spec.explain}; then ask for it again (the learner writes: ${spec.learnerWrites}).`;
+      return;
+    }
+    if (!recognize(w.step, prompt, { language: project.language, task: w.task })) return;
     if (w.step === 3) void addExampleChecks(prompt, w.task);
     rememberOwnStep(w.task, w.step);
     advanceWorkflow(true);
@@ -743,8 +761,9 @@ export default function (pi: ExtensionAPI): void {
     // Spec 2026-10-21 §7: tasks are ticked from evidence (/tutor-done), never by the model; task_done_ids is ignored.
     const ladder = roleNamed(activeRole).ladder;
     // Phase 8 A16: one step per reply — when code already moved the recipe on the learner's message, the reply's
-    // step_done is about that same step.
-    if (ladder) advanceWorkflow(j.step_done && !recipeMovedByCode);
+    // step_done is about that same step. Spec §6: the model's word moves the step only after a real attempt, and
+    // never counts toward a habit (no rememberOwnStep) — the model still awards nothing.
+    if (ladder) advanceWorkflow(j.step_done && !recipeMovedByCode && isAttempt(lastLearnerText));
     recipeMovedByCode = false;
     // The architect records concepts but never moves the hint ladder (spec 2026-10-13 §3).
     // M3 #17: the reply answered an episode an editor trigger has since replaced (or, M6c M6, none:
@@ -774,6 +793,8 @@ export default function (pi: ExtensionAPI): void {
    */
   function learnerMessage(prompt: string) {
     recipeMovedByCode = false; // Phase 8 review I4: one judgment cycle per learner message, judged or not
+    recipeNote = null;
+    if (prompt && !prompt.startsWith(TUTOR_PREFIX)) lastLearnerText = prompt.startsWith("[ask-error]") ? "" : prompt; // a right-click ask is a question
     // Final review I6/M10: during the talking test a message is the step-up's (not a recipe step, not chat
     // evidence); a right-click question stays a question.
     const talking = stepUp && (stepUp.stage === "talk" || stepUp.stage === "plan" || stepUp.stage === "plan-reask");
@@ -1080,7 +1101,7 @@ export default function (pi: ExtensionAPI): void {
     workflow = startWorkflow(id, Date.now());
     pi.appendEntry("tutor_workflow", workflow);
     paint();
-    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find).`;
+    const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). Tell the learner in one line they can say "skip" to skip a step or "/tutor-plan off" to stop.`;
     // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
     if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
     else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");

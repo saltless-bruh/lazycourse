@@ -592,7 +592,7 @@ describe("/tutor-plan", () => {
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
     expect(b.entries.find((e) => e.type === "tutor_workflow")?.data).toMatchObject({ task: "P1.T1", step: 1 });
     expect(b.widgets["tutor"]?.[0]).toContain("plan 1/6");
-    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\.$/);
+    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\. .*"skip".*"\/tutor-plan off"/);
     const opts = await turn(b.events, b.ctx, "[tutor] design recipe started for P1.T1", judged("none"));
     expect(opts.message?.content).toMatch(/\[workflow\] design recipe for P1\.T1: step 1\/6 Find/);
   });
@@ -1785,8 +1785,58 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       // review I4: a code-moved step whose reply carries no judgment does not swallow the next reply's step_done
       await turn(b.events, b.ctx, "total: float, people: int → float", assistant("ok, no fence"));
       expect(step()).toBe(3);
-      await turn(b.events, b.ctx, "I am not sure what the examples should be", stepDone);
+      await turn(b.events, b.ctx, "the examples are a normal bill and an empty one", stepDone);
       expect(step()).toBe(4);
+    });
+    it("learner-session fixes §6: saying 'can I just try writing the code' skips the step; 'what does shape mean?' gets the step explained", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      expect(step()).toBe(1);
+      await turn(b.events, b.ctx, "can I just try writing the code?", judged("none"));
+      expect(step()).toBe(2);
+      const opts = await turn(b.events, b.ctx, "what does shape mean?", judged("none"));
+      expect(step()).toBe(2);
+      expect(opts.message?.content).toMatch(/Explain step Shape in one sentence: .+; then ask for it again/);
+      const next = await turn(b.events, b.ctx, "the bill comes in first and then the friends", judged("none"));
+      expect(next.message?.content).not.toMatch(/Explain step/);
+    });
+    it("learner-session fixes §6: a model-accepted step advances but does not count toward the habit; step_done on a question or a skip does not move the recipe", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const p = Profile.open(file); p.setSetting("onboarding", ""); p.close();
+      const b = await boot({ cwd: dir });
+      const step = () => (b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data as { step: number }).step;
+      const stepDone = assistant("ok\n```tutor-judgment\n" + JSON.stringify({ judgment: "none", episode_closed: false, step_done: true }) + "\n```");
+      await turn(b.events, b.ctx, "P1.T1 is the tip box", judged("none"));
+      expect(step()).toBe(2);
+      await turn(b.events, b.ctx, "what does shape mean?", stepDone);
+      expect(step()).toBe(2); // a question is no attempt
+      await turn(b.events, b.ctx, "the bill comes in first and then the friends", stepDone);
+      expect(step()).toBe(3); // the model accepted a real attempt code did not recognize
+      await turn(b.events, b.ctx, "tip(40, 2) → 4.0\nedge: tip(0, 2) → 0.0", judged("none"));
+      expect(step()).toBe(4); // code recognized
+      await turn(b.events, b.ctx, "skip", stepDone);
+      expect(step()).toBe(5); // the skip moved one step; its reply's step_done moved nothing more
+      await turn(b.events, b.ctx, "just let me code", judged("none"));
+      expect(step()).toBe(6);
+      expect((await setting(`recipe:${dir}`)).own["P1.T1"].sort()).toEqual([1, 3]);
+      const { Profile: P2 } = await import("../extensions/tutor/profile.js");
+      const q = P2.open(file); const ev = q.habitEvents().filter((e) => e.habit === "steps-first"); q.close();
+      expect(ev.map((e) => e.ok)).toEqual([false]); // Shape (model) and Steps (skipped) are not the learner's own
+    });
+    it("learner-session fixes §6: the kickoff says how to skip and stop", async () => {
+      mkdir(pjoin(dir, "spec"));
+      wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
+      const b = await boot({ cwd: dir });
+      await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+      const kickoff = b.sent.at(-1)?.text ?? "";
+      expect(kickoff).toMatch(/skip/);
+      expect(kickoff).toContain("/tutor-plan off");
     });
     it("final review M10: a plan sent as the first message of the talking test is taken as the plan", async () => {
       mkdir(pjoin(dir, "spec"));

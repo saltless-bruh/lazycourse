@@ -3,13 +3,21 @@ import type { Band } from "./policy.js";
 // The design-recipe workflow (spec 2026-10-13 §4): six steps, one artifact each, the learner does each.
 export const STEPS = ["Find", "Shape", "Examples", "Steps", "Map", "Build"] as const;
 
-const ARTIFACT = [
-  "the task line, its requirements and its blueprint box, as a small map diagram",
-  "inputs and outputs with their types, as one line like `argv: list[str] → Command`",
-  "2-3 concrete input → output cases, one of them an edge case",
-  "the job as numbered plain sentences, no code",
-  "each step mapped to the language construct that does it",
-  "one step at a time: write it, run it, compare with the examples",
+// Learner-session fixes §6: each step defined once — what the learner writes and a one-sentence explanation — so
+// the model, code recognition (recipe-steps.ts) and the learner read the same text.
+export const STEP_SPECS: { name: (typeof STEPS)[number]; learnerWrites: string; explain: string }[] = [
+  { name: "Find", learnerWrites: "say which task you are on and what it should do, in your own words",
+    explain: "before any code, say which task from the plan you are doing and what it should do when it works" },
+  { name: "Shape", learnerWrites: "what goes in and what comes back, e.g. \"it takes the total and the people and gives back each share\" (types welcome, not required)",
+    explain: "name the things your code is given and the one thing it gives back" },
+  { name: "Examples", learnerWrites: "2-3 concrete cases of what goes in and what should come out, one of them an edge case (zero, empty, wrong input)",
+    explain: "write a few real inputs with the answer you expect, including one unusual input, so you can check your code later" },
+  { name: "Steps", learnerWrites: "the job as plain sentences in order (first …, then …), no code",
+    explain: "say in ordinary words what happens first, next and last, the way you would explain it to a friend" },
+  { name: "Map", learnerWrites: "each step matched to the piece of the language that does it, e.g. \"dividing is the slash\"",
+    explain: "for each of your sentences, name the piece of the language that does it" },
+  { name: "Build", learnerWrites: "one step at a time: write it, run it, compare with the examples",
+    explain: "write one sentence's code, run it, and check it against your examples before the next" },
 ];
 
 const MODE: Record<Band, string> = {
@@ -46,7 +54,8 @@ export function workflowLabel(w: Workflow): string {
 export function formatWorkflowContext(w: Workflow, band: Band): string {
   return [
     `[workflow] design recipe for ${w.task}: step ${w.step}/${STEPS.length} ${STEPS[w.step - 1]}`,
-    `artifact: ${ARTIFACT[w.step - 1]}`,
+    `the learner writes: ${STEP_SPECS[w.step - 1].learnerWrites}`,
+    `if they ask what the step means: ${STEP_SPECS[w.step - 1].explain}`,
     // M7: the language card names the cookbook skill; its recipes are indexed by these plain steps.
     ...(STEPS[w.step - 1] === "Map" ? ["Open the cookbook skill the language card lists and match each of the learner's steps to a recipe; show the recipe's example, not their code."] : []),
     MODE[band],
