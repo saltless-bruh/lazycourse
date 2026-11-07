@@ -60,6 +60,18 @@ function Term:_spawn()
     return false
   end
   self.job = job
+  -- Learner-session fixes (spec §6): entering the pane, by keyboard or mouse, always takes typing; in Normal mode
+  -- the start of a typed message ran as Neovim commands (a message arrived as "ng the secret number").
+  vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
+    buffer = buf,
+    callback = function()
+      vim.schedule(function()
+        if self.job and vim.api.nvim_get_current_buf() == buf and vim.api.nvim_get_mode().mode ~= "t" then
+          pcall(vim.cmd, "startinsert")
+        end
+      end)
+    end,
+  })
   vim.b[buf].tutor_term = true
   vim.keymap.set("t", "<Esc><Esc>", [[<C-\><C-n>]], { buffer = buf })
   return true
