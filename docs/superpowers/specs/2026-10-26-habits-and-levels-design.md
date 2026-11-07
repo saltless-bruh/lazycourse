@@ -311,3 +311,14 @@ with an `if` and no call, so its only pieces were keywords — fixed: when a sol
 pieces, its keywords count. Independent final review: the Rust/Go parts build with the project's own manifest
 (its go line and edition); a typo inside a JS function is its own ReferenceError, not "not exported"; NaN equals
 NaN; a default-exported function is in scope. Pi's settings unchanged.
+
+**Phase 8 (the open list), 2026-11-07, nemotron.** `/tutor-live` passes (its expectation for an error that sits
+updated: no nudge since phase 1). Intermediate Python step-up, two runs: nemotron wrote all problems, the talking
+test passed (3/3 and 4/4 pieces), and both times its own clumsy code worked (`has_duplicates`, `find_duplicates`),
+so the ready-made programs (A8 option C) were not needed; with the hidden solutions written in, check gave
+solve/fix/plan full marks. Run 1 scored the improve part 0/1 with the hidden solution in place: its docstring
+counted as a statement (5 → 7, "worse"), so a 1934 ms → 1 ms version was "not better" — fixed, docstrings are
+documentation like comments. Run 2 scored improve 1/1; tests 0/1 was right (the driver's tests only had dates in
+order, so a copy without `abs()` passed them). `/tutor-improve` in the background (B2): `:TutorDone P1.T2 anyway`
+ticked while the checks were written, `done` said "still being written", then "P1.T1 improved: speed 1405 ms →
+3 ms · longest function 5 → 1 · nesting 2 → 0". Pi's settings unchanged.

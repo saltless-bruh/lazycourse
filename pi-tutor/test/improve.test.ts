@@ -32,6 +32,12 @@ describe.skipIf(!bwrapReady)("codeMetrics", () => {
     // an import of the standard library is not the learner's code
     expect(await at({ "src/main.py": "from statistics import mean\n\ndef count(xs):\n    return mean(xs)\n" })).toEqual({ longestFunction: 1, maxNesting: 0, branches: 0 });
   }, 60_000);
+  it("Phase 8 live run: a docstring is documentation, not a statement (like a comment)", async () => {
+    const at = (src: string) => codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host(), functions: ["f"] });
+    const plain = await at("def f(xs):\n    seen = set()\n    return len(seen)\n");
+    expect(await at("def f(xs):\n    \"\"\"Count them.\"\"\"\n    seen = set()\n    return len(seen)\n")).toEqual(plain);
+    expect(plain?.longestFunction).toBe(2);
+  }, 60_000);
   it("an elif chain is one level, not a staircase", async () => {
     const src = "def grade(n):\n    if n > 90:\n        return 'A'\n    elif n > 80:\n        return 'B'\n    elif n > 70:\n        return 'C'\n    return 'D'\n";
     expect(await codeMetrics(realExec, { root: project({ "src/main.py": src }), entry: "src/main.py", sandbox: host() }))

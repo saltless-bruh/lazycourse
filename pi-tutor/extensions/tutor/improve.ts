@@ -71,6 +71,14 @@ def depth(node, d):
             if not isinstance(c, ast.AST) or isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)): continue
             best = max(best, depth(c, d if elif_chain or not isinstance(c, BLOCK) else d + 1))
     return best
+docs = set()
+for t in trees:
+    for n in ast.walk(t):
+        body = getattr(n, "body", None)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)) and body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+            docs.add(id(body[0]))
+def is_doc(x):
+    return id(x) in docs
 def branches(f):
     n = 0
     for x in ast.walk(f):
@@ -80,7 +88,8 @@ def branches(f):
     return n
 print(json.dumps({
     # side-agent note: statements, not lines, so blank lines, comments and "a; b" change nothing
-    "longestFunction": max((sum(1 for x in ast.walk(f) if isinstance(x, ast.stmt) and x is not f) for f in fns), default=0),
+    # Phase 8 live run: a docstring is documentation like a comment, so a documented function is no longer one
+    "longestFunction": max((sum(1 for x in ast.walk(f) if isinstance(x, ast.stmt) and x is not f and not is_doc(x)) for f in fns), default=0),
     "maxNesting": max((depth(f, 0) for f in fns), default=0),
     "branches": sum(branches(f) for f in fns),
 }))
