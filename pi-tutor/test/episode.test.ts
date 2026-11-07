@@ -478,6 +478,55 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("check", b.ctx);
     expect(b.notes.at(-1)).toMatch(/improve 1\/1/);
   }, 240000);
+  it("option C review I1: a model call that errors (cut off at its length limit) still gets the ready-made program", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    await b.commands["tutor-level"].handler("40", b.ctx);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.intermediate) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const WRONG = "__LENGTH__";
+    const replies = [
+      JSON.stringify({ talk: "Write `top_word(text)` returning the most frequent word.", solve: "Write `weekday(iso)` returning the weekday name of an ISO date.", fix: "Write `tip(total)` returning 15% of the total.", improve: "Write `count_unique(items)` returning how many different items there are." }),
+      "check P1.T1: top_word('a b a') == 'a'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```",
+      "check P1.T1: weekday('2026-11-02') == 'Monday'", "```python\nimport datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n```",
+      "check P1.T1: tip(50) == 7.5", "```python\ndef tip(total):\n    return total * 0.15\n```",
+      "check P1.T1: count_unique([1, 1, 2]) == 2", "```python\ndef count_unique(items):\n    return len(set(items))\n```", WRONG,
+      "check P1.T1: count_unique([1, 1, 2]) == 2", "```python\ndef count_unique(items):\n    return len(set(items))\n```", WRONG,
+    ];
+    let asked = 0;
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => { asked++; const t = replies.shift() ?? ""; return t === "__LENGTH__" ? { role: "assistant", stopReason: "length", content: [{ type: "text", text: "def count_unique(items):\n    seen = [" }] } : { role: "assistant", stopReason: "stop", content: [{ type: "text", text: t }] }; };
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
+    await turn(b.events, b.ctx, "1. split the text\n2. count each word\n3. keep the biggest\npieces: split, max, count", judged("none"));
+    await until(() => existsSync(join(root, "stepup", "README.md")), 90000);
+    expect(replies).toEqual([]); // the model's improve part was asked for twice
+    expect(b.notes.some((n) => /coding test could not be prepared/.test(n))).toBe(false);
+    const { IMPROVE_FALLBACKS } = await import("../extensions/tutor/improve-fallback.js");
+    const handed = readFileSync(join(root, "stepup", "improve.py"), "utf8");
+    const used = IMPROVE_FALLBACKS.find((f) => f.clumsy === handed);
+    expect(used).toBeTruthy();
+    const readme = readFileSync(join(root, "stepup", "README.md"), "utf8");
+    expect(readme).toContain(used!.task); // the task of the program handed over, not the model's
+    expect(readme).toMatch(/5\. `stepup\/improve\.py`: .*works but is clumsy.*measured now: longest function/s);
+    expect(readme).not.toContain(used!.reference.split("\n")[1].trim()); // the hidden solution never enters the project
+    const q = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const saved = JSON.parse(q.setting(`stepup:${root}`) ?? "{}") as { improveTask?: string; improveMissing?: boolean; improveBefore?: unknown };
+    q.close();
+    expect(saved).toMatchObject({ improveTask: used!.task, improveBefore: expect.any(Object) });
+    expect(saved.improveMissing).toBeUndefined();
+    expect(asked).toBeGreaterThan(0);
+    // unchanged clumsy code is no improvement: the part does not pass for free
+    writeFileSync(join(root, "stepup", "solve.py"), "import datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n");
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve 0\/1/);
+    writeFileSync(join(root, "stepup", "improve.py"), used!.reference);
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/improve 1\/1/);
+  }, 240000);
   // Habits Task 24b: the step-up for Rust and Go, each part in its own crate / module folder.
   for (const lang of ["rust", "go"] as const) it.skipIf(!tool(lang === "rust" ? "cargo" : "go", lang === "rust" ? ["--version"] : ["version"]))(`the step-up in ${lang}: each part in its own folder, checked one at a time`, async () => {
     const R = lang === "rust";
@@ -614,6 +663,19 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-improve"].handler("done", b.ctx);
     expect(b.notes.at(-1)).toMatch(/P2\.T2 improved: speed: \d+ ms → \d+ ms · longest function: 5 → 1 statements/);
   }, 120000);
+  it("option C review I2: shorter code that gives a wrong answer on the large input is not an improvement", async () => {
+    const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
+    const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",
+      { reference: "def count_unique(items):\n    return len(set(items))\n" });
+    await b.commands["tutor-level"].handler("70", b.ctx);
+    writeFileSync(join(root, "spec", "tasks.md"), "- [x] P2.T2 count the unique items: `count_unique(items)`\n- [ ] P2.T3 print\n");
+    b.replies.push("check P2.T2: count_unique([]) == 0\ntimed P2.T2: count_unique(list(range(3000)))");
+    await startImprove(b);
+    writeFileSync(join(root, "src", "main.py"), "def count_unique(items):\n    return len(set(items[:100]))\n");
+    await b.commands["tutor-improve"].handler("done", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/P2\.T2 not yet: the task's checks must still pass: .*different answer on the large input/);
+    expect((await habits()).map(([h]) => h)).not.toContain("optimizes");
+  }, 180000);
   it("improve it (Task 17): /tutor-improve measures a ticked task before and after; better and nothing worse is the optimizes habit", async () => {
     const SLOW = "def count_unique(items):\n    seen = []\n    for x in items:\n        if x not in seen:\n            seen.append(x)\n    return len(seen)\n";
     const { b, root } = await doneProject(SLOW, [{ task: "P2.T2", kind: "value", expr: "count_unique([1, 1, 2])", expected: "2", milestone: 1, status: "trusted" }], "python",

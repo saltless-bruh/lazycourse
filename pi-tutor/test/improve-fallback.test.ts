@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { IMPROVE_FALLBACKS, fallbackChecks } from "../extensions/tutor/improve-fallback.js";
+import { IMPROVE_FALLBACKS, fallbackChecks, pickFallback } from "../extensions/tutor/improve-fallback.js";
 import { codeMetrics, improveResult, calledFunctions } from "../extensions/tutor/improve.js";
 import { runChecks } from "../extensions/tutor/check-run.js";
 import { crossCheckOnReference } from "../extensions/tutor/check-job.js";
@@ -49,4 +49,23 @@ describe("ready-made improve-it programs", () => {
       expect(r.worse, f.task).toEqual([]);
     }, 120_000);
   }
+});
+
+describe("ready-made programs: review M1, M3", () => {
+  it("M1: a retake gets the next program, never the one used last", () => {
+    expect(pickFallback(null)).toBe(IMPROVE_FALLBACKS[0]);
+    for (let k = 0; k < IMPROVE_FALLBACKS.length; k++) expect(pickFallback(IMPROVE_FALLBACKS[k].task)).toBe(IMPROVE_FALLBACKS[(k + 1) % IMPROVE_FALLBACKS.length]);
+    expect(pickFallback("a task from an older version")).toBe(IMPROVE_FALLBACKS[0]);
+  });
+  it.skipIf(!bwrapReady)("M3: a Counter answer to word_lengths is the same answer on the large input", async () => {
+    const f = IMPROVE_FALLBACKS.find((x) => x.task.includes("word_lengths"))!;
+    const { extra } = fallbackChecks(f);
+    const root = mkdtempSync(join(tmpdir(), "fb-m3-"));
+    mkdirSync(join(root, "stepup"));
+    const sb = host();
+    const confirmed = await crossCheckOnReference({ exec: realExec, sandbox: sb, language: "python", entry: "stepup/improve.py", runCmd: null, reference: f.reference, checks: extra, root });
+    writeFileSync(join(root, "stepup", "improve.py"), "from collections import Counter\n\ndef word_lengths(words):\n    return Counter(len(w) for w in words)\n");
+    const r = await runChecks(realExec, { language: "python", root, entry: "stepup/improve.py", runCmd: null, checks: confirmed.map((c) => ({ ...c, limitMs: undefined })), sandbox: sb });
+    expect(r.results.map((x) => [x.check.kind, x.pass, x.error])).toEqual(confirmed.map((c) => [c.kind, true, undefined]));
+  }, 60_000);
 });

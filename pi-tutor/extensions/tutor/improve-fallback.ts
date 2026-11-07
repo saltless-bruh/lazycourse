@@ -20,7 +20,7 @@ export interface ImproveFallback {
 
 export const IMPROVE_FALLBACKS: ImproveFallback[] = [
   {
-    task: "Write `count_unique(items)` returning how many different items the list has.",
+    task: "Write `count_unique(items)` returning how many different items a list of numbers or strings has.",
     clumsy: [
       "def count_unique(items):",
       "    seen = []",
@@ -38,7 +38,7 @@ export const IMPROVE_FALLBACKS: ImproveFallback[] = [
     extra: ["check P1.T1: count_unique([]) == 0", "timed P1.T1: count_unique(list(range(3000)))"],
   },
   {
-    task: "Write `has_duplicate(items)` returning True when some item appears more than once.",
+    task: "Write `has_duplicate(items)` returning True when some item of a list of numbers or strings appears more than once.",
     clumsy: [
       "def has_duplicate(items):",
       "    result = False",
@@ -54,7 +54,7 @@ export const IMPROVE_FALLBACKS: ImproveFallback[] = [
     extra: ["check P1.T1: has_duplicate([]) == False", "timed P1.T1: has_duplicate(list(range(2000)))"],
   },
   {
-    task: "Write `pair_sum(nums, target)` returning True when two numbers at different positions add up to target.",
+    task: "Write `pair_sum(nums, target)` returning True when two whole numbers at different positions of the list add up to target.",
     clumsy: [
       "def pair_sum(nums, target):",
       "    found = False",
@@ -148,7 +148,7 @@ export const IMPROVE_FALLBACKS: ImproveFallback[] = [
     ].join("\n") + "\n",
     reference: "def word_lengths(words):\n    result = {}\n    for w in words:\n        result[len(w)] = result.get(len(w), 0) + 1\n    return result\n",
     checks: ["check P1.T1: word_lengths(['a', 'bb', 'cc']) == {1: 1, 2: 2}", "check P1.T1: word_lengths(['tree']) == {4: 1}"],
-    extra: ["check P1.T1: word_lengths([]) == {}", "timed P1.T1: word_lengths(['x' * (i % 400) for i in range(4000)])"],
+    extra: ["check P1.T1: word_lengths([]) == {}", "timed P1.T1: word_lengths(['x' * (i % 100) for i in range(4000)])"],
   },
 ];
 
@@ -158,7 +158,8 @@ export function fallbackChecks(f: ImproveFallback): { checks: Check[]; extra: Ch
   return { checks: parse(f.checks), extra: parse(f.extra) };
 }
 
-/** The fallback to use: a different one per step-up (by when it started), so a retake gets another program. */
-export function pickFallback(started: number): ImproveFallback {
-  return IMPROVE_FALLBACKS[Math.abs(Math.floor(started / 1000)) % IMPROVE_FALLBACKS.length];
+/** The program after the one used last (by its task), so a retake never gets the same one again. */
+export function pickFallback(lastTask: string | null): ImproveFallback {
+  const k = IMPROVE_FALLBACKS.findIndex((f) => f.task === lastTask);
+  return IMPROVE_FALLBACKS[(k + 1) % IMPROVE_FALLBACKS.length];
 }

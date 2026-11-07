@@ -1413,7 +1413,10 @@ export default function (pi: ExtensionAPI): void {
       baseMs = runs.base.length ? Math.min(...runs.base) : null;
     }
     const m: Measured | null = metrics && { ...metrics, edgePassed: extra.filter((x) => x.check.kind === "value" && x.pass).length, ms };
-    return { m, baseMs, failed: own.find((x) => !x.pass), missing: r.missing };
+    // Option C review I2: a large input answered wrongly (or not at all) is a failed check, not a skipped timing;
+    // a run that is only slower than its limit still has its time and is judged on speed.
+    const wrongTimed = extra.find((x) => x.check.kind === "timed" && !x.pass && x.ms === undefined);
+    return { m, baseMs, failed: own.find((x) => !x.pass) ?? wrongTimed, missing: r.missing };
   }
   pi.registerCommand("tutor-improve", {
     description: "Make a ticked task's working code better, measured before and after: /tutor-improve <task id>|done|off",
@@ -1827,11 +1830,14 @@ export default function (pi: ExtensionAPI): void {
             parseChecks(await complete(systemText("improve"), improvePrompt({ taskLine: `P1.T1 ${task}`, checks: lines(impTrusted) })), { language: lang, taskIds: ["P1.T1"], milestone: 1 }).checks.filter((c) => c.kind !== "io"));
         };
         const readyMade = async (): Promise<typeof improve | null> => {
-          const f = pickFallback(s.started), parsed = fallbackChecks(f);
+          const f = pickFallback(lastFallback()), parsed = fallbackChecks(f);
+          rememberFallback(f);
           const checks = trustedOnly(await crossCheckOnReference({ exec, sandbox: sandboxHost(), language: lang, entry, runCmd: null, reference: f.reference, checks: parsed.checks, root }));
           return checks.length === parsed.checks.length ? finish(f.task, checks, f.reference, f.clumsy, async () => parsed.extra) : null;
         };
-        const made = (await fromModel()) ?? (await fromModel()) ?? (lang === "python" ? await readyMade() : null);
+        // Option C review I1: a model call that errors (cut off, timed out) is an attempt that failed, not the end.
+        const attempt = () => fromModel().catch(() => null);
+        const made = (await attempt()) ?? (await attempt()) ?? (lang === "python" ? await readyMade() : null);
         if (!made) {
           // Only a sandbox that cannot run the vetted program gets here: a setup problem, not the learner's.
           saveStepUp(null);
@@ -1903,6 +1909,15 @@ export default function (pi: ExtensionAPI): void {
       if (after.m && !after.failed && !after.missing) { const r = improveResult({ ...s.improveBefore, ms: after.baseMs ?? s.improveBefore.ms }, after.m); improveOk = r.better.length > 0 && r.worse.length === 0; }
     }
     return { ...base, tests: { passed: testsOk ? 1 : 0, total: 1 }, improve: { passed: improveOk ? 1 : 0, total: 1 } };
+  }
+  /** Option C review M1: the ready-made improve-it program used last, per language, so a retake gets the next one. */
+  function lastFallback(): string | null {
+    let v: string | null = null;
+    if (profile && project) { const p = profile, key = `stepup-fallback:${project.language}`; profileWrite(() => { v = p.setting(key) || null; }); }
+    return v;
+  }
+  function rememberFallback(f: { task: string }) {
+    if (profile && project) { const p = profile, key = `stepup-fallback:${project.language}`; profileWrite(() => p.setSetting(key, f.task)); }
   }
   let stepUp: StepUpState | null = null;
   function saveStepUp(s: StepUpState | null) {
@@ -1994,7 +2009,7 @@ export default function (pi: ExtensionAPI): void {
           const ref = await writeMilestoneChecks({ complete, exec: (c, a, o) => pi.exec(c, a, o), sandbox: sandboxHost(), language: lang, tasksMd: `## Milestone 1: step-up\n- [ ] P1.T1 ${json.talk}\n`, milestone: 1, entry, runCmd: null, root });
           const given = typeof (json as { improve?: unknown }).improve === "string" ? (json as { improve: string }).improve.trim() : "";
           // Phase 8 A8, option C: no improve-it problem from the model is a ready-made one's task, not a failed setup.
-          const improveTask = band === "intermediate" ? given || pickFallback(prep.started).task : undefined;
+          const improveTask = band === "intermediate" ? given || pickFallback(lastFallback()).task : undefined;
           saveStepUp({ ...prep, stage: "talk", talkTask: json.talk, solveTask: json.solve, fixTask: typeof json.fix === "string" ? json.fix : json.solve, talkRef: ref.reference, talkChecks: ref.checks, ...(improveTask ? { improveTask } : {}) });
           showStepUp(`Step-up, part 1: the talking test.\n\n${json.talk}\n\nTalk it through in your own words: what the program needs, the steps, and which pieces you would use. No code yet.`);
         } catch (e) {
