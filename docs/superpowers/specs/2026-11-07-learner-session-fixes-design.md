@@ -55,8 +55,12 @@ A leaking reply is rewritten like any other failed check.
 
 Each recipe step is defined once — name, what the learner writes, a one-sentence explanation — and the same text
 feeds the model, code recognition and the learner. Step 1 **Find** asks the learner to "say which task you are on and
-what it should do, in your own words". Steps advance only by code (recognized artifacts, a tick for Build); the
-model's `step_done` no longer moves the recipe. Plain words are understood: "skip" / "just let me code" skips the
+what it should do, in your own words". A step advances when code recognizes the learner's artifact — and only those
+steps count toward the steps-first habit — or, when code does not, when the model says `step_done` **and** the
+learner's latest message is a real attempt (not a question, not a skip or "I don't understand", at least 4 words);
+model-accepted steps advance but never count toward a habit, so the model still awards nothing. Code recognizers
+accept plain beginner wording (for Shape: "it takes the total and the people and gives back each share"), tested
+against real beginner phrasings. Plain words are understood: "skip" / "just let me code" skips the
 step; "I don't understand" / "what is a …" gets the step's one-sentence explanation. The kickoff says how to skip and
 stop. In the editor, entering the tutor pane (keyboard or mouse) always puts it in input mode, so typed text never
 runs as Neovim commands.

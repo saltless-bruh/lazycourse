@@ -19,7 +19,7 @@ bubblewrap sandbox.
 - Nothing writes to stdout/stderr inside Pi; new Pi APIs are verified in `types.d.ts` and recorded in `pi-tutor/PI_SURFACE.md`.
 - Editor paths stay inside the project root (realpath); `bash` stays off for the model.
 - TDD: each step's test fails first. Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- The model never ticks, scores or moves a level or a recipe step (after this plan: not even `step_done`).
+- The model never ticks, scores or moves a level, and never awards a habit: a recipe step the model accepts (`step_done` on a real attempt code did not recognize) advances but does not count toward steps-first.
 - Learner-facing copy fixed by the spec, verbatim: "New here? Tell me what you'd like to learn — or type /tutor-start.",
   "level not set", "ticked on trust: I could not build a check that works for <task>".
 - Branch `learner-fixes` from main 97c6f93; ledger lines appended to `.superpowers/sdd/2026-10-26-habits-and-levels/progress.md`.
@@ -158,25 +158,27 @@ bubblewrap sandbox.
 - [ ] **Step 4: Run** the full TS suite — pass.
 - [ ] **Step 5: Commit** `fix: examples that rename the task's solution or use its words are held (learner session #3)`
 
-### Task 7: Recipe steps defined once; plain-word skip; code-only advance (spec §6)
+### Task 7: Recipe steps defined once; plain-word skip; beginner wording recognized (spec §6)
 
 **Files:**
 - Modify: `pi-tutor/extensions/tutor/workflow.ts` (`STEPS`, `ARTIFACT` → `STEP_SPECS`; the recipe note the model reads at `workflow.ts:49`), `pi-tutor/extensions/tutor/recipe-steps.ts`, `pi-tutor/extensions/tutor/index.ts` (`recipeStep`, `applyTurnJudgment`, `beginRecipe`)
 - Test: `pi-tutor/test/workflow.test.ts`, `pi-tutor/test/recipe-steps.test.ts`, `pi-tutor/test/smoke.test.ts`
 
 **Interfaces:**
-- Produces: `STEP_SPECS: { name: string; learnerWrites: string; explain: string }[]` (workflow.ts; index 0 = Find with `learnerWrites` "say which task you are on and what it should do, in your own words"); `recipeIntent(text: string): "skip" | "explain" | null` (recipe-steps.ts).
+- Produces: `STEP_SPECS: { name: string; learnerWrites: string; explain: string }[]` (workflow.ts; index 0 = Find with `learnerWrites` "say which task you are on and what it should do, in your own words"); `recipeIntent(text: string): "skip" | "explain" | null` and `isAttempt(text: string): boolean` (recipe-steps.ts: not a question, not a recipe intent, at least 4 words).
 
 - [ ] **Step 1: Failing tests:**
   - workflow `"each step is defined once and Find asks for the task in the learner's words"`: `STEP_SPECS[0].learnerWrites` contains "which task", and no spec text contains "blueprint" or "map" except step 5's name.
   - recipe-steps `recipeIntent`: "skip" / "can I just try writing the code?" / "just let me code" → `"skip"`; "I don't know what a map diagram is" / "what is a step?" → `"explain"`; "the first task is P1.T1" → `null`.
   - smoke `"saying 'can I just try writing the code' skips the step"`: recipe at step 1 → after that message the step is 2.
-  - smoke `"the model's step_done no longer moves the recipe"`: a judged reply with `step_done: true` and no learner artifact → step unchanged.
+  - recipe-steps `"beginner wording is recognized"` (one case per step, plain sentences, no types or arrows): Find "I'm doing P1.T1, it makes the secret number"; Shape "it takes the total and the people and gives back each share"; Examples "if the total is 48 and 3 people it should give 16, and with 0 people it should say error"; Steps "first I divide the total, then I round it, then I give it back"; Map "dividing is the slash, rounding is round()" → each `recognize(step, …)` is true.
+  - smoke `"a model-accepted step advances but does not count toward the habit"`: recipe at step 2, learner writes a real attempt code does not recognize, the reply has `step_done: true` → step 3, and the steps-first habit later counts only code-recognized steps.
+  - smoke `"step_done on a question or a skip does not move the recipe"`: learner asks "what does shape mean?" and the reply has `step_done: true` → step unchanged.
   - smoke `"the kickoff says how to skip and stop"`: the kickoff message contains "skip" and "/tutor-plan off".
 - [ ] **Step 2: Run** — FAIL.
-- [ ] **Step 3: Implement:** replace `ARTIFACT` uses with `STEP_SPECS`; in `recipeStep` check `recipeIntent` first (skip → advance without counting it as the learner's own; explain → a hidden note for this turn: "Explain step <name> in one sentence: <explain>; then ask for it again"); remove `advanceWorkflow(j.step_done …)` from `applyTurnJudgment` (Build still ends on a tick).
+- [ ] **Step 3: Implement:** replace `ARTIFACT` uses with `STEP_SPECS`; in `recipeStep` check `recipeIntent` first (skip → advance without counting it as the learner's own; explain → a hidden note for this turn: "Explain step <name> in one sentence: <explain>; then ask for it again"); in `applyTurnJudgment` advance on `j.step_done` only when `isAttempt(lastLearnerMessage)` and code did not already move it this message, without `rememberOwnStep` (Build still ends on a tick); widen the Shape, Examples, Steps and Map recognizers for the plain wording above (Shape: names two or more inputs and what comes back, e.g. "takes … and gives/returns …").
 - [ ] **Step 4: Run** the full TS suite — pass.
-- [ ] **Step 5: Commit** `fix: recipe steps explain themselves, skip in plain words, and move only on the learner's work (learner session #6)`
+- [ ] **Step 5: Commit** `fix: recipe steps explain themselves, skip in plain words, recognize beginner wording; model-accepted steps award nothing (learner session #6)`
 
 ### Task 8: Live learner session again, docs, review, merge
 
