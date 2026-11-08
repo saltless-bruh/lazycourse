@@ -39,7 +39,7 @@ export type TutorPayload =
   | { kind: "diagnostics"; buf: number; path: string; errors: number; warnings: number; first?: { line: number; msg: string } }
   | { kind: "idle"; buf: number; path: string; line: number; since_ms: number }
   | { kind: "churn"; buf: number; path: string; region: [number, number]; edits: number }
-  | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string };
+  | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string; timed_out?: boolean };
 
 export interface EditorSnapshot {
   path: string;

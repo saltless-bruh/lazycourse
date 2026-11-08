@@ -87,6 +87,8 @@ function M.run(kind)
   end
   -- Learner-session fixes (spec §1): stop ends the visible run; its exit is not reported.
   if kind == "stop" then
+    -- Minor M4: stopping says so, like Ctrl+C does.
+    if runpane.running() then vim.notify("[tutor] run stopped", vim.log.levels.INFO) end
     runpane.stop()
     M.state.run_job = nil
     return
@@ -101,7 +103,9 @@ function M.run(kind)
     M.state.run_job = nil
   end
   if M.state.run_job then
-    vim.notify("[tutor] a test run is still running", vim.log.levels.WARN)
+    -- Minor M2: a visible run waiting for input is the learner's program, not a test.
+    vim.notify(runpane.running() and "[tutor] your program is still running in the run split: finish it, or :TutorRun stop"
+      or "[tutor] a test run is still running", vim.log.levels.WARN)
     return
   end
   -- M8: the project's own README names its commands; the plugin option is the fallback.
@@ -126,8 +130,8 @@ function M.run(kind)
     end
   end
   local payload_cmd = type(cmd) == "table" and cmd or { cmd }
-  local function report(code, stdout, stderr)
-    local payload = { kind = "run_output", cmd = payload_cmd, code = code, stdout = stdout, stderr = stderr }
+  local function report(code, stdout, stderr, timed_out)
+    local payload = { kind = "run_output", cmd = payload_cmd, code = code, stdout = stdout, stderr = stderr, timed_out = timed_out or nil }
     if not M.notify_tutor(payload) then
       vim.notify("[tutor] run finished (exit " .. code .. ") but pi-tutor is not connected", vim.log.levels.INFO)
     end
@@ -152,8 +156,10 @@ function M.run(kind)
     M.state.run_job = pane.job
     return
   end
-  -- The hidden test run gets no input (a read fails at once) and at most 60 s.
+  -- The hidden test run gets no input (a read fails at once) and at most 60 s (test_timeout_ms).
   local out, err = {}, {}
+  local limit = opts.test_timeout_ms or 60000
+  local timed_out = false
   local ok, job = pcall(vim.fn.jobstart, argv, {
     cwd = opts.cwd,
     stdin = "null",
@@ -165,7 +171,14 @@ function M.run(kind)
       if M.state.run_job == id then M.state.run_job = nil end
       -- Phase 8 D (M6c parked): a run setup() stopped (exit 143) is no failed run of the learner's.
       if stopped[id] then stopped[id] = nil return end
-      report(code, table.concat(out, "\n"), table.concat(err, "\n"))
+      -- Minor M3: a test stopped at the limit is reported as timed out, not as a plain failure.
+      local errs = table.concat(err, "\n")
+      if timed_out then
+        local note = ("[tutor] the tests were stopped after %s s: they may wait for input or loop forever"):format(limit / 1000)
+        errs = (errs ~= "" and errs .. "\n" or "") .. note
+        vim.notify(note, vim.log.levels.WARN)
+      end
+      report(code, table.concat(out, "\n"), errs, timed_out)
     end,
   })
   if not ok or type(job) ~= "number" or job <= 0 then
@@ -173,7 +186,7 @@ function M.run(kind)
     return
   end
   M.state.run_job = job
-  vim.defer_fn(function() if M.state.run_job == job then pcall(vim.fn.jobstop, job) end end, 60000)
+  vim.defer_fn(function() if M.state.run_job == job then timed_out = true; pcall(vim.fn.jobstop, job) end end, limit)
 end
 
 local function slash(text)

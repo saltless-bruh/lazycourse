@@ -11,7 +11,7 @@ export type Trigger =
   | { kind: "churn"; path: string; region: [number, number] }
   | { kind: "chat" }
   /** A failing :TutorRun with the end of its output (spec 2026-10-13 §7 #4). */
-  | { kind: "run"; cmd: string[]; code: number; trace: string };
+  | { kind: "run"; cmd: string[]; code: number; trace: string; timedOut?: true };
 
 /** `superseded`: an editor trigger replaced an open chat, idle or churn episode. */
 export type CloseReason = "cleared" | "run_passed" | "judged" | "superseded";
@@ -108,6 +108,8 @@ export function describeTrigger(t: Trigger): string {
     case "churn": return `rewriting ${basename(t.path)}:${t.region[0]}-${t.region[1]}`;
     case "chat": return "learner question";
     case "run": {
+      // Review minor: a hidden test run stopped at its limit (stdin is empty, so it loops) — say so, not "exit 143".
+      if (t.timedOut) return `tests timed out (likely an endless loop): ${t.cmd.join(" ")}`;
       // Spec 2026-10-21 §7: a failed check (/tutor-done) names the task and what the code gave.
       if (t.cmd[0] === "/tutor-done") {
         const what = (t.trace.split("\n")[0] ?? "").replace(/^check \S+: /, "");

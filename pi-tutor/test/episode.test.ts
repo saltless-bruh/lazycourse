@@ -1174,6 +1174,14 @@ describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
     expect(b.sent).toEqual([]);
     expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
   }, 20000);
+  it("a test run stopped at its time limit is no graded try, but the tutor hears it timed out (author 2026-11-08)", async () => {
+    const b = await linked();
+    await nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["pytest"], code: 143, stdout: "", stderr: "[tutor] the tests were stopped after 60 s", timed_out: true }]);
+    await until(() => /tests timed out/.test(b.widgets["tutor"]?.[1] ?? ""));
+    await until(() => b.sent.length > 0);
+    expect(b.sent[0].text).toMatch(/tests timed out \(likely an endless loop\): pytest/);
+    expect(episodes(b.entries).filter((e) => (e.trigger as { kind: string }).kind === "run").every((e) => (e.attempts as number) === 0)).toBe(true);
+  }, 20000);
   it("an error marked in the editor no longer makes a runtime error a typo run (author 2026-10-21)", async () => {
     const b = await linked();
     await setError("boom");

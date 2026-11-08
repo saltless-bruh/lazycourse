@@ -234,6 +234,15 @@ Re-verify every line when bumping versions.
 - Right-click error help (nvim-tutor, spec 2026-10-26 §5.2): `amenu PopUp.<entry>` / `amenu enable|disable PopUp.<entry>`,
   the `MenuPopup` autocmd, `vim.fn.menu_info(name, "n").enabled`, `vim.diagnostic.get(0, { lnum })`, and
   `vim.keymap.set("n", "<leader>te", …)` (verified headless, Neovim 0.12.6, 2026-10-26).
+- Visible run and pane input mode (nvim-tutor runpane.lua, term.lua; learner-session fixes, probed headless on
+  Neovim 0.12.6, 2026-11-08): `botright 12split` (E36 with no room → `tabnew`), `jobstart{term=true}` inside
+  `nvim_win_call`, a `WinClosed` autocmd with `pattern = tostring(win)` and `once = true` (fires on
+  `nvim_win_close`), `vim.bo[buf].bufhidden = "wipe"` on the run buffer, `startinsert` after the run starts, and a
+  buffer-local `WinEnter`/`BufWinEnter` autocmd on the Pi pane that calls `startinsert` while its job runs
+  (`nvim_get_mode()` read in tests). The hidden `:TutorRun test` uses `jobstart(argv, { stdin = "null" })` (a read
+  fails at once: `read x || exit 7` exits 7) and a `vim.defer_fn` jobstop at `test_timeout_ms` (default 60000);
+  a stopped test reports `timed_out = true` in its `run_output` payload. `:TutorRun` checks `term.textlocked()`
+  first and reruns via `vim.schedule` (a lazy keymap).
 - Push autocmds live in `extensions/tutor/push.lua.ts` and are installed with `nvim_exec_lua`;
   `vim.g.tutor_chan` holds the extension's channel for `:TutorRun`.
 
