@@ -227,7 +227,7 @@ function M.switch(dir, file)
     return false
   end
   opts.cwd = dir
-  vim.cmd.cd(vim.fn.fnameescape(dir))
+  vim.fn.chdir(dir) -- not :cd, which prints the folder; that message covered the tutor pane (re-run topic 5)
   -- Editor window: a normal buffer, else any non-terminal one (LazyVim's dashboard is
   -- buftype=nofile), else a new split left of the Pi pane.
   local target, fallback
@@ -255,6 +255,14 @@ end
 local function data_dir()
   return (vim.env.XDG_DATA_HOME or vim.fn.expand("~/.local/share")) .. "/nvim-tutor"
 end
+
+local function profile_path()
+  local env = vim.env.PI_TUTOR_PROFILE
+  return (env and env ~= "" and env ~= ":memory:") and env or (data_dir() .. "/profile.sqlite")
+end
+
+--- The profile and project-list files this plugin reads (wayfinding spec §8.4).
+function M.paths() return { profile_file = opts.profile_file, projects_file = opts.projects_file } end
 
 local function real(p)
   return vim.uv.fs_realpath(p) or vim.fs.normalize(p)
@@ -307,8 +315,9 @@ function M.setup(user_opts)
     -- Wayfinding spec 2026-11-08 §8.4: Neovim opens the tutor by itself only in a project or ~/lazycourse.
     auto_open = true,
     lazycourse = vim.fn.expand("~/lazycourse"),
-    projects_file = data_dir() .. "/projects.json",
-    profile_file = data_dir() .. "/profile.sqlite",
+    -- Where pi-tutor keeps its profile (PI_TUTOR_PROFILE wins, as in pi-tutor's profile.ts) and the project list.
+    profile_file = profile_path(),
+    projects_file = vim.fs.dirname(profile_path()) .. "/projects.json",
   }, user_opts or {})
   check_version()
   -- PI_TUTOR=1 tells pi-tutor this Pi is the tutor; plain `pi` elsewhere stays untouched.

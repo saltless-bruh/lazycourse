@@ -738,3 +738,35 @@ describe("tutor start-up", function()
     assert.is_nil(notes:find("New to lazycourse", 1, true))
   end)
 end)
+
+-- Wayfinding spec §9.5 (re-run topic 5): after the folder switch the pane looked cut off on the left. Screen-replay
+-- 2026-11-09 showed the cause: `:cd` printed the new folder (it does when the last key was typed, or at verbose ≥ 5),
+-- and that message popup covered the left of the tutor pane's lines until it timed out.
+describe("tutor.switch", function()
+  it("changes folder without printing it", function()
+    package.loaded["tutor"] = nil
+    local saved = vim.fn.getcwd()
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = saved, check_version = false, auto_open = false })
+    local dir = vim.fn.resolve(vim.fn.tempname()); vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "# x" }, dir .. "/README.md")
+    vim.o.verbose = 5
+    local out = vim.fn.execute("lua require('tutor').switch(" .. vim.inspect(dir) .. ", 'README.md')")
+    vim.o.verbose = 0
+    vim.cmd.cd(vim.fn.fnameescape(saved))
+    -- `:cd` prints the folder as :pwd does ("[global] <dir>", or the bare path); verbose also logs the chdir() call itself.
+    assert.is_nil(out:find("[global] " .. dir, 1, true), out)
+    for _, l in ipairs(vim.split(out, "\n")) do assert.are_not.equal(dir, vim.trim(l)) end
+  end)
+end)
+
+describe("tutor profile paths", function()
+  it("follow PI_TUTOR_PROFILE like pi-tutor does, so the projects list is found where Pi wrote it", function()
+    local saved = vim.env.PI_TUTOR_PROFILE
+    vim.env.PI_TUTOR_PROFILE = "/x/y/p.sqlite"
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, auto_open = false })
+    local p = require("tutor").paths()
+    vim.env.PI_TUTOR_PROFILE = saved
+    assert.same({ profile_file = "/x/y/p.sqlite", projects_file = "/x/y/projects.json" }, p)
+  end)
+end)
