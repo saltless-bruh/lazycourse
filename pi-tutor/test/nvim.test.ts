@@ -91,6 +91,20 @@ describe("NvimLink", () => {
     expect(await link.cursorLine()).toBe(3);
   }, 20000);
 
+  // Wayfinding spec §9.4: a file the extension rewrote reloads into its open, unmodified buffer with no W11 prompt.
+  it("reloadFile shows a file rewritten on disk, with no prompt", async () => {
+    const { link, h } = await setup();
+    const f = join(h.root, "README.md");
+    writeFileSync(f, "The plan arrives shortly\n");
+    await link.openLocation(f, 1);
+    await new Promise((r) => setTimeout(r, 1100)); // a new mtime second, so Neovim sees the change
+    writeFileSync(f, "---\nrun: python main.py\n---\n");
+    await link.reloadFile(f);
+    const nvim = (link as unknown as { raw: { lua(c: string): Promise<unknown> } }).raw;
+    expect(await nvim.lua("return vim.api.nvim_buf_get_lines(0, 0, -1, false)")).toEqual(["---", "run: python main.py", "---"]);
+    expect(await nvim.lua("return vim.api.nvim_get_mode().blocking")).toBe(false);
+  }, 20000);
+
   it("calls onDisconnect and clears state when Neovim exits", async () => {
     h = await startHeadlessNvim();
     let disconnected = false;

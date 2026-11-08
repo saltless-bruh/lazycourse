@@ -27,6 +27,7 @@ import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
 import { describe as describeCmd, commandNote } from "./commands.js";
+import { refreshPlanBuffers } from "./plan-reload.js";
 import { whereOf, nextStep, sessionCard, type Where, type WayInput } from "./wayfinding.js";
 import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
@@ -2549,7 +2550,12 @@ export default function (pi: ExtensionAPI): void {
           (v) => checkScaffold(v, job.rounds));
         writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language), goVersion: await goVersionFor(proj.language) });
         if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
-        if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
+        if (generation === mine) {
+          specStatus = null;
+          ui?.notify("the project plan is ready: spec/tasks.md", "info");
+          // Wayfinding spec §9.4: the README the learner has open shows the plan's version (with its run: line).
+          if (link) await refreshPlanBuffers(link, proj.path, (m) => ui?.notify(m, "warning"));
+        }
         written = true;
       } catch (e) {
         if (generation === mine) {
