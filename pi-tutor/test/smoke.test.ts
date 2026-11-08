@@ -1350,12 +1350,13 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     const welcome = b.messages.find((m) => (m.message as { customType: string }).customType === "tutor_welcome")!;
     expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...(welcome.message as object), timestamp: 1 }] })).toMatchObject({ messages: [] });
   });
-  it("every turn carries the tutor's commands, onboarding turns too", async () => {
+  // Wayfinding spec 2026-11-08 §6: the note is built from the command list for where the learner is.
+  it("every turn carries the tutor's commands for where the learner is, onboarding turns too", async () => {
     const b = await boot();
     const s = await userTurn(b, "hi");
-    expect(s["tutor_commands"]).toMatch(/:TutorRun/);
-    expect(s["tutor_commands"]).toMatch(/\/tutor-start/);
-    expect(s["tutor_commands"]).toMatch(/say "skip" to skip a step or "\/tutor-plan off" to stop/);
+    expect(s["tutor_commands"]).toMatch(/\/tutor-start[^\n]*tutor pane/);
+    expect(s["tutor_commands"]).toMatch(/:Tutor \(type it in the editor\)/);
+    expect(s["tutor_commands"]).not.toMatch(/:TutorDone/);
   });
   it("the widget says level not set until a level is known", async () => {
     const b = await boot();

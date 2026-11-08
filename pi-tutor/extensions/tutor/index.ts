@@ -25,7 +25,9 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
-import { COMMANDS_NOTE, WELCOME } from "./commands-note.js";
+import { WELCOME } from "./commands-note.js";
+import { describe as describeCmd, commandNote } from "./commands.js";
+import type { Where } from "./wayfinding.js";
 import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
@@ -279,6 +281,9 @@ export default function (pi: ExtensionAPI): void {
     if (exam && !examTimer) { examTimer = setInterval(paint, 1000); examTimer.unref?.(); }
     if (!exam && examTimer) { clearInterval(examTimer); examTimer = null; }
   }
+
+  /** Where the learner is (wayfinding spec §7); Task 2 derives it from state. */
+  function whereNow(): Where { return firstRun() ? "fresh" : onboardingActive() ? "onboarding-talk" : "project"; }
 
   function paint() {
     state.attempt = episode?.attempts || undefined;
@@ -573,7 +578,7 @@ export default function (pi: ExtensionAPI): void {
 
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
   pi.on("before_agent_start", async (event) => {
-    event.systemPromptOptions.sections["tutor_commands"] = COMMANDS_NOTE;
+    event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
     if (event.messageType === "user" && firstRun() && !event.prompt.trim().startsWith("/")) {
       saveOnboarding(newOnboarding(null));
@@ -915,7 +920,7 @@ export default function (pi: ExtensionAPI): void {
     ui?.notify(`the second reader did not answer (${why}); this reply was shown unread`, "info");
   }
   pi.registerCommand("tutor-checker", {
-    description: "A second model reads each held reply against the turn's rule: /tutor-checker <provider/model>|off",
+    description: describeCmd("/tutor-checker"),
     handler: async (args, ctx) => {
       const want = args.trim();
       const now = profile?.setting("checker") || "off";
@@ -1051,7 +1056,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-architect", {
-    description: "Architecture professor: components, data flow, trade-offs; /tutor-architect off to return",
+    description: describeCmd("/tutor-architect"),
     handler: async (args, ctx) => {
       const q = args.trim();
       if (q === "off") { setRole(DEFAULT_ROLE); paint(); ctx.ui.notify("back to the coding tutor", "info"); return; }
@@ -1065,7 +1070,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-plan", {
-    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1; next moves on; off stops)",
+    description: describeCmd("/tutor-plan"),
     handler: async (args, ctx) => {
       const id = args.trim();
       // Live check: the model may call a step complete and never set step_done; the learner moves on.
@@ -1215,7 +1220,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("tutor-exam", {
-    description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons; sandbox on|off",
+    description: describeCmd("/tutor-exam"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       const a = parseExamArgs(args);
       if (a.kind === "usage") { ctx.ui.notify("usage: /tutor-exam [small|medium] [topic] | check | off | sandbox [on|off] (for a topic that starts with \"sandbox\": /tutor-exam small sandbox …)", "warning"); return; }
@@ -1293,7 +1298,7 @@ export default function (pi: ExtensionAPI): void {
   const rubric = () => { try { return readFileSync(join(SKILLS_DIR, "tutor-exam-rubric", "SKILL.md"), "utf8").replace(/^---[\s\S]*?---\n/, ""); } catch { return ""; } };
 
   pi.registerCommand("tutor-submit", {
-    description: "Hand in the running exam: run its tests, grade it, write exam/<id>/grade.md",
+    description: describeCmd("/tutor-submit"),
     handler: (_args, ctx) => exclusive(ctx, async () => {
       if (!exam || !project || !profile) { ctx.ui.notify("no exam is running; start one with /tutor-exam", "info"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
@@ -1345,7 +1350,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-progress", {
-    description: "Your progress: hint use over time, exams, concept map (/tutor-progress [language])",
+    description: describeCmd("/tutor-progress"),
     handler: async (args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       const arg = args.trim().toLowerCase();
@@ -1375,7 +1380,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-memory", {
-    description: "List what the tutor remembers about you; pick one to forget it",
+    description: describeCmd("/tutor-memory"),
     handler: async (_args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       const rows = profile.memories({ language: null, limit: 200 });
@@ -1395,7 +1400,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-thinking", {
-    description: "Show or hide the model's thinking: auto (hidden) | show | hide",
+    description: describeCmd("/tutor-thinking"),
     handler: async (args, ctx) => {
       const shown = () => (thinkingHidden(thinking, bandFor(level())) ? "hidden" : "shown");
       if (!args.trim()) { ctx.ui.notify(`thinking: ${thinking} (${shown()} now)`, "info"); return; }
@@ -1410,7 +1415,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-feedback", {
-    description: "Tell the tutor how it is teaching: too-long | too-vague | too-much-help | good",
+    description: describeCmd("/tutor-feedback"),
     handler: async (args, ctx) => {
       const kind = args.trim() as FeedbackKind;
       if (!FEEDBACK_KINDS.includes(kind)) { ctx.ui.notify("usage: /tutor-feedback too-long|too-vague|too-much-help|good", "warning"); return; }
@@ -1468,7 +1473,7 @@ export default function (pi: ExtensionAPI): void {
     return { m, baseMs, failed: own.find((x) => !x.pass) ?? wrongTimed, missing: r.missing };
   }
   pi.registerCommand("tutor-improve", {
-    description: "Make a ticked task's working code better, measured before and after: /tutor-improve <task id>|done|off",
+    description: describeCmd("/tutor-improve"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       if (!project || !profile) { ctx.ui.notify("/tutor-improve works inside a project: /tutor-start makes one", "warning"); return; }
       const proj = project, p = profile, root = proj.path, arg = args.trim();
@@ -1567,7 +1572,7 @@ export default function (pi: ExtensionAPI): void {
 
   /** Task 16: the pro notes on design and naming (no points) are on by default; `/tutor-notes off` stops them. */
   pi.registerCommand("tutor-notes", {
-    description: "Notes on design and naming after a pro tick: /tutor-notes on|off",
+    description: describeCmd("/tutor-notes"),
     handler: async (args, ctx) => {
       const want = args.trim();
       if (want !== "on" && want !== "off") { ctx.ui.notify(`usage: /tutor-notes on|off (now ${profile?.setting("pro-notes") === "off" ? "off" : "on"})`, "info"); return; }
@@ -1582,7 +1587,7 @@ export default function (pi: ExtensionAPI): void {
    * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
    */
   pi.registerCommand("tutor-done", {
-    description: "Tick a task when its checks pass: /tutor-done [task id] [anyway]",
+    description: describeCmd("/tutor-done"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       if (!project || !profile) { ctx.ui.notify("/tutor-done works inside a project: /tutor-start makes one", "warning"); return; }
       const proj = project, p = profile, root = proj.path, key = `checks:${root}`, path = join(root, "spec", "tasks.md");
@@ -1999,7 +2004,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("tutor-step-up", {
-    description: "The step-up to the next band: a talking test and a coding test (spec 2026-10-26 §6.3)",
+    description: describeCmd("/tutor-step-up"),
     handler: async (args, ctx) => {
       if (!project || !profile) { ctx.ui.notify("the step-up runs inside a project: /tutor-start makes one", "warning"); return; }
       const p = profile, lang = project.language, band = bandFor(level());
@@ -2070,7 +2075,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-fix", {
-    description: "Pro: show the fix for the spot you are stuck on (other levels get it after a few tries)",
+    description: describeCmd("/tutor-fix"),
     handler: async (_args, ctx) => {
       if (!episode || !roleNamed(activeRole).ladder) { ctx.ui.notify("nothing to fix: run your program first", "info"); return; }
       if (bandFor(level()) !== "pro") { ctx.ui.notify("the fix comes after a few tries on the same spot", "info"); return; }
@@ -2086,7 +2091,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-level", {
-    description: "Set the tutor level 0-100 (beginner → pro)",
+    description: describeCmd("/tutor-level"),
     handler: async (args, ctx) => {
       const arg = args.trim();
       if (arg === "") {
@@ -2139,7 +2144,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("tutor-docs", {
-    description: "Fetch (or re-fetch) official docs for a language into tutor-<lang>-* skills",
+    description: describeCmd("/tutor-docs"),
     handler: async (args, ctx) => {
       const language = (args.trim() || project?.language || editorLanguage() || "").toLowerCase();
       if (!/^[a-z][a-z0-9+#.-]{0,30}$/.test(language)) { ctx.ui.notify("usage: /tutor-docs <language>", "warning"); return; }
@@ -2541,7 +2546,7 @@ export default function (pi: ExtensionAPI): void {
   const backFromReview = (l: LessonState): LessonState => ({ ...l, ...l.resume!, fails: 0, stepBack: false, resume: null });
 
   pi.registerCommand("tutor-lesson", {
-    description: "Learn-first lessons: next (write the exercise / start the next round) | check | skip | review | off",
+    description: describeCmd("/tutor-lesson"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       const a = args.trim().toLowerCase();
       if (!project || !profile) { ctx.ui.notify("lessons run inside a project: /tutor-start makes one", "warning"); return; }
@@ -2637,7 +2642,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-start", {
-    description: "Meet the tutor: a short conversation, one project, then build or learn first; check runs the level task; off pauses",
+    description: describeCmd("/tutor-start"),
     handler: async (args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
@@ -2675,7 +2680,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-learn", {
-    description: "Draft a skill from the last finished stuck episode; edit it, then submit to keep or Esc to discard",
+    description: describeCmd("/tutor-learn"),
     handler: async (_args, ctx) => {
       const branch = ctx.sessionManager.getBranch() as unknown[];
       const ep = lastClosedEpisode(branch);
@@ -2700,7 +2705,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-status", {
-    description: "Show the tutor's current state",
+    description: describeCmd("/tutor-status"),
     handler: async (_args, ctx) => {
       ctx.ui.notify(renderWidget(state).join(" | "), "info");
     },
