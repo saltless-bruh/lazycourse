@@ -2806,18 +2806,49 @@ describe("empty replies", () => {
     expect(b.entries.filter((x) => x.type === "tutor_judgment")).toHaveLength(1);
   });
 
-  it("onboarding skips the re-ask: its own dialogs fill the gaps (review I2)", async () => {
-    const saved = process.env.PI_TUTOR_PROFILE;
-    process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "empty-onb-")), "p.sqlite");
+  // Author 2026-11-09 (overrides review I2's skip): getting-started retries a blank reply too, and its own next step
+  // (the note, the next question or dialog) waits until the retry has finished.
+  const onboardingRun = async (fn: (b: Awaited<ReturnType<typeof boot>>, saved: () => Promise<{ exchanges: number; fields: Record<string, unknown> }>) => Promise<void>) => {
+    const savedEnv = process.env.PI_TUTOR_PROFILE;
+    const file = pjoin(mkd(pjoin(tmp(), "empty-onb-")), "p.sqlite");
+    process.env.PI_TUTOR_PROFILE = file;
     try {
       const b = await boot();
+      const { Profile } = await import("../extensions/tutor/profile.js");
+      const saved = async () => { const p = Profile.open(file); const v = JSON.parse(p.setting("onboarding") ?? "null"); p.close(); return v; };
+      await fn(b, saved);
+    } finally { if (savedEnv === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = savedEnv; }
+  };
+  const NOTE = (o: object) => `\`\`\`tutor-intake\n${JSON.stringify(o)}\n\`\`\``;
+
+  it("getting-started: a blank reply is retried, and the tutor's next step waits for the retry", async () => {
+    await onboardingRun(async (b, saved) => {
       const m = onlyThinking();
       await turn(b.events, b.ctx, "I want to learn python", m);
-      expect(visible(m)).not.toMatch(/writing its answer/);
+      expect(visible(m)).toMatch(/writing its answer/);
       await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
       await settle();
-      expect(rewrites(b)).toHaveLength(0);
-    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+      expect(rewrites(b)).toHaveLength(1);
+      expect((await saved()).exchanges).toBe(0); // the onboarding step did not run on the blank reply
+      await customTurn(b, rewrites(b)[0].message as object, assistant("Nice to meet you! How long have you been coding?"));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(1); // it runs once, after the retry
+      expect(rewrites(b)).toHaveLength(1);
+    });
+  });
+
+  it("getting-started: a note in the blank reply is kept for the retry's step", async () => {
+    await onboardingRun(async (b, saved) => {
+      const m = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: NOTE({ experience: "none yet" }) }] };
+      await turn(b.events, b.ctx, "I have never coded", m);
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      await customTurn(b, rewrites(b)[0].message as object, assistant("Welcome! Which language would you like?"));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      expect((await saved()).fields).toMatchObject({ experience: "none yet" });
+    });
   });
 
   it("a message typed after an empty reply, answered, cancels the re-ask (review I3)", async () => {
