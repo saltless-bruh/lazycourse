@@ -27,7 +27,7 @@ import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortN
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
 import { WELCOME } from "./commands-note.js";
 import { describe as describeCmd, commandNote } from "./commands.js";
-import type { Where } from "./wayfinding.js";
+import { whereOf, nextStep, type Where, type WayInput } from "./wayfinding.js";
 import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
@@ -282,8 +282,26 @@ export default function (pi: ExtensionAPI): void {
     if (!exam && examTimer) { clearInterval(examTimer); examTimer = null; }
   }
 
-  /** Where the learner is (wayfinding spec §7); Task 2 derives it from state. */
-  function whereNow(): Where { return firstRun() ? "fresh" : onboardingActive() ? "onboarding-talk" : "project"; }
+  /** Wayfinding spec 2026-11-08 §7: what decides the next step, read from the extension's own state. */
+  function wayInput(): WayInput {
+    const o = onboarding;
+    const elsewhere = o && o.stage === "choose" && !o.paused && o.dir && !onboardingActive() ? o.dir : null;
+    const shown = !!o && o.stage !== "done" && (o.paused || onboardingActive() || !!elsewhere);
+    let passingTask: string | null = null;
+    if (signal === "run passed" && project) {
+      if (workflow) passingTask = workflow.task;
+      else { try { passingTask = openTaskIds(readFileSync(join(project.path, "spec", "tasks.md"), "utf8"))[0] ?? null; } catch { passingTask = null; } }
+    }
+    return {
+      firstRun: firstRun(), tour: null,
+      onboarding: shown ? { stage: o!.stage, paused: !!o!.paused, levelTaskOpen: o!.stage === "check" && o!.levelCheck?.passed === null,
+        dialog: (o!.stage === "read" && o!.presented === "read") || (o!.stage === "project" && o!.presented === "project"), elsewhere } : null,
+      spec: specStatus, project: !!project,
+      recipe: workflow ? { task: workflow.task, step: workflow.step, action: STEP_SPECS[workflow.step - 1].name.toLowerCase() } : null,
+      stuck: !!episode, passingTask, lesson: !!lesson, exam: !!exam, stepUp: !!stepUp,
+    };
+  }
+  function whereNow(): Where { return whereOf(wayInput()); }
 
   function paint() {
     state.attempt = episode?.attempts || undefined;
@@ -295,6 +313,7 @@ export default function (pi: ExtensionAPI): void {
     if (!r.ladder) state.attempt = undefined;
     state.task = workflow ? workflowLabel(workflow) : undefined;
     state.lesson = lesson ? lessonLabel(lesson) : undefined;
+    state.next = nextStep(wayInput());
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));

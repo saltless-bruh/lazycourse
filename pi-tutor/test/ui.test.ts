@@ -3,6 +3,13 @@ import { renderWidget, renderStatus } from "../extensions/tutor/ui.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 describe("renderWidget", () => {
+  // Wayfinding spec 2026-11-08 §7: the next step is a third line, clipped like the others.
+  it("a next step is a clipped third line", () => {
+    const w = renderWidget({ state: "clean", connected: true, next: "next: " + "x".repeat(80) });
+    expect(w).toHaveLength(3);
+    expect(visibleWidth(w[2])).toBeLessThanOrEqual(44);
+    expect(renderWidget({ state: "clean", connected: true })).toHaveLength(2);
+  });
   const base = { language: "python", level: 30, state: "idle", connected: true };
   it("the widget shows tries, never a rung (spec 2026-10-21 §5)", () => {
     expect(renderWidget({ ...base, attempt: 2 }).join("\n")).toMatch(/try 2/);

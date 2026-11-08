@@ -18,6 +18,8 @@ export interface TutorState {
   lost?: boolean;
   /** Latest judgment word from the model, or "missing" when a reply had no block. */
   last?: string;
+  /** Wayfinding spec 2026-11-08 §7: the one next thing to do, a third line. */
+  next?: string;
 }
 
 const MAX = 44;
@@ -53,7 +55,8 @@ export function renderWidget(s: TutorState): string[] {
   const prefix = s.connected ? "" : `${s.lost ? "nvim closed" : "outside nvim"} · `;
   const suffix = s.last ? ` · judged ${s.last}` : "";
   const room = Math.max(1, MAX - visibleWidth(prefix) - visibleWidth(suffix));
-  return [clip(line1), clip(`${prefix}${clip(s.state, room)}${suffix}`)];
+  const lines = [clip(line1), clip(`${prefix}${clip(s.state, room)}${suffix}`)];
+  return s.next ? [...lines, clip(s.next)] : lines;
 }
 
 export function renderStatus(s: TutorState): string {

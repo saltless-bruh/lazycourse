@@ -1358,6 +1358,10 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     expect(s["tutor_commands"]).toMatch(/:Tutor \(type it in the editor\)/);
     expect(s["tutor_commands"]).not.toMatch(/:TutorDone/);
   });
+  it("the widget's third line says the next step (wayfinding spec §7)", async () => {
+    const b = await boot();
+    expect(b.widgets["tutor"]?.[2]).toMatch(/^next: .*:TutorTour/);
+  });
   it("the widget says level not set until a level is known", async () => {
     const b = await boot();
     expect(b.widgets["tutor"]?.[0]).toMatch(/level not set/);
