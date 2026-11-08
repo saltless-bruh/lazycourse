@@ -19,6 +19,8 @@ export interface Command {
   builtin?: boolean;
   planned?: string;
   context?: string;
+  /** In the model's note in every state: running code, starting, the recipe (learner-session fixes). */
+  core?: boolean;
 }
 
 let cache: Command[] | null = null;
@@ -51,7 +53,9 @@ const PLACE = { editor: "type it in the editor", pane: "type it in the tutor pan
 
 /** The model's note: the commands to point the learner to now, each with where it is typed (replaces COMMANDS_NOTE). */
 export function commandNote(w: Where): string {
-  const lines = commandsFor(w).filter((c) => c.where !== "key" || !c.context).map((c) =>
+  const now = commandsFor(w);
+  const core = loadCommands().filter((c) => c.core && !now.includes(c));
+  const lines = [...now, ...core].filter((c) => c.where !== "key" || !c.context).map((c) =>
     `- ${c.name}${c.args ? ` ${c.args}` : ""} (${PLACE[c.where]}): ${c.help}`);
   return ["The tutor's own commands, the ones to point the learner to now (never to an outside terminal). "
     + "`:Name` is typed in the editor, `/name` in the tutor pane:", ...lines].join("\n");

@@ -1356,6 +1356,10 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     const s = await userTurn(b, "hi");
     expect(s["tutor_commands"]).toMatch(/\/tutor-start[^\n]*tutor pane/);
     expect(s["tutor_commands"]).toMatch(/:Tutor \(type it in the editor\)/);
+    // Learner-session fixes: the model once sent a beginner to "open your terminal and type python3"; the core
+    // commands (running code, starting, the recipe's skip) are in every note, whatever the state.
+    expect(s["tutor_commands"]).toMatch(/:TutorRun/);
+    expect(s["tutor_commands"]).toMatch(/"skip"[^\n]*`off` to stop/);
     expect(s["tutor_commands"]).not.toMatch(/:TutorDone/);
   });
   it("the widget's third line says the next step (wayfinding spec §7)", async () => {
