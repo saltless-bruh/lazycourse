@@ -24,6 +24,8 @@ export function fakePi() {
   const entries: { type: string; data: unknown }[] = [];
   const sent: { text: string; opts: unknown }[] = [];
   const messages: { message: unknown; options: unknown }[] = [];
+  // Wayfinding spec §9.1: the tutor's own nudges are hidden custom messages, recorded here as {text, opts}.
+  const nudges: { text: string; opts: unknown }[] = [];
   const execOut: Record<string, { stdout: string; stderr: string; code: number }> = {};
   const skills: { path: string }[] = [];
   const tools: Record<string, { execute: (...a: unknown[]) => Promise<unknown> }> = {};
@@ -37,11 +39,15 @@ export function fakePi() {
     registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => { commands[name] = def; },
     appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); },
     sendUserMessage: (text: string, opts: unknown) => { sent.push({ text, opts }); },
-    sendMessage: (message: unknown, options: unknown) => { messages.push({ message, options }); },
+    sendMessage: (message: unknown, options: unknown) => {
+      messages.push({ message, options });
+      const m = message as { customType?: string; content?: unknown };
+      if (m.customType === "tutor_nudge") nudges.push({ text: String(m.content), opts: options });
+    },
     exec: async (command: string) => ({ ...(execOut[command] ?? { stdout: "", stderr: `${command}: not found`, code: 127 }), killed: false }),
     getCommands: () => skills.map((s) => ({ name: "skill:x", source: "skill", sourceInfo: { path: s.path } })),
   };
-  return { pi, events, commands, entries, sent, messages, skills, execOut, tools, transformers, renderers };
+  return { pi, events, commands, entries, sent, messages, skills, execOut, tools, transformers, renderers, nudges };
 }
 
 export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {
@@ -129,6 +135,15 @@ export async function turn(events: Record<string, Handler>, ctx: unknown, prompt
     await events["turn_end"]({ type: "turn_end", message }, ctx);
   }
   return Object.assign(opts, { message: r?.message }); // sections + the hidden per-turn context
+}
+
+/** A turn the extension started with one of its hidden nudges (Pi: `messageType: "custom"`, no prompt). */
+export async function nudgeTurn(events: Record<string, Handler>, ctx: unknown, content: string, ...messages: unknown[]) {
+  const opts = { sections: {} as Record<string, string> };
+  const message = { role: "custom", customType: "tutor_nudge", content, display: false, timestamp: 1 };
+  const r = (await events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, ctx)) as { message?: { content: string } } | undefined;
+  for (const m of messages) await events["turn_end"]({ type: "turn_end", message: m }, ctx);
+  return Object.assign(opts, { message: r?.message });
 }
 
 /** A real pi.exec stand-in (exit code, killed on timeout) for tests that run real toolchains. */

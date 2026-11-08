@@ -149,6 +149,13 @@ Re-verify every line when bumping versions.
   listeners"), so an async check here runs before the screen gets the final message. Used for held teaching
   replies (spec 2026-10-21 §6): the reply is checked (compliance.checkTurn) and replaced when it fails. Live
   spike 2026-10-20: a reply held behind a placeholder through an 8 s async check, then released replaced.
+- `pi.sendMessage({ customType: "tutor_nudge", content: "[tutor] …", display: false }, { triggerTurn: true })`, sent
+  only once `ctx.isIdle()` (wayfinding spec 2026-11-08 §9.1): every "[tutor] …" line to the model (onboarding kicks,
+  stuck signals, recipe start and step moves, lessons, project talk). It replaced `sendUserMessage(…, { deliverAs:
+  "followUp" })`, which showed the line as the learner's message. Pi turns a custom message into a user-role LLM
+  message (`dist/core/messages.js`, `case "custom"`); `display: false` hides it (docs/session-format.md). The run's
+  `before_agent_start` is a `BeforeAgentStartCustomEvent` (types.d.ts:736) whose `message.content` the extension reads
+  back as the turn's prompt, so the "[tutor]" checks still apply.
 - `pi.registerMessageRenderer(customType, (message, options, theme) => Component | undefined)` (types.d.ts:1250,
   `MessageRenderer` at :1169; Pi 1.3.0): the `tutor_card` session card renders as `new Text(content, 1, 0)` from
   `@earendil-works/pi-tui` (`components/text.d.ts`: `constructor(text?, paddingX?, paddingY?, customBgFn?)`), so it

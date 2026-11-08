@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
+import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, nudgeTurn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import { HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
@@ -592,15 +592,42 @@ describe("/tutor-plan", () => {
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
     expect(b.entries.find((e) => e.type === "tutor_workflow")?.data).toMatchObject({ task: "P1.T1", step: 1 });
     expect(b.widgets["tutor"]?.[0]).toContain("plan 1/6");
-    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\. .*"skip".*"\/tutor-plan off"/);
+    expect(b.nudges.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\. .*"skip".*"\/tutor-plan off"/);
     const opts = await turn(b.events, b.ctx, "[tutor] design recipe started for P1.T1", judged("none"));
     expect(opts.message?.content).toMatch(/\[workflow\] design recipe for P1\.T1: step 1\/6 Find/);
+  });
+  // Wayfinding spec §9.1: the tutor's own lines are hidden custom messages, never the learner's voice.
+  it("a nudge is a hidden message that starts a turn, not a learner message", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(b.sent).toHaveLength(0);
+    const m = b.messages.filter((x) => (x.message as { customType: string }).customType === "tutor_nudge");
+    expect(m).toHaveLength(1);
+    expect(m[0]).toMatchObject({ message: { display: false }, options: { triggerTurn: true } });
+  });
+  it("a nudge sent while the tutor is answering is delivered once, when it is idle (Review Focus 1)", async () => {
+    const b = await boot({ cwd: project() });
+    b.busy.value = true;
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(b.nudges).toHaveLength(0);
+    b.busy.value = false;
+    await new Promise((r) => setTimeout(r, 150));
+    expect(b.nudges).toHaveLength(1);
+  });
+  it("a nudge-started turn opens no chat episode and gets the recipe's context", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    const opts = await nudgeTurn(b.events, b.ctx, b.nudges.at(-1)!.text, judged("none"));
+    expect(opts.message?.content).toMatch(/\[workflow\] design recipe for P1\.T1: step 1\/6 Find/);
+    expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "chat")).toBe(false);
   });
   it("without a UI it starts the workflow but sends no turn", async () => {
     const b = await boot({ cwd: project() });
     await b.commands["tutor-plan"].handler("P1.T1", { ...b.ctx, hasUI: false });
     expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(true);
-    expect(b.sent).toHaveLength(0);
+    expect(b.nudges).toHaveLength(0);
   });
   it("step_done from the learner advances; from a [tutor] nudge it does not", async () => {
     const b = await boot({ cwd: project() });
@@ -627,7 +654,7 @@ describe("/tutor-plan", () => {
     await empty.commands["tutor-plan"].handler("P1.T1", empty.ctx);
     expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(false);
     expect(empty.entries.some((e) => e.type === "tutor_workflow")).toBe(false);
-    expect(b.sent).toHaveLength(0);
+    expect(b.nudges).toHaveLength(0);
     expect(b.notes.join("\n")).toMatch(/usage: \/tutor-plan/);
     expect(b.notes.join("\n")).toMatch(/P1\.T9 is not in spec\/tasks\.md/);
     expect(empty.notes.join("\n")).toMatch(/no spec\/tasks\.md/);
@@ -668,7 +695,7 @@ describe("/tutor-plan next (live check: the model called step 4 complete but nev
     await b.commands["tutor-plan"].handler("next", b.ctx);
     expect(b.widgets["tutor"]?.[0]).toContain("plan 5/6");
     expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ step: 5 });
-    expect(b.sent.at(-1)?.text).toBe("[tutor] the learner moved on to step 5 (Map) of the design recipe for P1.T1.");
+    expect(b.nudges.at(-1)?.text).toBe("[tutor] the learner moved on to step 5 (Map) of the design recipe for P1.T1.");
   });
   it("next after Build finishes the workflow; without a workflow it says so", async () => {
     const b = await boot({ cwd: project(), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 6, started: 1 } }] });
@@ -715,10 +742,10 @@ describe("final review fixes (workflow)", () => {
   it("I4: /tutor-plan off ends the recipe; the context and widget label go away and stay away on resume", async () => {
     const b = await boot({ cwd: project() });
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
-    const n = b.sent.length;
+    const n = b.nudges.length;
     await b.commands["tutor-plan"].handler("off", b.ctx);
     expect(b.widgets["tutor"]?.[0]).not.toContain("plan");
-    expect(b.sent.length).toBe(n);
+    expect(b.nudges.length).toBe(n);
     const last = b.entries.filter((e) => e.type === "tutor_workflow").at(-1);
     expect(last?.data).toMatchObject({ task: "P1.T1", done: expect.any(Number) });
     const opts = await turn(b.events, b.ctx, "hi", judged("none"));
@@ -1455,7 +1482,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
   it("starts a conversation: a kickoff turn, the onboarding rules instead of the ladder, and no hint episode", async () => {
     const b = await boot({ cwd: home });
     await b.commands["tutor-start"].handler("", b.ctx);
-    expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\]/), opts: { deliverAs: "followUp" } });
+    expect(b.nudges.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\]/), opts: { triggerTurn: true } });
     const t = await exchange(b, note({ experience: "none yet", known: [] }));
     expect(t.sections["tutor"]).toMatch(/first meeting/i);
     expect(t.sections["tutor"]).not.toMatch(/tutor-judgment/);
@@ -1477,7 +1504,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await b.commands["tutor-start"].handler("pytutor-architect", b.ctx);
     expect(b.notes.at(-1)).toBe("pick one of: python, rust, go, typescript, lua, javascript");
     expect(await saved()).toBeNull();
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
   });
   it("after two replies without a note the code asks the missing items itself, then moves on (Review Focus #1)", async () => {
     const b = await boot({ cwd: home });
@@ -1489,7 +1516,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(s.fields).toMatchObject({ experience: "none yet", known: [], target: "python", idea: null });
     expect(s.stage).toBe("read");
     expect(typeof s.level).toBe("number");
-    expect(b.sent.length).toBe(2); // the kickoff, then the turn where the tutor gives its read
+    expect(b.nudges.length).toBe(2); // the kickoff, then the turn where the tutor gives its read
   });
   it("a named language and a self-score of 7: a level task in the editor, run by /tutor-start check (Q7, Q20)", async () => {
     const { existsSync } = await import("node:fs");
@@ -1589,7 +1616,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     b.script.push("none yet", "", "");
     await exchange(b, assistant("hi"));
     await exchange(b, assistant("hello")); // fallback fills the checklist → stage read, the kick queues a follow-up
-    expect(b.sent.at(-1)?.text).toMatch(/level \d+\/100/); // the kick itself carries the stage's instruction
+    expect(b.nudges.at(-1)?.text).toMatch(/level \d+\/100/); // the kick itself carries the stage's instruction
     // Pi runs the queued follow-up in the same loop: no before_agent_start, then message_end, turn_end, agent_end.
     const reply = assistant("Here is my read of you.");
     await b.events["message_end"]({ type: "message_end", message: reply }, b.ctx);
@@ -1604,16 +1631,16 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await b.commands["tutor-start"].handler("", b.ctx);
     b.script.push("none yet", "", "");
     await exchange(b, assistant("hi"));
-    const sentBefore = b.sent.length;
+    const sentBefore = b.nudges.length;
     b.busy.value = true; // Pi is still finishing the run while agent_end handlers run
     await turn(b.events, b.ctx, "[tutor] onboarding", assistant("hello"));
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
     await new Promise((r) => setTimeout(r, 30));
-    expect(b.sent.length).toBe(sentBefore); // not queued into the ending run
+    expect(b.nudges.length).toBe(sentBefore); // not queued into the ending run
     b.busy.value = false;
     await new Promise((r) => setTimeout(r, 120));
-    expect(b.sent.length).toBe(sentBefore + 1);
-    expect(b.sent.at(-1)?.text).toMatch(/level \d+\/100/);
+    expect(b.nudges.length).toBe(sentBefore + 1);
+    expect(b.nudges.at(-1)?.text).toMatch(/level \d+\/100/);
   });
   it("the project suggestion shows Pi's cancellable loader and passes its signal (final review I1)", async () => {
     const { initTheme, BorderedLoader } = await import("@earendil-works/pi-coding-agent");
@@ -1684,7 +1711,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
 
   it("the new project session asks build-or-learn at once", async () => {
     const b = await boot({ cwd: dir });
-    expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { deliverAs: "followUp" } });
+    expect(b.nudges.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { triggerTurn: true } });
   });
   it("learn first: lesson rounds start (a beginner gets what its concepts build on: conditionals needs bools) and the spec is written in milestones in the background", async () => {
     const b = await boot({ cwd: dir });
@@ -1697,7 +1724,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
     expect(readFileSync(pjoin(dir, "spec", "tasks.md"), "utf8")).toMatch(/## Milestone 1:/);
     expect(readFileSync(pjoin(dir, "README.md"), "utf8")).toMatch(/run: python3 src\/main\.py/);
-    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] lesson/);
+    expect(b.nudges.at(-1)?.text).toMatch(/^\[tutor\] lesson/);
   });
   it("build now: only the spec, no lessons", async () => {
     const b = await boot({ cwd: dir });
@@ -1864,7 +1891,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
       const b = await boot({ cwd: dir });
       await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
-      const kickoff = b.sent.at(-1)?.text ?? "";
+      const kickoff = b.nudges.at(-1)?.text ?? "";
       expect(kickoff).toMatch(/skip/);
       expect(kickoff).toContain("/tutor-plan off");
       expect(kickoff).not.toMatch(/tell the learner/i); // the learner sees this bubble (re-run finding)
@@ -2170,7 +2197,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     wfile(pjoin(other, "README.md"), "my own readme");
     const p = Profile.open(file); p.addProject("python", other, "Older", 2); p.close();
     const b = await boot({ cwd: other });
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
     expect(b.notes.some((n) => n.includes(dir))).toBe(true); // where to go to continue
     b.replies.push(SPEC([]));
     const t = await exchange(b, note({ path: "build" }));
@@ -2183,7 +2210,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     b.replies.push(SPEC([]));
     await exchange(b, note({ path: "build" }));
     // The recipe's kickoff can follow once the (instant, here) plan is written; the project talk is still sent.
-    expect(b.sent.some((m) => /^\[tutor\] project: .*Tip Calculator/.test(m.text))).toBe(true);
+    expect(b.nudges.some((m) => /^\[tutor\] project: .*Tip Calculator/.test(m.text))).toBe(true);
   });
   it("a review returns the learner to where they were (final review I1)", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");

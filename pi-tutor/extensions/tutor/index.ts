@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { retryAssistantCall } from "@earendil-works/pi-ai/compat";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
@@ -396,7 +396,7 @@ export default function (pi: ExtensionAPI): void {
     // The architect discusses design: editor stuck signals still open episodes but do not interrupt it.
     if (nudge && roleNamed(activeRole).ladder && session?.isIdle() && (anyGap || now - lastNudge >= NUDGE_GAP_MS)) {
       lastNudge = now;
-      pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
+      sendNudge(session, `${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`);
     }
   }
 
@@ -604,6 +604,11 @@ export default function (pi: ExtensionAPI): void {
   }
 
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
+  /** The text a run started with: the learner's prompt, or the content of our hidden nudge (wayfinding spec §9.1). */
+  function promptOf(event: BeforeAgentStartEvent): string {
+    if (event.messageType === "user") return event.prompt;
+    return event.message.customType === "tutor_nudge" && typeof event.message.content === "string" ? event.message.content : "";
+  }
   pi.on("before_agent_start", async (event) => {
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
@@ -617,7 +622,7 @@ export default function (pi: ExtensionAPI): void {
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
       if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
       intake = undefined;
-      run = { prompt: event.messageType === "user" ? event.prompt : "", step: null, judged: true };
+      run = { prompt: promptOf(event), step: null, judged: true };
       return;
     }
     const band = bandFor(level());
@@ -625,8 +630,9 @@ export default function (pi: ExtensionAPI): void {
     const role = roleNamed(activeRole);
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
-    // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
-    const prompt = event.messageType === "user" ? event.prompt : "";
+    // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt; our own
+    // hidden nudge's text stands in, so every "[tutor]" check below still knows the turn is the tutor's.
+    const prompt = promptOf(event);
     learnerMessage(prompt);
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
@@ -1120,7 +1126,7 @@ export default function (pi: ExtensionAPI): void {
         const moved = advanceWorkflow(true);
         paint();
         if (moved && moved.done === undefined && ctx.hasUI) {
-          pi.sendUserMessage(`${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`, { deliverAs: "followUp" });
+          sendNudge(ctx, `${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`);
         }
         return;
       }
@@ -1144,7 +1150,7 @@ export default function (pi: ExtensionAPI): void {
     paint();
     const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). (You can say "skip" to skip a step, or "/tutor-plan off" to stop.)`;
     // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-    if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+    if (ctx.hasUI) sendNudge(ctx, kickoff);
     else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
   }
 
@@ -2275,14 +2281,22 @@ export default function (pi: ExtensionAPI): void {
     if (ctx.isIdle() || tries >= 600) { pi.sendMessage({ customType: "tutor_rewrite", content: text, display: false }, { triggerTurn: true }); return; }
     setTimeout(() => rewriteWhenIdle(ctx, text, tries + 1), 50).unref?.();
   }
-  function sendWhenIdle(ctx: ExtensionContext, text: string, tries = 0) {
+  /**
+   * Wayfinding spec §9.1: the tutor's own line to the model ("[tutor] …"), sent as a hidden custom message once Pi
+   * is idle, so it starts a fresh turn and never shows as the learner's message or in Pi's follow-up queue.
+   * Pi gives the model a custom message as user text (dist/core/messages.js); before_agent_start reads it back.
+   */
+  function sendNudge(ctx: ExtensionContext, text: string, tries = 0) {
     if (closing) return;
-    if (ctx.isIdle() || tries >= 600) { pi.sendUserMessage(text, { deliverAs: "followUp" }); return; }
-    setTimeout(() => sendWhenIdle(ctx, text, tries + 1), 50).unref?.();
+    if (ctx.isIdle() || tries >= 600) {
+      pi.sendMessage({ customType: "tutor_nudge", content: text, display: false }, { triggerTurn: true });
+      return;
+    }
+    setTimeout(() => sendNudge(ctx, text, tries + 1), 50).unref?.();
   }
   /** Start the model's next onboarding turn (only the TUI may start a turn, as for /tutor-plan). */
   function kick(ctx: ExtensionContext, what: string) {
-    if (ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} onboarding: ${what}`);
+    if (ctx.hasUI) sendNudge(ctx, `${TUTOR_PREFIX} onboarding: ${what}`);
     else ctx.ui.notify("send a message to continue", "info");
   }
   const checksRoot = (lang: string) => join(homedir(), "lazycourse", ".checks", lang);
@@ -2506,7 +2520,7 @@ export default function (pi: ExtensionAPI): void {
     return parts.join("\n\n");
   }
   function lessonKick(ctx: ExtensionContext, what: string) {
-    if (ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} lesson: ${what}`);
+    if (ctx.hasUI) sendNudge(ctx, `${TUTOR_PREFIX} lesson: ${what}`);
   }
 
   interface SpecJob { rounds: string[][]; about: Record<string, string>; level: number; project: { title: string; summary: string; concepts: string[] } }
@@ -2566,7 +2580,7 @@ export default function (pi: ExtensionAPI): void {
     saveLesson(l);
     if (l) lessonKick(ctx, `start the lesson on ${l.concept}`);
     // Final review I5 (Q10): building now, the tutor talks the project through while the plan is written.
-    else if (path === "build" && ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} project: talk through what "${o.project.title}" involves (${o.project.summary}) and its first small step, while the plan is being written`);
+    else if (path === "build" && ctx.hasUI) sendNudge(ctx, `${TUTOR_PREFIX} project: talk through what "${o.project.title}" involves (${o.project.summary}) and its first small step, while the plan is being written`);
     else if (path === "learn") ctx.ui.notify("no prepared lessons cover this project's ideas yet; we build and learn as we go", "info");
   }
 
