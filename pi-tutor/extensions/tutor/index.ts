@@ -12,7 +12,7 @@ import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { cleanReply, guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
-import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply, turnInstruction } from "./turns.js";
+import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT, LOST_TEXT, fallbackReply, turnInstruction } from "./turns.js";
 /** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
 const CHECKER_TIMEOUT_MS = 180_000;
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
@@ -284,6 +284,8 @@ export default function (pi: ExtensionAPI): void {
   }
 
   let lastNow = "";
+  /** Author 2026-11-09: one re-ask per learner turn for a reply with nothing visible; the re-ask is due at agent_end. */
+  let emptyAsked = false, pendingEmpty = false;
   /** Wayfinding spec §8.3: the tour's current step, from Neovim's `tour` payloads; null when no tour runs. */
   let tourState: { step: number; total: number; title: string } | null = null;
   /** Wayfinding spec 2026-11-08 §7: what decides the next step, read from the extension's own state. */
@@ -530,7 +532,12 @@ export default function (pi: ExtensionAPI): void {
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
     // Q23: the Pi that restarted in the new project folder carries the conversation on: build or learn.
-    if (onboardingActive() && onboarding?.stage === "choose") kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises");
+    // Author 2026-11-09 (freeze option B): the first turn starts after session_start has returned, so Pi's screen is
+    // hooked up to the run before the build-or-learn dialog opens (once, a dialog opened earlier ignored every key).
+    if (onboardingActive() && onboarding?.stage === "choose") {
+      const mine = generation;
+      setTimeout(() => { if (generation === mine) kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises"); }, 250).unref?.();
+    }
     // Final review C1: a pending choice belongs to its folder; elsewhere the learner is only told where to go.
     else if (onboarding?.stage === "choose" && !onboarding.paused && onboarding.dir) ctx.ui.notify(`your project "${onboarding.project?.title ?? "?"}" is waiting in ${onboarding.dir}: open it there to choose build now or learn first`, "info");
     // Final review I2 / Review Focus #4: a plan job that did not finish (Pi quit) is reported, not forgotten.
@@ -634,6 +641,7 @@ export default function (pi: ExtensionAPI): void {
     return event.message.customType === "tutor_nudge" && typeof event.message.content === "string" ? event.message.content : "";
   }
   pi.on("before_agent_start", async (event) => {
+    if (event.messageType === "user" || (event.messageType === "custom" && event.message.customType === "tutor_nudge")) emptyAsked = false;
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
     // Wayfinding spec §8.3: during the tour a question is about the tour, not the onboarding's first answer.
@@ -1070,6 +1078,19 @@ export default function (pi: ExtensionAPI): void {
         content = next;
         changed = true;
       }
+    }
+    // Author 2026-11-09 (option B): a final reply with nothing for the learner — the answer stayed in the hidden thinking —
+    // is held and asked once more; empty again, an honest line. The judgment fence stays, so the turn still counts.
+    const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
+    const shown = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+    if (final && !hideJudgment(shown).trim()) {
+      const line = emptyAsked ? LOST_TEXT : EMPTY_TEXT;
+      if (!emptyAsked) { emptyAsked = true; pendingEmpty = true; }
+      pi.appendEntry("tutor_check", { issues: ["empty"], step: cur?.step ?? null, rejected: shown.slice(0, 2000) });
+      const i = content.findIndex((c) => c.type === "text");
+      content = i < 0 ? [...content, { type: "text" as const, text: line }]
+        : content.map((c, k) => (k === i && c.type === "text" ? { ...c, text: `${line}\n${c.text}` } : c));
+      changed = true;
     }
     return changed ? { message: { ...m, content } } : undefined;
   });
@@ -2715,6 +2736,10 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (pendingEmpty) {
+      pendingEmpty = false;
+      if (!pendingRewrite) rewriteWhenIdle(ctx, "Your last reply had no text for the learner: your answer was only in your thinking. Write your answer to the learner now, following this turn's instruction.");
+    }
     if (pendingRewrite) {
       const issues = pendingRewrite;
       pendingRewrite = null;

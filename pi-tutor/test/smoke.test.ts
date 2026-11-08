@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, nudgeTurn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
+import { hideJudgment } from "../extensions/tutor/compliance.js";
 import { HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
@@ -1795,8 +1796,9 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
   }
   const waitFor = async (ok: () => boolean) => { for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10)); expect(ok()).toBe(true); };
 
-  it("the new project session asks build-or-learn at once", async () => {
+  it("the new project session asks build-or-learn as soon as it has started", async () => {
     const b = await boot({ cwd: dir });
+    await new Promise((r) => setTimeout(r, 400)); // author 2026-11-09: after start-up returns, not inside it
     expect(b.nudges.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { triggerTurn: true } });
   });
   it("learn first: lesson rounds start (a beginner gets what its concepts build on: conditionals needs bools) and the spec is written in milestones in the background", async () => {
@@ -2276,6 +2278,14 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(p.knownConcepts("python", Date.now() + 1000)).toEqual(expect.arrayContaining(["variables", "functions"]));
     p.close();
   }, 60_000);
+  // Author 2026-11-09 (freeze option B): once, the switched Pi ignored every key at this dialog. Its first turn started
+  // inside session_start, before Pi's screen was hooked up; it now starts only after start-up has returned.
+  it("the switched Pi asks build-or-learn only after its start-up has finished", async () => {
+    const b = await boot({ cwd: dir });
+    expect(b.nudges).toHaveLength(0);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(b.nudges.at(-1)?.text).toMatch(/start building now, or first learn/);
+  });
   it("a pending choice stays with its project: another project's Pi is untouched and its README kept (final review C1)", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");
     const { realpathSync } = await import("node:fs");
@@ -2757,5 +2767,66 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     await fix.commands["tutor-thinking"].handler("show", fix.ctx);
     await fix.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", systemPromptOptions: { sections: {} } }, fix.ctx);
     expect(fix.transformers[0]("so it is total / people", think)).toBe("so it is total / people");
+  });
+});
+
+// Wayfinding branch, author 2026-11-09 (option B): nemotron sometimes answered only in its hidden thinking; the visible
+// reply was just the judgment block, so the learner saw nothing. Every turn gets one re-ask, then an honest line.
+describe("empty replies", () => {
+  const JUDGED = '```tutor-judgment\n{"judgment":"none"}\n```';
+  const onlyThinking = () => ({ role: "assistant", stopReason: "stop", content: [{ type: "thinking", thinking: "What's happening: normal mode is…" }, { type: "text", text: JUDGED }] });
+  const visible = (m: unknown) => hideJudgment(((m as { content: { type: string; text?: string }[] }).content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n"))).trim();
+  const rewrites = (b: Awaited<ReturnType<typeof boot>>) => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_rewrite");
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+  const customTurn = async (b: Awaited<ReturnType<typeof boot>>, message: object, reply: unknown) => {
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, b.ctx);
+    const e = (await b.events["message_end"]({ type: "message_end", message: reply }, b.ctx)) as { message?: object } | undefined;
+    if (e?.message) { for (const k of Object.keys(reply as object)) delete (reply as Record<string, unknown>)[k]; Object.assign(reply as object, e.message); }
+    await b.events["turn_end"]({ type: "turn_end", message: reply }, b.ctx);
+  };
+
+  it("a reply with nothing for the learner is held and asked again once", async () => {
+    const b = await boot();
+    const m = onlyThinking();
+    await turn(b.events, b.ctx, "what is normal mode?", m);
+    expect(visible(m)).toMatch(/writing its answer/);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(1);
+    expect(String((rewrites(b)[0].message as { content: string }).content)).toMatch(/only in your thinking/);
+    expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(1); // the judgment still counts
+  });
+
+  it("empty again: an honest line, and no third try", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    const again = onlyThinking();
+    await customTurn(b, rewrites(b)[0].message as object, again);
+    expect(visible(again)).toMatch(/lost my answer/i);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(1);
+  });
+
+  it("a reply with text is left alone", async () => {
+    const b = await boot();
+    const m = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    await turn(b.events, b.ctx, "what is normal mode?", m);
+    expect(visible(m)).toBe("Normal mode is for commands.");
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
+  });
+
+  it("a tool-use step with no text is not an empty reply", async () => {
+    const b = await boot();
+    const m = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: { path: "a.py" } }] };
+    await turn(b.events, b.ctx, "look at my file", m);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
   });
 });
