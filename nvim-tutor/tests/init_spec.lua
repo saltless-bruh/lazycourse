@@ -484,6 +484,72 @@ describe("tutor.init", function()
     assert.is_nil(tutor.state.run_job)
   end)
 
+  local function capture_notes(fn)
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    local ok, err = pcall(fn)
+    vim.notify = orig
+    assert(ok, err)
+    return table.concat(notes, "\n")
+  end
+
+  it("minor M2: :TutorRun test while the program waits in the split names the program, not a test", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 30" }, test_cmd = { "true" } })
+    tutor._notify_override = function() end
+    vim.cmd("TutorRun")
+    local notes = capture_notes(function() vim.cmd("TutorRun test") end)
+    assert.is_nil(notes:find("a test run"), notes)
+    assert.is_truthy(notes:find("your program is still running"), notes)
+    vim.cmd("TutorRun stop")
+  end)
+
+  it("minor M3: a test run stopped at its time limit tells the learner and the tutor it timed out", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, test_cmd = { "sh", "-c", "sleep 30" }, test_timeout_ms = 300 })
+    local got
+    tutor._notify_override = function(p) got = p end
+    local notes = capture_notes(function()
+      vim.cmd("TutorRun test")
+      vim.wait(3000, function() return got ~= nil end)
+    end)
+    assert.is_truthy(got)
+    assert.is_truthy(got.stderr:find("stopped after 0.3 s"), got.stderr)
+    assert.is_true(got.timed_out)
+    assert.is_truthy(notes:find("stopped after 0.3 s"), notes)
+  end)
+
+  it("minor M4: :TutorRun stop and closing the split both say the run stopped", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 30" } })
+    tutor._notify_override = function() end
+    vim.cmd("TutorRun")
+    local a = capture_notes(function() vim.cmd("TutorRun stop") end)
+    assert.is_truthy(a:find("run stopped"), a)
+    vim.cmd("TutorRun")
+    local b = capture_notes(function() vim.api.nvim_win_close(term_win(), true) end)
+    assert.is_truthy(b:find("run stopped"), b)
+    local c = capture_notes(function() vim.cmd("TutorRun stop") end)
+    assert.is_nil(c:find("run stopped"), c) -- nothing was running
+  end)
+
+  it("minor M6: closing the run split wipes its terminal buffer", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "true" } })
+    tutor._notify_override = function() end
+    vim.cmd("TutorRun")
+    local win = term_win()
+    local buf = vim.api.nvim_win_get_buf(win)
+    vim.wait(1000, function() return tutor.state.run_job == nil end)
+    vim.api.nvim_win_close(win, true)
+    vim.wait(100)
+    assert.is_false(vim.api.nvim_buf_is_valid(buf))
+  end)
+
   it(":TutorRun test can never hang (stdin is empty)", function()
     package.loaded["tutor"] = nil
     local tutor = require("tutor")

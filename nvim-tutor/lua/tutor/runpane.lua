@@ -53,8 +53,10 @@ function M.start(argv, cwd, on_exit, on_end)
   win = vim.api.nvim_get_current_win()
   local old = vim.api.nvim_win_get_buf(win)
   local buf = vim.api.nvim_create_buf(false, true)
+  -- Minor M6: closing the split wipes the run's buffer (a reused window's old buffer goes the same way).
+  vim.bo[buf].bufhidden = "wipe"
   vim.api.nvim_win_set_buf(win, buf)
-  if vim.b[old].tutor_run and old ~= buf then pcall(vim.api.nvim_buf_delete, old, { force = true }) end
+  if vim.api.nvim_buf_is_valid(old) and vim.b[old].tutor_run and old ~= buf then pcall(vim.api.nvim_buf_delete, old, { force = true }) end
   vim.b[buf].tutor_run = true
   local c = { buf = buf, win = win, job = nil, stopped = false }
   -- jobstart{term=true} attaches to the current window's buffer (CLAUDE.md): run it inside the split.
@@ -85,6 +87,7 @@ function M.start(argv, cwd, on_exit, on_end)
     once = true,
     callback = function()
       if c.job then
+        vim.notify("[tutor] run stopped", vim.log.levels.INFO) -- minor M4
         c.stopped = true
         if current == c then current = nil end
         pcall(vim.fn.jobstop, c.job)
