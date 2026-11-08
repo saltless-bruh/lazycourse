@@ -47,7 +47,7 @@ import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from 
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
-import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
+import { writeProjectsFile, Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, formatFeedback } from "./feedback.js";
 import { suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, LANGUAGES } from "./start.js";
 import { newOnboarding, checkInOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, type Onboarding, type Fields } from "./onboard.js";
@@ -492,6 +492,8 @@ export default function (pi: ExtensionAPI): void {
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
     }
+    // Wayfinding spec §8.4: Neovim reads the project folders at start-up to open the tutor by itself there.
+    if (profile) { const p = profile; profileWrite(() => writeProjectsFile(p)); }
     const proj = profile?.projectAt(realCwd(ctx.cwd));
     project = proj ?? null;
     if (proj) state.language = proj.language;
@@ -2412,6 +2414,7 @@ export default function (pi: ExtensionAPI): void {
       const lua = await luaRuntimeFor(lang);
       try {
         dir = createProject(profile, { language: lang, level: o.level ?? levelFrom(o), project: { ...o.project, size: "small" }, dir: resolve(expandHome(answer.trim() || def, homedir())), about: aboutOf(o), now: Date.now(), luaRuntime: lua }).dir;
+        { const p = profile; profileWrite(() => writeProjectsFile(p)); }
       } catch (e) { saveOnboarding(o); ctx.ui.notify(e instanceof Error ? e.message : String(e), "warning"); return; }
       saveOnboarding({ ...o, stage: "choose", presented: null, dir });
       await fetchDocs(ctx, lang, false); // the switched Pi loads the language's docs (spec §6 last step)

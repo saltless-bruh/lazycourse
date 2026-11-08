@@ -254,22 +254,15 @@ return {
   {
     dir = "<repo>/nvim-tutor",
     name = "nvim-tutor",
-    cmd = { "Tutor", "TutorRestart", "TutorRun", "TutorStart", "TutorLevel", "TutorLearn",
-            "TutorDocs", "TutorReload", "TutorPlan", "TutorArchitect", "TutorFeedback", "TutorThinking",
-            "TutorExam", "TutorSubmit", "TutorProgress", "TutorLesson" },
-    keys = {
-      { "<leader>tt", "<cmd>Tutor<cr>", desc = "Toggle tutor (pi)" },
-      { "<leader>tr", "<cmd>TutorRun<cr>", desc = "Run project and tell tutor" },
-    },
-    init = function()
-      local ok, wk = pcall(require, "which-key")
-      if ok then wk.add({ { "<leader>t", group = "tutor" } }) end
-    end,
-    opts = {},
+    lazy = false, -- loads at start: in a tutor project or ~/lazycourse, nvim opens the tutor by itself
+    opts = {},    -- auto_open = false turns that off
     config = function(_, o) require("tutor").setup(o) end,
   },
 }
 ```
+
+The plugin sets its own keys: `<leader>tt` (open/close the tutor), `<leader>tr` (`:TutorRun`), `<leader>te`
+(ask about the error under the cursor) and `<leader>t?` (help: every command, in its own tab).
 
 4. `:Tutor` (or `<leader>tt`) opens Pi in a right split; type at Pi's prompt. `<Esc><Esc>` leaves terminal mode.
 

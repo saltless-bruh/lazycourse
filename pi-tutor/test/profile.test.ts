@@ -3,7 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Profile, SCHEMA_VERSION, MIGRATIONS, defaultProfilePath, toFtsQuery } from "../extensions/tutor/profile.js";
+import { Profile, SCHEMA_VERSION, MIGRATIONS, defaultProfilePath, toFtsQuery, writeProjectsFile } from "../extensions/tutor/profile.js";
+import { readFileSync, existsSync } from "node:fs";
 
 let p: Profile | undefined;
 afterEach(() => { p?.close(); p = undefined; });
@@ -339,5 +340,23 @@ describe("profile v6: the habit event log (spec 2026-10-26 §6.1)", () => {
     expect(p.habitEvents("own-fixes")).toEqual([{ habit: "own-fixes", ok: true, language: "python", project: "/p/a", at: 5, evidence: "ep-1" }]);
     expect(p.habitEvents().map((e) => e.habit)).toEqual(["own-fixes", "reads-errors"]);
     p.close();
+  });
+});
+
+// Wayfinding spec §8.4: Neovim opens the tutor by itself only in a project folder; it reads this list at start-up.
+describe("writeProjectsFile", () => {
+  it("writes the paths of every project, all languages", () => {
+    p = Profile.open(tmp());
+    p.addProject("python", "/home/u/lazycourse/python-a", "A", 1);
+    p.addProject("rust", "/home/u/code/b", "B", 2);
+    const out = join(mkdtempSync(join(tmpdir(), "pitutor-projects-")), "projects.json");
+    writeProjectsFile(p, out);
+    expect(JSON.parse(readFileSync(out, "utf8")).sort()).toEqual(["/home/u/code/b", "/home/u/lazycourse/python-a"]);
+  });
+  it("an in-memory profile writes nothing", () => {
+    p = Profile.open(":memory:");
+    const out = join(mkdtempSync(join(tmpdir(), "pitutor-projects-")), "projects.json");
+    writeProjectsFile(p, out, ":memory:");
+    expect(existsSync(out)).toBe(false);
   });
 });

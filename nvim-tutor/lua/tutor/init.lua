@@ -251,9 +251,63 @@ function M.switch(dir, file)
   return true
 end
 
+local function data_dir()
+  return (vim.env.XDG_DATA_HOME or vim.fn.expand("~/.local/share")) .. "/nvim-tutor"
+end
+
+local function real(p)
+  return vim.uv.fs_realpath(p) or vim.fs.normalize(p)
+end
+
+local function inside(path, dir)
+  return path == dir or vim.startswith(path, dir .. "/")
+end
+
+--- Wayfinding spec §8.4: open the tutor by itself? Not with a file argument (git's commit editor, `nvim notes.md`);
+--- a directory argument is the start folder; then only inside a known project or `lazycourse`.
+---@param argv string[] @param cwd string @param projects string[] @param lazycourse string
+function M.should_autostart(argv, cwd, projects, lazycourse)
+  local start = cwd
+  for _, a in ipairs(argv) do
+    if vim.fn.isdirectory(a) == 1 then start = a else return false end
+  end
+  start = real(start)
+  if inside(start, real(lazycourse)) then return true end
+  for _, p in ipairs(projects) do
+    if inside(start, real(p)) then return true end
+  end
+  return false
+end
+
+local function read_projects(file)
+  local f = io.open(file, "r")
+  if not f then return {} end
+  local ok, list = pcall(vim.json.decode, f:read("*a"))
+  f:close()
+  return ok and type(list) == "table" and list or {}
+end
+
+--- What Neovim's start does (VimEnter), injectable for tests: open the pane, or the first-run hint.
+---@param s { argv: string[], cwd: string, ui: boolean }
+function M.on_start(s)
+  if not s.ui or not opts.auto_open then return end
+  if M.should_autostart(s.argv, s.cwd, read_projects(opts.projects_file), opts.lazycourse) then
+    opts.cwd = real(#s.argv == 1 and s.argv[1] or s.cwd) -- the tutor's project root, and :TutorRun's folder
+    M.state.term.opts.cwd = opts.cwd
+    M.state.term:show()
+  elseif vim.fn.filereadable(opts.profile_file) == 0 then
+    vim.notify("[tutor] New to lazycourse? :TutorTour teaches Neovim and the tutor", vim.log.levels.INFO)
+  end
+end
+
 function M.setup(user_opts)
   opts = vim.tbl_deep_extend("force", {
     pi_cmd = { "pi" }, cwd = vim.fn.getcwd(), width = 0.45, run_cmd = nil, test_cmd = nil, check_version = true,
+    -- Wayfinding spec 2026-11-08 §8.4: Neovim opens the tutor by itself only in a project or ~/lazycourse.
+    auto_open = true,
+    lazycourse = vim.fn.expand("~/lazycourse"),
+    projects_file = data_dir() .. "/projects.json",
+    profile_file = data_dir() .. "/profile.sqlite",
   }, user_opts or {})
   check_version()
   -- PI_TUTOR=1 tells pi-tutor this Pi is the tutor; plain `pi` elsewhere stays untouched.
@@ -308,6 +362,22 @@ function M.setup(user_opts)
     end,
   })
   vim.keymap.set("n", "<leader>te", M.ask_error, { desc = "Ask tutor about this error" })
+  -- Wayfinding spec §8.4: the plugin owns its keys (they were lazy.nvim `keys` in the user's config), so the
+  -- command list's drift test sees them all.
+  local commands = require("tutor.commands")
+  vim.keymap.set("n", "<leader>tt", "<Cmd>Tutor<CR>", { desc = "tutor: " .. commands.describe("<leader>tt") })
+  vim.keymap.set("n", "<leader>tr", "<Cmd>TutorRun<CR>", { desc = "tutor: " .. commands.describe("<leader>tr") })
+  vim.keymap.set("n", "<leader>t?", "<Cmd>TutorHelp<CR>", { desc = "tutor: " .. commands.describe("<leader>t?") })
+  local ok, wk = pcall(require, "which-key")
+  if ok and wk.add then wk.add({ { "<leader>t", group = "tutor" } }) end
+  if vim.v.vim_did_enter == 0 then
+    vim.api.nvim_create_autocmd("VimEnter", {
+      group = vim.api.nvim_create_augroup("tutor-start", { clear = true }), once = true,
+      callback = function()
+        M.on_start({ argv = vim.fn.argv(), cwd = vim.fn.getcwd(), ui = #vim.api.nvim_list_uis() > 0 })
+      end,
+    })
+  end
 end
 
 return M
