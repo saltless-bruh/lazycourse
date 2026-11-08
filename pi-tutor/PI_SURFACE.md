@@ -156,6 +156,9 @@ Re-verify every line when bumping versions.
   message (`dist/core/messages.js`, `case "custom"`); `display: false` hides it (docs/session-format.md). The run's
   `before_agent_start` is a `BeforeAgentStartCustomEvent` (types.d.ts:736) whose `message.content` the extension reads
   back as the turn's prompt, so the "[tutor]" checks still apply.
+- Neovim RPC, wayfinding spec 2026-11-08 §8.2: `nvim.setVar("tutor_now", { where, next })` (node-client
+  `Neovim.setVar` → `nvim_set_var`) from `paint()`, only when the value changed; `nvim.lua('… require("tutor.help").open()')`
+  in a `pcall` for `/tutor-help` (false when the plugin is not on the runtimepath). Probed headless with Neovim 0.12.6.
 - `pi.registerMessageRenderer(customType, (message, options, theme) => Component | undefined)` (types.d.ts:1250,
   `MessageRenderer` at :1169; Pi 1.3.0): the `tutor_card` session card renders as `new Text(content, 1, 0)` from
   `@earendil-works/pi-tui` (`components/text.d.ts`: `constructor(text?, paddingX?, paddingY?, customBgFn?)`), so it

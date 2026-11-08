@@ -283,6 +283,7 @@ export default function (pi: ExtensionAPI): void {
     if (!exam && examTimer) { clearInterval(examTimer); examTimer = null; }
   }
 
+  let lastNow = "";
   /** Wayfinding spec 2026-11-08 §7: what decides the next step, read from the extension's own state. */
   function wayInput(): WayInput {
     const o = onboarding;
@@ -314,7 +315,12 @@ export default function (pi: ExtensionAPI): void {
     if (!r.ladder) state.attempt = undefined;
     state.task = workflow ? workflowLabel(workflow) : undefined;
     state.lesson = lesson ? lessonLabel(lesson) : undefined;
-    state.next = nextStep(wayInput());
+    const way = wayInput();
+    state.next = nextStep(way);
+    // Wayfinding spec §8.2: Neovim's help tab opens with "Now: …"; sent only when it changed.
+    const now = { where: whereOf(way), next: state.next };
+    const nowKey = `${now.where}|${now.next}`;
+    if (link && nowKey !== lastNow) { lastNow = nowKey; link.setNow(now).catch(() => { lastNow = ""; }); }
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));
@@ -2759,6 +2765,13 @@ export default function (pi: ExtensionAPI): void {
       const dir = saveSkill(skillsRoot(), header.name, edited);
       ctx.ui.notify(`saved ${dir}; reloading skills`, "info");
       await ctx.reload();
+    },
+  });
+
+  pi.registerCommand("tutor-help", {
+    description: describeCmd("/tutor-help"),
+    handler: async (_args, ctx) => {
+      if (!link || !(await link.openHelp())) { ctx.ui.notify("help opens in Neovim: :TutorHelp (or <leader>t?) in the editor", "info"); return; }
     },
   });
 

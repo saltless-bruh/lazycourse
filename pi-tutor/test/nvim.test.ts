@@ -105,6 +105,22 @@ describe("NvimLink", () => {
     expect(await nvim.lua("return vim.api.nvim_get_mode().blocking")).toBe(false);
   }, 20000);
 
+  // Wayfinding spec §8.2: /tutor-help opens the plugin's help tab; paint() tells Neovim where the learner is.
+  it("openHelp opens the help tab and setNow tells Neovim where the learner is", async () => {
+    const { link } = await setup();
+    const nvim = link.raw;
+    await nvim.lua(`vim.opt.rtp:prepend(...)`, [join(__dirname, "..", "..", "nvim-tutor")]);
+    await link.setNow({ where: "stuck", next: "next: :TutorRun test" });
+    expect(await nvim.lua("return vim.g.tutor_now")).toEqual({ where: "stuck", next: "next: :TutorRun test" });
+    expect(await link.openHelp()).toBe(true);
+    expect(await nvim.lua("return #vim.api.nvim_list_tabpages()")).toBe(2);
+    expect(await nvim.lua("return vim.api.nvim_buf_get_lines(0, 2, 3, false)[1]")).toBe("Now: :TutorRun test");
+  }, 20000);
+  it("openHelp says false when the plugin is not there", async () => {
+    const { link } = await setup();
+    expect(await link.openHelp()).toBe(false);
+  }, 20000);
+
   it("calls onDisconnect and clears state when Neovim exits", async () => {
     h = await startHeadlessNvim();
     let disconnected = false;

@@ -235,6 +235,18 @@ export class NvimLink {
   }
 
   /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */
+  /** Wayfinding spec §8.2: open nvim-tutor's help tab; false when the plugin is not loaded in this Neovim. */
+  async openHelp(): Promise<boolean> {
+    try {
+      return (await this.timed(this.raw.lua(`local ok = pcall(function() require("tutor.help").open() end) return ok`), 2000, "help")) === true;
+    } catch { return false; }
+  }
+
+  /** Where the learner is, for the help tab's "Now" line (`vim.g.tutor_now`). */
+  async setNow(now: { where: string; next: string }): Promise<void> {
+    await this.timed(this.raw.setVar("tutor_now", now), 2000, "now");
+  }
+
   async switchProject(dir: string, file: string): Promise<void> {
     await this.raw.lua(`local d, f = ...; vim.defer_fn(function() require("tutor").switch(d, f) end, 500)`, [dir, file]);
   }

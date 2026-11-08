@@ -1339,6 +1339,14 @@ describe("/tutor-progress (gap #8)", () => {
   });
 });
 
+describe("/tutor-help (wayfinding spec §8.2)", () => {
+  it("without Neovim it says where help opens", async () => {
+    const b = await boot();
+    await b.commands["tutor-help"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/help opens in Neovim: :TutorHelp/);
+  });
+});
+
 describe("first run (learner-session fixes Task 3, spec §2)", () => {
   let saved: string | undefined;
   beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "first-")), "p.sqlite"); });

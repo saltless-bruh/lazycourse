@@ -298,6 +298,7 @@ function M.setup(user_opts)
   cmd("TutorProgress", slash("/tutor-progress"), { nargs = "?" })
   cmd("TutorStepUp", slash("/tutor-step-up"), { nargs = "?", complete = function() return { "check", "submit" } end })
   cmd("TutorReload", slash("/reload"), {})
+  cmd("TutorHelp", function() require("tutor.help").open() end, {})
   vim.cmd("amenu " .. ASK_ENTRY .. " <Cmd>lua require('tutor').ask_error()<CR>")
   vim.api.nvim_create_autocmd("MenuPopup", {
     group = vim.api.nvim_create_augroup("tutor-ask-error", { clear = true }),
