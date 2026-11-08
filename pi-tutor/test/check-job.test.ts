@@ -278,6 +278,14 @@ describe("checks contract and retry (learner-session fixes Task 4)", () => {
     expect(m.checks.filter((c) => c.task === "P1.T1")).toHaveLength(1);
     expect(m.confirmed).toEqual({ trusted: 0, total: 1 });
   }, 60_000);
+  it.skipIf(!bwrapReady)("review minor: a line the retry repeats within its own reply is kept once", async () => {
+    const line = 'run P1.T1: stdin "" -> stdout contains "ready"';
+    const replies = ["check P1.T1: isinstance(secret_number, int) == True", REF, `${line}\n${line}`];
+    const m = await writeMilestoneChecks({ complete: async () => replies.shift() ?? "", exec: realExec, sandbox: host(),
+      language: "python", tasksMd: TASKS1, milestone: 1, entry: "src/main.py", runCmd: "python3 src/main.py" });
+    expect(m.checks.filter((c) => c.kind === "io")).toHaveLength(1);
+    expect(m.confirmed).toEqual({ trusted: 1, total: 2 });
+  }, 60_000);
   it.skipIf(!bwrapReady)("retry: false (the step-up) asks only once", async () => {
     const asked: string[] = [];
     const replies = ["check P1.T1: isinstance(secret_number, int) == True", REF];

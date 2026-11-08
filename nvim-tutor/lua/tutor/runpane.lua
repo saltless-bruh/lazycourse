@@ -43,7 +43,8 @@ function M.start(argv, cwd, on_exit, on_end)
   -- split (E36), the run gets its own tab.
   local win
   for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.b[vim.api.nvim_win_get_buf(w)].tutor_run then win = w end
+    -- Review minor: the window is marked too, so it is found after the learner opened a file in it.
+    if vim.w[w].tutor_run or vim.b[vim.api.nvim_win_get_buf(w)].tutor_run then win = w end
   end
   if win then
     vim.api.nvim_set_current_win(win)
@@ -58,6 +59,7 @@ function M.start(argv, cwd, on_exit, on_end)
   vim.api.nvim_win_set_buf(win, buf)
   if vim.api.nvim_buf_is_valid(old) and vim.b[old].tutor_run and old ~= buf then pcall(vim.api.nvim_buf_delete, old, { force = true }) end
   vim.b[buf].tutor_run = true
+  vim.w[win].tutor_run = true
   local c = { buf = buf, win = win, job = nil, stopped = false }
   -- jobstart{term=true} attaches to the current window's buffer (CLAUDE.md): run it inside the split.
   local ok, job = pcall(vim.api.nvim_win_call, win, function()
@@ -70,6 +72,9 @@ function M.start(argv, cwd, on_exit, on_end)
         vim.schedule(function()
           on_end(id)
           if not c.stopped then on_exit(code, tail(buf, 60), id) end
+          -- Review minor: a run buffer no window shows (a file was opened in the split) is wiped once it ends;
+          -- 'bufhidden' cannot wipe a terminal whose job still ran.
+          if vim.api.nvim_buf_is_valid(buf) and #vim.fn.win_findbuf(buf) == 0 then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
         end)
       end,
     })

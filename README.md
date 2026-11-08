@@ -135,7 +135,8 @@ Exams (Milestone 8):
   output and type into it when it asks for input; `q` closes the split once it has ended, and
   `:TutorRun stop` (or closing the split, or Ctrl+C) stops it and says "run stopped" — a stopped run is never a
   failed try. Running again restarts it. `:TutorRun test` runs hidden with no input and is stopped after 60 s
-  (plugin option `test_timeout_ms`); a stopped test says it timed out. When the tutor saw you finish a task, the next passing run ticks it in
+  (plugin option `test_timeout_ms`); a stopped test says it timed out, the tutor is told, and it is never a
+  failed try. When the tutor saw you finish a task, the next passing run ticks it in
   `spec/tasks.md` (never while the file has unsaved edits in Neovim).
 - `:TutorExam [small|medium] [topic]` writes a timed exam into `exam/<nn>-<name>/`: `brief.md`
   (task, requirements R1…, examples, grading), a starter file and example tests. The tests are run

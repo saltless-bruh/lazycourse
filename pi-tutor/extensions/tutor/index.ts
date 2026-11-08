@@ -341,6 +341,9 @@ export default function (pi: ExtensionAPI): void {
   function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean, spotKey?: string) {
     const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
     if (isSyntaxError(trigger.trace)) { signal = "run failed: a syntax error (fix the line it names)"; paint(); return; }
+    // Author 2026-11-08: a test run stopped at its time limit is no graded try (a slow machine must not spend tries);
+    // the tutor still hears it timed out and helps, without help climbing.
+    if (trigger.timedOut) { signal = "tests timed out"; paint(); nudgeFor(trigger, nudge, true); return; }
     const spot = spotKey ?? spotOf(trigger.trace), hash = sourceHash(root);
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
       const before = episode.attempts;
@@ -436,7 +439,7 @@ export default function (pi: ExtensionAPI): void {
       case "idle": signal = `idle ${Math.round(p.since_ms / 1000)}s`; break;
       case "churn": signal = `churning lines ${p.region[0]}-${p.region[1]}`; break;
       case "run_output": {
-        signal = p.code === 0 ? "run passed" : `run failed (exit ${p.code})`;
+        signal = p.code === 0 ? "run passed" : p.timed_out ? "tests timed out" : `run failed (exit ${p.code})`;
         // Final review I5: a :TutorRun run is a run too, for small runs.
         const entry = project ? projectRun(project.path, project.language).entry : null;
         if (project && entry) runSized(join(project.path, entry), "run");

@@ -186,7 +186,7 @@ export async function writeMilestoneChecks(d: {
       // Minor M1: a check the model returns again is the same check, kept once.
       const key = (c: Check) => JSON.stringify([c.task, c.kind, c.expr, c.expected, c.stdin, c.contains]);
       const had = new Set(checks.map(key));
-      const more = parseChecks(await d.complete(systemText("checks"), again), { language: d.language, taskIds: lacking, milestone: d.milestone }).checks.filter((c) => !had.has(key(c)));
+      const more = parseChecks(await d.complete(systemText("checks"), again), { language: d.language, taskIds: lacking, milestone: d.milestone }).checks.filter((c) => !had.has(key(c)) && had.add(key(c)) !== undefined);
       if (more.length) {
         const r2 = await run(more);
         if (!r2.missing) {

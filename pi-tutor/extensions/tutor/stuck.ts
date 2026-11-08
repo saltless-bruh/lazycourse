@@ -149,7 +149,7 @@ export class StuckDetector {
       }
       case "run_output":
         // A failed run is the learner's own explicit check: it opens even when another episode is open.
-        out.push(p.code === 0 ? { type: "run_passed" } : { type: "open", trigger: { kind: "run", cmd: p.cmd, code: p.code, trace: traceOf(p.stdout, p.stderr) } });
+        out.push(p.code === 0 ? { type: "run_passed" } : { type: "open", trigger: { kind: "run", cmd: p.cmd, code: p.code, trace: traceOf(p.stdout, p.stderr), ...(p.timed_out ? { timedOut: true as const } : {}) } });
         break;
     }
     return out;

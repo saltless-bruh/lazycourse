@@ -550,6 +550,22 @@ describe("tutor.init", function()
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
   end)
 
+  it("review minor: a file opened in the run split leaves no stale run buffer and no second split", function()
+    package.loaded["tutor"] = nil
+    local tutor = require("tutor")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, run_cmd = { "sh", "-c", "sleep 30" } })
+    tutor._notify_override = function() end
+    vim.cmd("TutorRun")
+    local win = term_win()
+    local old = vim.api.nvim_win_get_buf(win)
+    local wins = #vim.api.nvim_tabpage_list_wins(0)
+    vim.api.nvim_win_call(win, function() vim.cmd("enew") end)
+    vim.cmd("TutorRun")
+    assert.equals(wins, #vim.api.nvim_tabpage_list_wins(0))
+    assert.is_true(vim.wait(1000, function() return not vim.api.nvim_buf_is_valid(old) end))
+    vim.cmd("TutorRun stop")
+  end)
+
   it(":TutorRun test can never hang (stdin is empty)", function()
     package.loaded["tutor"] = nil
     local tutor = require("tutor")

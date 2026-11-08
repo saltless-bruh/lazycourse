@@ -115,6 +115,8 @@ describe("StuckDetector runs", () => {
     const d = det(0);
     expect(d.observe({ kind: "run_output", cmd: ["x"], code: 1, stdout: "", stderr: "" }, 0)).toMatchObject([{ type: "open", trigger: { kind: "run", code: 1 } }]); // spec 2026-10-13 §7 #4
     expect(d.observe({ kind: "run_output", cmd: ["x"], code: 0, stdout: "", stderr: "" }, 0)).toEqual([{ type: "run_passed" }]);
+    // review minor: the time-out flag reaches the run trigger
+    expect(d.observe({ kind: "run_output", cmd: ["x"], code: 143, stdout: "", stderr: "note", timed_out: true }, 0)).toMatchObject([{ type: "open", trigger: { kind: "run", code: 143, timedOut: true } }]);
   });
 });
 
