@@ -1651,6 +1651,17 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect((await saved()).project).toMatchObject({ title: "Text Game Engine" });
     expect(b.nudges.at(-1)?.text).toMatch(/too big for level \d+.*smaller version.*Text Game Engine/);
   });
+  // Final review I3: an idea the model cannot scale down left onboarding stuck at the same idea on every retry.
+  it("when no smaller version keeps the idea, the next try is free of it", async () => {
+    const off = { title: "Todo List", summary: "Track todos.", concepts: [] };
+    const bad = JSON.stringify({ projects: [todo], fits: false, smaller: off });
+    const { b, seen } = await ideaFlow("a 3D game engine", [bad, bad, JSON.stringify({ projects: [todo] })]);
+    expect(b.notes.some((n) => /could not make a smaller version/.test(n))).toBe(true);
+    expect((await saved()).ideaDropped).toBe(true);
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
+  });
   it("'show me something else' frees the model from the idea", async () => {
     const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
     b.script.push("Show me something else");

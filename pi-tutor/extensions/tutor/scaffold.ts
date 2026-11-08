@@ -74,7 +74,9 @@ export function scaffoldPrompt(i: { language: string; level: number; band: Band;
 }
 
 export function slugify(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "project";
+  // Final review I4: accents fold to their letter ("Möchte" → mochte, "đoán" → doan) instead of breaking the word.
+  const plain = title.normalize("NFKD").replace(/\p{M}+/gu, "").replace(/[đĐ]/g, "d");
+  return plain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "project";
 }
 
 export function commentPrefix(entryFile: string): string {

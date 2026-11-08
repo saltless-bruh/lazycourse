@@ -86,6 +86,10 @@ describe("the learner's idea is the project", () => {
     ["a number guessing game", "Number Guessing Game"],
     ["I want to make a número guessing game!", "Número Guessing Game"],
     ["build an expense tracker.", "Expense Tracker"],
+    // Final review I4: more ways to say "I want to", and a cut at a clause boundary, not mid-clause.
+    ["I'd like to write a bot", "Bot"],
+    ["i wanna build a CLI: todo-list (with tags) / priorities?", "CLI"],
+    ["I want to make a tool that tracks my running times, shows weekly charts, and more", "Tool That Tracks My Running Times"],
   ])("ideaTitle(%j) = %j", (idea, title) => expect(ideaTitle(idea)).toBe(title));
   it("a long idea becomes a title of at most 40 characters, cut at a word", () => {
     const t = ideaTitle("a command line program that keeps track of the books I read and the ones I want to read next year");
@@ -97,6 +101,9 @@ describe("the learner's idea is the project", () => {
     expect(dir).toMatch(/^\/home\/u\/lazycourse\/python-[a-z0-9-]+$/);
   });
   it.each([
+    // Final review I3: an idea without spaces between words (Japanese) is compared by pairs of letters.
+    ["単語帳アプリ (text)", "日本語の単語帳アプリを作りたい", true],
+    ["Todo List", "日本語の単語帳アプリを作りたい", false],
     ["Text Number Guessing", "a number guessing game", true],
     ["Todo List CLI", "a number guessing game", false],
     ["Tiny Text Adventure Engine", "a 3D game engine", true],
@@ -136,5 +143,23 @@ describe("the learner's idea is the project", () => {
     profile = Profile.open(":memory:");
     const s = await suggestOne({ profile, complete: async () => ONE }, { language: "python", level: 5, about: {}, exclude: [], idea: null });
     expect(s.title).toBe("Tip Calculator");
+  });
+});
+
+describe("project folders (final review I4)", () => {
+  it.each([
+    ["Ich Möchte Einen Vokabeltrainer", "python-ich-mochte-einen-vokabeltrainer"],
+    ["Trò chơi đoán số", "python-tro-choi-doan-so"],
+  ])("defaultProjectDir(%j) folds accents", (title, slug) => expect(defaultProjectDir("/h", "python", title)).toBe(`/h/lazycourse/${slug}`));
+  it("a title with no Latin letters uses the given fallback name for its folder", () => {
+    expect(defaultProjectDir("/h", "python", "単語帳アプリ", "Vocabulary Cards")).toBe("/h/lazycourse/python-vocabulary-cards");
+  });
+  it("an idea in another script keeps its own words as the title and gets a folder from the model's title", async () => {
+    profile = Profile.open(":memory:");
+    const todo = { title: "Vocabulary Cards", summary: "Flash cards.", size: "small", concepts: [] };
+    const s = await suggestOne({ profile, complete: async () => JSON.stringify({ projects: [todo], fits: true }) },
+      { language: "python", level: 5, about: {}, exclude: [], idea: "単語帳アプリ" });
+    expect(s.title).toBe("単語帳アプリ");
+    expect(s.slug).toBe("Vocabulary Cards");
   });
 });

@@ -18,7 +18,7 @@ export interface Onboarding {
   badNotes: number;
   levelCheck: { task: string; passed: boolean | null } | null;
   level: number | null;
-  project: { title: string; summary: string; concepts: string[] } | null;
+  project: { title: string; summary: string; concepts: string[]; /** folder name when the title has no Latin letters */ slug?: string } | null;
   shown: string[];
   stage: Stage;
   /** Exchanges held since a self-score below 5 was known: two technical-question turns (Q7). */

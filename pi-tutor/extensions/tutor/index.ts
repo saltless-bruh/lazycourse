@@ -2411,13 +2411,17 @@ export default function (pi: ExtensionAPI): void {
         const idea = o.ideaDropped ? null : o.fields.idea ?? null;
         const lvl = o.level ?? levelFrom(o);
         const s = await suggestOne({ profile, complete: modelComplete(ctx, () => "tutor: finding a project for you…") }, { language: o.fields.target!, level: lvl, about: aboutOf(o), exclude: o.shown, idea });
-        o = { ...o, project: { title: s.title, summary: s.summary, concepts: s.concepts }, shown: [...o.shown, s.title], presented: "project" };
+        o = { ...o, project: { title: s.title, summary: s.summary, concepts: s.concepts, ...(s.slug ? { slug: s.slug } : {}) }, shown: [...o.shown, s.title], presented: "project" };
         saveOnboarding(o);
         if (s.tooBig) kick(ctx, `say their idea "${idea}" is too big for level ${lvl} as it is, and offer this smaller version of it: "${s.title}" — ${s.summary}; they can ask for something else`);
         else kick(ctx, `suggest this one project and say why it suits them: "${s.title}" — ${s.summary}; they can ask for something else`);
       } catch (e) {
-        saveOnboarding(o);
-        ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off" : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
+        // Final review I3: an idea no smaller version could keep is let go, so the next try can suggest something else.
+        const unscalable = e instanceof Error && /could not make a smaller version/.test(e.message);
+        saveOnboarding(unscalable ? { ...o, ideaDropped: true } : o);
+        ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off"
+          : unscalable ? `${e.message.split(";")[0]}; /tutor-start suggests another project for your level`
+          : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
       }
       return;
     }
@@ -2425,7 +2429,7 @@ export default function (pi: ExtensionAPI): void {
       const pick = await ctx.ui.select(`Project: ${o.project.title}`, ["Start this project", "Show me something else"]);
       if (pick === undefined) { saveOnboarding(o); return; }
       if (pick === "Show me something else") { onboarding = { ...o, project: null, presented: null, ideaDropped: true }; return onboardStep(ctx); }
-      const lang = o.fields.target!, def = defaultProjectDir(homedir(), lang, o.project.title);
+      const lang = o.fields.target!, def = defaultProjectDir(homedir(), lang, o.project.title, o.project.slug);
       const answer = await ctx.ui.input(`Project folder (Enter for ${def})`, def);
       if (answer === undefined) { saveOnboarding(o); return; }
       let dir: string;
