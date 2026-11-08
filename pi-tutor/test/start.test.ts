@@ -90,6 +90,10 @@ describe("the learner's idea is the project", () => {
     ["I'd like to write a bot", "Bot"],
     ["i wanna build a CLI: todo-list (with tags) / priorities?", "CLI"],
     ["I want to make a tool that tracks my running times, shows weekly charts, and more", "Tool That Tracks My Running Times"],
+    // Second review M1, M2: a leading aside is no title, "/" joins words, a curly apostrophe is still "I'd".
+    ["Hmm, I want to make a snake game", "Snake Game"],
+    ["a client/server chat", "Client/server Chat"],
+    ["I’d like to build a todo app", "Todo App"],
   ])("ideaTitle(%j) = %j", (idea, title) => expect(ideaTitle(idea)).toBe(title));
   it("a long idea becomes a title of at most 40 characters, cut at a word", () => {
     const t = ideaTitle("a command line program that keeps track of the books I read and the ones I want to read next year");
@@ -150,6 +154,7 @@ describe("project folders (final review I4)", () => {
   it.each([
     ["Ich Möchte Einen Vokabeltrainer", "python-ich-mochte-einen-vokabeltrainer"],
     ["Trò chơi đoán số", "python-tro-choi-doan-so"],
+    ["Straße Łódź Ørsted Æsir", "python-strasse-lodz-orsted-aesir"],
   ])("defaultProjectDir(%j) folds accents", (title, slug) => expect(defaultProjectDir("/h", "python", title)).toBe(`/h/lazycourse/${slug}`));
   it("a title with no Latin letters uses the given fallback name for its folder", () => {
     expect(defaultProjectDir("/h", "python", "単語帳アプリ", "Vocabulary Cards")).toBe("/h/lazycourse/python-vocabulary-cards");

@@ -75,7 +75,9 @@ export function scaffoldPrompt(i: { language: string; level: number; band: Band;
 
 export function slugify(title: string): string {
   // Final review I4: accents fold to their letter ("Möchte" → mochte, "đoán" → doan) instead of breaking the word.
-  const plain = title.normalize("NFKD").replace(/\p{M}+/gu, "").replace(/[đĐ]/g, "d");
+  const fold: Record<string, string> = { ß: "ss", ł: "l", Ł: "l", ø: "o", Ø: "o", æ: "ae", Æ: "ae", œ: "oe", Œ: "oe", þ: "th", Þ: "th", đ: "d", Đ: "d" };
+  // Second review M3: letters with no accent to strip (ß, ł, ø, æ…) fold too, instead of being dropped.
+  const plain = title.replace(/[ßłŁøØæÆœŒþÞđĐ]/g, (c) => fold[c]).normalize("NFKD").replace(/\p{M}+/gu, "");
   return plain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "project";
 }
 

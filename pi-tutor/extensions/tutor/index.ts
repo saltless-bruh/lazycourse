@@ -505,6 +505,7 @@ export default function (pi: ExtensionAPI): void {
     // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
     // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
     rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
+    emptyAsked = false; pendingEmpty = false;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
@@ -536,7 +537,7 @@ export default function (pi: ExtensionAPI): void {
     // hooked up to the run before the build-or-learn dialog opens (once, a dialog opened earlier ignored every key).
     if (onboardingActive() && onboarding?.stage === "choose") {
       const mine = generation;
-      setTimeout(() => { if (generation === mine) kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises"); }, 250).unref?.();
+      setTimeout(() => { if (generation === mine && onboardingActive() && onboarding?.stage === "choose") kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises"); }, 250).unref?.();
     }
     // Final review C1: a pending choice belongs to its folder; elsewhere the learner is only told where to go.
     else if (onboarding?.stage === "choose" && !onboarding.paused && onboarding.dir) ctx.ui.notify(`your project "${onboarding.project?.title ?? "?"}" is waiting in ${onboarding.dir}: open it there to choose build now or learn first`, "info");
@@ -641,7 +642,8 @@ export default function (pi: ExtensionAPI): void {
     return event.message.customType === "tutor_nudge" && typeof event.message.content === "string" ? event.message.content : "";
   }
   pi.on("before_agent_start", async (event) => {
-    if (event.messageType === "user" || (event.messageType === "custom" && event.message.customType === "tutor_nudge")) emptyAsked = false;
+    // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
+    if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) emptyAsked = false;
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
     // Wayfinding spec §8.3: during the tour a question is about the tour, not the onboarding's first answer.
@@ -932,6 +934,7 @@ export default function (pi: ExtensionAPI): void {
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // Phase 8 review I3: a held reply that got the fallback marked the run rejected; the reply to this message is new.
     run = { ...run, prompt: text, judged: false, rejected: false, reasks: 0 };
+    emptyAsked = false; pendingEmpty = false; // review I3: the learner moved on; their message gets the next reply
     learnerMessage(text);
   });
 
@@ -1081,11 +1084,22 @@ export default function (pi: ExtensionAPI): void {
     }
     // Author 2026-11-09 (option B): a final reply with nothing for the learner — the answer stayed in the hidden thinking —
     // is held and asked once more; empty again, an honest line. The judgment fence stays, so the turn still counts.
-    const final = m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall");
+    // Review I5: a reply cut off (length) or broken (error) with nothing visible gets the honest line, never a re-ask.
+    // Review I2: onboarding has no re-ask: note-only replies are its normal shape, and its own dialogs fill the gaps.
+    const ended = !m.content.some((c) => c.type === "toolCall");
     const shown = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-    if (final && !hideJudgment(shown).trim()) {
-      const line = emptyAsked ? LOST_TEXT : EMPTY_TEXT;
-      if (!emptyAsked) { emptyAsked = true; pendingEmpty = true; }
+    if (ended && !onboardingActive() && !hideJudgment(shown).trim()) {
+      const reask = m.stopReason === "stop" && !emptyAsked;
+      const line = reask ? EMPTY_TEXT : LOST_TEXT;
+      if (reask) {
+        emptyAsked = true; pendingEmpty = true;
+        // Review I1: the judgment counts on the reply the learner reads, so this one's is dropped; the re-ask keeps
+        // this turn's step (a fix stays a fix) and is told why.
+        if (cur) {
+          cur.rejected = true;
+          if (cur.step) rewrite = { reasks: cur.reasks ?? 0, issues: ["empty"], step: cur.step };
+        }
+      }
       pi.appendEntry("tutor_check", { issues: ["empty"], step: cur?.step ?? null, rejected: shown.slice(0, 2000) });
       const i = content.findIndex((c) => c.type === "text");
       content = i < 0 ? [...content, { type: "text" as const, text: line }]

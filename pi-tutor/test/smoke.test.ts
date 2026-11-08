@@ -2795,7 +2795,62 @@ describe("empty replies", () => {
     await settle();
     expect(rewrites(b)).toHaveLength(1);
     expect(String((rewrites(b)[0].message as { content: string }).content)).toMatch(/only in your thinking/);
-    expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(1); // the judgment still counts
+    // Review I1: the judgment counts only on the reply the learner reads, not on the empty one too.
+    expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(0);
+    const opts = { sections: {} as Record<string, string> };
+    const r = (await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message: rewrites(b)[0].message, systemPromptOptions: opts }, b.ctx)) as { message?: { content: string } } | undefined;
+    expect(r?.message?.content).toMatch(/\[tutor-check\][\s\S]*no text for the learner/); // same turn, told why
+    const good = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    const e = (await b.events["message_end"]({ type: "message_end", message: good }, b.ctx)) as { message?: object } | undefined;
+    await b.events["turn_end"]({ type: "turn_end", message: e?.message ?? good }, b.ctx);
+    expect(b.entries.filter((x) => x.type === "tutor_judgment")).toHaveLength(1);
+  });
+
+  it("onboarding skips the re-ask: its own dialogs fill the gaps (review I2)", async () => {
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "empty-onb-")), "p.sqlite");
+    try {
+      const b = await boot();
+      const m = onlyThinking();
+      await turn(b.events, b.ctx, "I want to learn python", m);
+      expect(visible(m)).not.toMatch(/writing its answer/);
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      expect(rewrites(b)).toHaveLength(0);
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+
+  it("a message typed after an empty reply, answered, cancels the re-ask (review I3)", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    await b.events["input"]({ type: "input", text: "hello?", source: "interactive", streamingBehavior: "steer" }, b.ctx);
+    await b.events["message_start"]({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "hello?" }], timestamp: 1 } }, b.ctx);
+    const good = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    await b.events["message_end"]({ type: "message_end", message: good }, b.ctx);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
+  });
+
+  it("a later notes turn gets its own re-ask, not 'lost my answer' at once (review I4)", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    await customTurn(b, rewrites(b)[0].message as object, assistant(`Normal mode is for commands.\n${JUDGED}`));
+    const notes = onlyThinking();
+    await customTurn(b, { role: "custom", customType: "tutor_notes", content: "[tutor-reply] notes", display: false, timestamp: 1 }, notes);
+    expect(visible(notes)).toMatch(/writing its answer/);
+  });
+
+  it("a reply cut off with nothing visible gets the honest line, no re-ask (review I5)", async () => {
+    const b = await boot();
+    const m = { role: "assistant", stopReason: "length", content: [{ type: "thinking", thinking: "long…" }] };
+    await turn(b.events, b.ctx, "what is normal mode?", m);
+    expect(visible(m)).toMatch(/lost my answer/i);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
   });
 
   it("empty again: an honest line, and no third try", async () => {

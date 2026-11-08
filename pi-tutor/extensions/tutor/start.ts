@@ -63,11 +63,12 @@ const LEAD_INS = [/^i(?:\s+want|\s+would like|'d like|\s+wanna)(?:\s+to)?\s+(?:m
 
 /** The learner's own words as a project title (§9.2): lead-ins dropped, at most 40 characters cut at a word, Title Case. */
 export function ideaTitle(idea: string): string {
-  let t = idea.trim().replace(/[.!?,;:]+$/u, "").replace(/\s+/g, " ");
+  const flat = idea.trim().replace(/[’‘]/g, "'").replace(/[.!?,;:]+$/u, "").replace(/\s+/g, " ");
+  // The clause that says what to make names the thing; an aside before it ("Hmm,") and detail after a comma, colon or
+  // bracket are not the title (final review I4, second review M1). "/" joins words ("client/server"), so it stays.
+  const clauses = flat.split(/\s*[,;:(]\s*/u).map((c) => c.trim()).filter(Boolean);
+  let t = clauses.find((c) => LEAD_INS[0].test(c) || LEAD_INS[1].test(c)) ?? clauses[0] ?? flat;
   for (const re of LEAD_INS) t = t.replace(re, "");
-  // The first clause names the thing; what follows a comma, colon or bracket is detail (final review I4).
-  const clause = t.split(/\s*[,;:(/]/u)[0].trim();
-  if (clause) t = clause;
   const words: string[] = [];
   for (const w of t.split(" ")) {
     if ([...words, w].join(" ").length > 40) break;

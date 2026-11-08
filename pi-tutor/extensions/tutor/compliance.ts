@@ -91,6 +91,7 @@ export function checkReply(text: string, o: { band: Band; step: TurnStep | null;
 const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "missing-judgment": () => "it did not end with the fenced tutor-judgment block (plain text, not a tool call)",
   "checker": () => "it was read again by a second reader, who found it breaks this turn's instruction; follow it exactly",
+  "empty": () => "it had no text for the learner: the answer stayed in your thinking. Write the answer to the learner now",
   "code-above-rung": () => "it showed code the current rung does not allow; point and explain instead",
   "wide-diagram": (cols) => `a diagram line was wider than the learner's pane (${cols} characters); stack it vertically`,
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
@@ -190,7 +191,7 @@ export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS, 
 // ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
 
 /** "checker" (habits Task 19): an optional second model read the reply and said it breaks this turn's rule. */
-export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix" | "checker";
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix" | "checker" | "empty";
 
 // Spec 2026-10-26 §5.3: nemotron named the fix in words ("use / instead of *", "true division is needed").
 const INSTRUCTION = /\b(use|using|change|replace|switch|should be|instead of|try|needs?|need to|is needed|requires?|must be)\b/i;
