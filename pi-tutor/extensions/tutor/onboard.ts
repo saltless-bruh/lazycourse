@@ -25,6 +25,8 @@ export interface Onboarding {
   probeTurns: number;
   /** The stage whose model turn was started; its dialog follows when that run ends. */
   presented: Stage | null;
+  /** Wayfinding spec §9.2: the learner asked for something else, so the idea no longer decides the project. */
+  ideaDropped?: boolean;
   /** Second /tutor-start for a language with a finished project (Q9): a short check-in. */
   checkIn: { last: string; due: string[] } | null;
   /** The project folder onboarding made (final review C1): the build-or-learn choice runs only there. */

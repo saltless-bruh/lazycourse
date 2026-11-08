@@ -1614,6 +1614,42 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await exchange(b, assistant("Here is my read: you are just starting."));
     expect(b.widgets["tutor"]?.[0]).toMatch(/lvl 30/);
   });
+  // Wayfinding spec §9.2 (re-run topic 2): the learner's idea is the project, or a smaller version of it.
+  const ideaFlow = async (idea: string, replies: string[]) => {
+    const b = await boot({ cwd: home });
+    const seen: string[] = [];
+    (b.ctx as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { messages: { content: { text: string }[] }[] }) => {
+      seen.push(c.messages.map((m) => m.content.map((x) => x.text).join("")).join("\n"));
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? ONE }] };
+    };
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, note({ experience: "none yet", known: [], idea }));
+    await exchange(b, assistant("hello"));
+    b.script.length = 0; // dialog answers the note made unneeded must not answer the project dialog
+    await exchange(b, assistant("Here is my read: you are just starting."));
+    return { b, seen };
+  };
+  const todo = { title: "Todo List CLI", summary: "Track todos.", size: "small", concepts: [] };
+  it("an idea that fits becomes the project, whatever the model names", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
+    expect(seen.some((t) => /the learner's idea \(keep it\): a number guessing game/.test(t))).toBe(true);
+    expect((await saved()).project).toMatchObject({ title: "Number Guessing Game" });
+    expect(b.nudges.at(-1)?.text).toMatch(/Number Guessing Game/);
+  });
+  it("an idea too big for the level: the tutor says so and offers the smaller version", async () => {
+    const smaller = { title: "Text Game Engine", summary: "Rooms in text.", concepts: [] };
+    const { b } = await ideaFlow("a 3D game engine", [JSON.stringify({ projects: [todo], fits: false, smaller })]);
+    expect((await saved()).project).toMatchObject({ title: "Text Game Engine" });
+    expect(b.nudges.at(-1)?.text).toMatch(/too big for level \d+.*smaller version.*Text Game Engine/);
+  });
+  it("'show me something else' frees the model from the idea", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
+    b.script.push("Show me something else");
+    await exchange(b, assistant("how about it?"));
+    expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
+    expect(seen.at(-1)).toMatch(/do not suggest: Number Guessing Game/);
+  });
   it("'show me something else' asks for another project, never one already shown", async () => {
     const b = await boot({ cwd: home });
     const seen: string[] = [];

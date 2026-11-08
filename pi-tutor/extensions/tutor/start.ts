@@ -19,17 +19,64 @@ export function isLanguage(s: string): s is Language {
   return (LANGUAGES as readonly string[]).includes(s);
 }
 
-/** One project for this learner (Q4), never one already shown. */
-export async function suggestOne(d: { profile: Profile; complete: Complete }, i: { language: string; level: number; about: Record<string, string>; exclude: string[] }): Promise<Suggestion> {
-  const [s] = await completeJson(d.complete, systemText("suggest"), suggestPrompt({
+/** One project for this learner (Q4), never one already shown. With an idea, the project is that idea (§9.2). */
+export async function suggestOne(d: { profile: Profile; complete: Complete }, i: { language: string; level: number; about: Record<string, string>; exclude: string[]; idea?: string | null }): Promise<Suggestion & { tooBig?: true }> {
+  const prompt = suggestPrompt({
     language: i.language, level: i.level, band: bandFor(i.level), about: i.about,
     // M7 minor: old free-form rows read under the pack vocabulary's tag.
     weakConcepts: weakConcepts(d.profile.concepts(i.language), vocabOf(loadPack(i.language), loadPack("editor"))),
     done: d.profile.projects(i.language).map((p) => p.title), count: 1, exclude: i.exclude,
     // Live check 2026-10-19: without the vocabulary the model invented tags no lesson matches.
     tags: loadPack(i.language)?.tags.map((t) => t.tag) ?? [],
-  }), (v) => checkSuggestions(v, 1));
-  return s;
+  });
+  const idea = i.idea?.trim();
+  if (!idea) {
+    const [s] = await completeJson(d.complete, systemText("suggest"), prompt, (v) => checkSuggestions(v, 1));
+    return s;
+  }
+  // Wayfinding spec §9.2: the model judges whether the idea fits the level; code keeps the title and every offer tied.
+  const withIdea = `${prompt}\nthe learner's idea (keep it): ${idea}\nalso answer "fits": true or false — whether this idea, as it is, suits the learner's level; when false, add "smaller": {"title","summary","concepts"}, a smaller version of the same idea`;
+  try {
+    return await completeJson(d.complete, systemText("suggest"), withIdea, (v) => {
+      const [s] = checkSuggestions(v, 1);
+      const o = v as { fits?: unknown; smaller?: { title?: unknown; summary?: unknown; concepts?: unknown } };
+      if (typeof o.fits !== "boolean") throw new Error('"fits" must be true or false');
+      if (o.fits) return { ...s, title: ideaTitle(idea) };
+      const sm = o.smaller;
+      if (!sm || typeof sm.title !== "string" || !sm.title.trim() || typeof sm.summary !== "string") throw new Error('when "fits" is false, "smaller" needs a title and a summary');
+      if (!tiedToIdea(`${sm.title} ${sm.summary}`, idea)) throw new Error(`the smaller version must keep the learner's idea "${idea}"`);
+      const concepts = Array.isArray(sm.concepts) ? sm.concepts.filter((c): c is string => typeof c === "string") : s.concepts;
+      return { title: sm.title.trim(), summary: sm.summary.trim(), size: "small" as const, concepts, tooBig: true as const };
+    });
+  } catch (e) {
+    if (e instanceof Error && /must keep the learner's idea/.test(e.message)) throw new Error(`could not make a smaller version of your idea "${idea}"; /tutor-start tries again, or ask for something else`);
+    throw e;
+  }
+}
+
+const LEAD_INS = [/^i\s+(?:want|would like|'d like|wanna)\s+to\s+(?:make|build|write|create|code|do)\s+/i, /^(?:make|build|write|create|code)\s+/i, /^(?:a|an|the)\s+/i];
+
+/** The learner's own words as a project title (§9.2): lead-ins dropped, at most 40 characters cut at a word, Title Case. */
+export function ideaTitle(idea: string): string {
+  let t = idea.trim().replace(/[.!?,;:]+$/u, "").replace(/\s+/g, " ");
+  for (const re of LEAD_INS) t = t.replace(re, "");
+  const words: string[] = [];
+  for (const w of t.split(" ")) {
+    if ([...words, w].join(" ").length > 40) break;
+    words.push(w);
+  }
+  const out = (words.length ? words : [t.slice(0, 40)]).map((w) => w.charAt(0).toLocaleUpperCase() + w.slice(1)).join(" ");
+  return out || idea.trim().slice(0, 40);
+}
+
+const STOP = new Set(["want", "would", "like", "make", "build", "write", "create", "that", "this", "with", "simple", "small", "some", "thing", "program", "project", "really", "just", "from", "into", "about", "something"]);
+
+/** Whether `text` keeps the idea: it shares a content word (4+ letters, not a filler) with it, any case (§9.2). */
+export function tiedToIdea(text: string, idea: string): boolean {
+  const words = (s: string) => s.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w));
+  const want = new Set(words(idea));
+  if (want.size === 0) return true;
+  return words(text).some((w) => want.has(w));
 }
 
 export function expandHome(p: string, home: string): string {
