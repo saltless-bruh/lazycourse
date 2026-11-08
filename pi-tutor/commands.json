@@ -117,7 +117,7 @@
   { "name": ":TutorStepUp", "where": "editor", "twin": "/tutor-step-up", "args": "[check | submit]", "group": "paths", "when": ["step-up"] },
   { "name": ":TutorReload", "where": "editor", "twin": "/reload", "group": "record", "when": [] },
   { "name": ":TutorHelp", "where": "editor", "twin": "/tutor-help", "group": "start", "when": ["always"] },
-  { "name": ":TutorTour", "where": "editor", "args": "[restart | off]", "group": "start", "planned": "T10",
+  { "name": ":TutorTour", "where": "editor", "args": "[restart | off]", "group": "start",
     "for": "the tour: Neovim and the tutor, step by step",
     "help": "A short guided tour: the Neovim basics you need, then how to use the tutor (the pane, running code, asking for help). It remembers where you stopped. `restart` starts over, `off` stops.",
     "when": ["fresh", "tour"] },

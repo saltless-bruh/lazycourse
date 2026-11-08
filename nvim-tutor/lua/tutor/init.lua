@@ -353,6 +353,10 @@ function M.setup(user_opts)
   cmd("TutorStepUp", slash("/tutor-step-up"), { nargs = "?", complete = function() return { "check", "submit" } end })
   cmd("TutorReload", slash("/reload"), {})
   cmd("TutorHelp", function() require("tutor.help").open() end, {})
+  cmd("TutorTour", function(a)
+    local tour = require("tutor.tour")
+    if a.args == "off" then tour.stop() else tour.start({ restart = a.args == "restart" }) end
+  end, { nargs = "?", complete = function() return { "restart", "off" } end })
   vim.cmd("amenu " .. ASK_ENTRY .. " <Cmd>lua require('tutor').ask_error()<CR>")
   vim.api.nvim_create_autocmd("MenuPopup", {
     group = vim.api.nvim_create_augroup("tutor-ask-error", { clear = true }),
