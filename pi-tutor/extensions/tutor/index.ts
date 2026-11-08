@@ -501,7 +501,7 @@ export default function (pi: ExtensionAPI): void {
     onboarding = loadOnboarding();
     onboardingHere = false;
     // Learner-session fixes (spec §2): a first run leads — a welcome line, and no level shown until one is known.
-    state.levelKnown = !(firstRun() || (onboardingActive() && onboarding?.level === undefined));
+    state.levelKnown = !(firstRun() || (onboardingActive() && (onboarding?.level === undefined || onboarding?.level === null)));
     generation++;
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
@@ -2372,6 +2372,11 @@ export default function (pi: ExtensionAPI): void {
         if (a !== undefined && a.trim() !== "" && Number.isInteger(n) && n >= 0 && n <= 100) level = n;
       }
       o = { ...o, level, stage: "project", presented: null };
+      // Wayfinding spec §9.3: the accepted level shows at once (it was only saved when the project folder was made).
+      setLevel(level);
+      const lang = o.fields.target, p = profile;
+      if (lang) profileWrite(() => { if (p.language(lang)) p.setLevel(lang, level); });
+      paint();
     }
     if (o.stage === "project" && !o.project) {
       try {

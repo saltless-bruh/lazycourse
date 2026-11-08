@@ -1583,6 +1583,37 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(s.stage).toBe("choose");
     expect(b.notes.some((n) => n.includes(`cd ${dir} && pi`))).toBe(true);
   });
+  // Wayfinding spec §9.3 (re-run topic 3): the widget showed "level not set" until the project folder was made.
+  it("accepting the read sets the level at once, before any project exists", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello"));
+    b.replies.push(ONE);
+    await exchange(b, assistant("Here is my read: you are just starting."));
+    expect(b.widgets["tutor"]?.[0]).toMatch(/lvl \d+/);
+    expect(b.widgets["tutor"]?.[0]).not.toMatch(/level not set/);
+    expect(b.statuses["tutor"]).not.toMatch(/level not set/);
+  });
+  it("a resumed onboarding with no level yet still says level not set", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { newOnboarding } = await import("../extensions/tutor/onboard.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!); p.setSetting("onboarding", JSON.stringify(newOnboarding("python"))); p.close();
+    const b = await boot({ cwd: home });
+    expect(b.widgets["tutor"]?.[0]).toMatch(/level not set/);
+  });
+  it("a typed level shows at once too", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello"));
+    b.replies.push(ONE);
+    b.script.push("no", "30");
+    await exchange(b, assistant("Here is my read: you are just starting."));
+    expect(b.widgets["tutor"]?.[0]).toMatch(/lvl 30/);
+  });
   it("'show me something else' asks for another project, never one already shown", async () => {
     const b = await boot({ cwd: home });
     const seen: string[] = [];
