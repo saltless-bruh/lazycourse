@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, REASONED } from "./fake-pi.js";
+import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, nudgeTurn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
+import { hideJudgment } from "../extensions/tutor/compliance.js";
 import { HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
@@ -592,15 +593,42 @@ describe("/tutor-plan", () => {
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
     expect(b.entries.find((e) => e.type === "tutor_workflow")?.data).toMatchObject({ task: "P1.T1", step: 1 });
     expect(b.widgets["tutor"]?.[0]).toContain("plan 1/6");
-    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\. .*"skip".*"\/tutor-plan off"/);
+    expect(b.nudges.at(-1)?.text).toMatch(/^\[tutor\] design recipe started for P1\.T1: Parse argv into a Command\. Begin step 1 \(Find\)\. .*"skip".*"\/tutor-plan off"/);
     const opts = await turn(b.events, b.ctx, "[tutor] design recipe started for P1.T1", judged("none"));
     expect(opts.message?.content).toMatch(/\[workflow\] design recipe for P1\.T1: step 1\/6 Find/);
+  });
+  // Wayfinding spec §9.1: the tutor's own lines are hidden custom messages, never the learner's voice.
+  it("a nudge is a hidden message that starts a turn, not a learner message", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(b.sent).toHaveLength(0);
+    const m = b.messages.filter((x) => (x.message as { customType: string }).customType === "tutor_nudge");
+    expect(m).toHaveLength(1);
+    expect(m[0]).toMatchObject({ message: { display: false }, options: { triggerTurn: true } });
+  });
+  it("a nudge sent while the tutor is answering is delivered once, when it is idle (Review Focus 1)", async () => {
+    const b = await boot({ cwd: project() });
+    b.busy.value = true;
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(b.nudges).toHaveLength(0);
+    b.busy.value = false;
+    await new Promise((r) => setTimeout(r, 150));
+    expect(b.nudges).toHaveLength(1);
+  });
+  it("a nudge-started turn opens no chat episode and gets the recipe's context", async () => {
+    const b = await boot({ cwd: project() });
+    await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+    const opts = await nudgeTurn(b.events, b.ctx, b.nudges.at(-1)!.text, judged("none"));
+    expect(opts.message?.content).toMatch(/\[workflow\] design recipe for P1\.T1: step 1\/6 Find/);
+    expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "chat")).toBe(false);
   });
   it("without a UI it starts the workflow but sends no turn", async () => {
     const b = await boot({ cwd: project() });
     await b.commands["tutor-plan"].handler("P1.T1", { ...b.ctx, hasUI: false });
     expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(true);
-    expect(b.sent).toHaveLength(0);
+    expect(b.nudges).toHaveLength(0);
   });
   it("step_done from the learner advances; from a [tutor] nudge it does not", async () => {
     const b = await boot({ cwd: project() });
@@ -627,7 +655,7 @@ describe("/tutor-plan", () => {
     await empty.commands["tutor-plan"].handler("P1.T1", empty.ctx);
     expect(b.entries.some((e) => e.type === "tutor_workflow")).toBe(false);
     expect(empty.entries.some((e) => e.type === "tutor_workflow")).toBe(false);
-    expect(b.sent).toHaveLength(0);
+    expect(b.nudges).toHaveLength(0);
     expect(b.notes.join("\n")).toMatch(/usage: \/tutor-plan/);
     expect(b.notes.join("\n")).toMatch(/P1\.T9 is not in spec\/tasks\.md/);
     expect(empty.notes.join("\n")).toMatch(/no spec\/tasks\.md/);
@@ -668,7 +696,7 @@ describe("/tutor-plan next (live check: the model called step 4 complete but nev
     await b.commands["tutor-plan"].handler("next", b.ctx);
     expect(b.widgets["tutor"]?.[0]).toContain("plan 5/6");
     expect(b.entries.filter((e) => e.type === "tutor_workflow").at(-1)?.data).toMatchObject({ step: 5 });
-    expect(b.sent.at(-1)?.text).toBe("[tutor] the learner moved on to step 5 (Map) of the design recipe for P1.T1.");
+    expect(b.nudges.at(-1)?.text).toBe("[tutor] the learner moved on to step 5 (Map) of the design recipe for P1.T1.");
   });
   it("next after Build finishes the workflow; without a workflow it says so", async () => {
     const b = await boot({ cwd: project(), branch: [{ type: "custom", customType: "tutor_workflow", data: { task: "P1.T1", step: 6, started: 1 } }] });
@@ -715,10 +743,10 @@ describe("final review fixes (workflow)", () => {
   it("I4: /tutor-plan off ends the recipe; the context and widget label go away and stay away on resume", async () => {
     const b = await boot({ cwd: project() });
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
-    const n = b.sent.length;
+    const n = b.nudges.length;
     await b.commands["tutor-plan"].handler("off", b.ctx);
     expect(b.widgets["tutor"]?.[0]).not.toContain("plan");
-    expect(b.sent.length).toBe(n);
+    expect(b.nudges.length).toBe(n);
     const last = b.entries.filter((e) => e.type === "tutor_workflow").at(-1);
     expect(last?.data).toMatchObject({ task: "P1.T1", done: expect.any(Number) });
     const opts = await turn(b.events, b.ctx, "hi", judged("none"));
@@ -1312,20 +1340,29 @@ describe("/tutor-progress (gap #8)", () => {
   });
 });
 
+describe("/tutor-help (wayfinding spec §8.2)", () => {
+  it("without Neovim it says where help opens", async () => {
+    const b = await boot();
+    await b.commands["tutor-help"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/help opens in Neovim: :TutorHelp/);
+  });
+});
+
 describe("first run (learner-session fixes Task 3, spec §2)", () => {
   let saved: string | undefined;
   beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "first-")), "p.sqlite"); });
   afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
-  const WELCOME = "New here? Tell me what you'd like to learn — or type /tutor-start.";
-  const shownTexts = (b: Awaited<ReturnType<typeof boot>>) => b.messages.map((m) => String((m.message as { content: string }).content));
+  // Wayfinding spec 2026-11-08 §8.1: the welcome is now the session card's first-run form.
+  const cards = (b: Awaited<ReturnType<typeof boot>>) => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_card");
+  const cardText = (b: Awaited<ReturnType<typeof boot>>) => String((cards(b).at(-1)?.message as { content: string } | undefined)?.content ?? "");
   const userTurn = async (b: Awaited<ReturnType<typeof boot>>, prompt: string) => {
     const opts = { sections: {} as Record<string, string> };
     await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: opts }, b.ctx);
     return opts.sections;
   };
-  it("a brand-new learner is welcomed and their first message starts onboarding", async () => {
+  it("a brand-new learner gets the card with the tour offer and their first message starts onboarding", async () => {
     const b = await boot();
-    expect(shownTexts(b)).toContain(WELCOME);
+    expect(cardText(b)).toMatch(/new here.*:TutorTour/);
     const sections = await userTurn(b, "hi, I want to learn Python. I have never programmed before.");
     expect(sections["tutor_onboard"]).toBeTruthy();
     const { Profile } = await import("../extensions/tutor/profile.js");
@@ -1338,24 +1375,42 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     const b = await boot();
     expect((await userTurn(b, "what is LazyVim?"))["tutor_onboard"]).toBeTruthy();
   });
-  it("a learner with a profile language is not welcomed", async () => {
+  it("a learner with a profile language gets a card without the tour offer", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");
     const p = Profile.open(process.env.PI_TUTOR_PROFILE!); p.saveLanguage("python", 10, {}, 1); p.close();
     const b = await boot();
-    expect(shownTexts(b)).not.toContain(WELCOME);
+    expect(cards(b)).toHaveLength(1);
+    expect(cardText(b)).not.toMatch(/new here/);
     expect((await userTurn(b, "hello"))["tutor_onboard"]).toBeUndefined();
   });
-  it("the welcome stays out of the model's context", async () => {
+  it("every session opens with one card the model never sees, shown without starting a turn", async () => {
     const b = await boot();
-    const welcome = b.messages.find((m) => (m.message as { customType: string }).customType === "tutor_welcome")!;
-    expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...(welcome.message as object), timestamp: 1 }] })).toMatchObject({ messages: [] });
+    expect(cards(b)).toHaveLength(1);
+    const card = cards(b)[0];
+    expect(card.message).toMatchObject({ display: true });
+    expect(card.options).toMatchObject({ triggerTurn: false });
+    expect(cardText(b).split("\n")).toHaveLength(3);
+    expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...(card.message as object), timestamp: 1 }] })).toMatchObject({ messages: [] });
   });
-  it("every turn carries the tutor's commands, onboarding turns too", async () => {
+  it("the card renders as plain text under its own renderer", async () => {
+    const b = await boot();
+    expect(b.renderers["tutor_card"]).toBeTypeOf("function");
+  });
+  // Wayfinding spec 2026-11-08 §6: the note is built from the command list for where the learner is.
+  it("every turn carries the tutor's commands for where the learner is, onboarding turns too", async () => {
     const b = await boot();
     const s = await userTurn(b, "hi");
+    expect(s["tutor_commands"]).toMatch(/\/tutor-start[^\n]*tutor pane/);
+    expect(s["tutor_commands"]).toMatch(/:Tutor \(type it in the editor\)/);
+    // Learner-session fixes: the model once sent a beginner to "open your terminal and type python3"; the core
+    // commands (running code, starting, the recipe's skip) are in every note, whatever the state.
     expect(s["tutor_commands"]).toMatch(/:TutorRun/);
-    expect(s["tutor_commands"]).toMatch(/\/tutor-start/);
-    expect(s["tutor_commands"]).toMatch(/say "skip" to skip a step or "\/tutor-plan off" to stop/);
+    expect(s["tutor_commands"]).toMatch(/"skip"[^\n]*`off` to stop/);
+    expect(s["tutor_commands"]).not.toMatch(/:TutorDone/);
+  });
+  it("the widget's third line says the next step (wayfinding spec §7)", async () => {
+    const b = await boot();
+    expect(b.widgets["tutor"]?.[2]).toMatch(/^next: .*:TutorTour/);
   });
   it("the widget says level not set until a level is known", async () => {
     const b = await boot();
@@ -1436,7 +1491,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
   it("starts a conversation: a kickoff turn, the onboarding rules instead of the ladder, and no hint episode", async () => {
     const b = await boot({ cwd: home });
     await b.commands["tutor-start"].handler("", b.ctx);
-    expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\]/), opts: { deliverAs: "followUp" } });
+    expect(b.nudges.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\]/), opts: { triggerTurn: true } });
     const t = await exchange(b, note({ experience: "none yet", known: [] }));
     expect(t.sections["tutor"]).toMatch(/first meeting/i);
     expect(t.sections["tutor"]).not.toMatch(/tutor-judgment/);
@@ -1458,7 +1513,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await b.commands["tutor-start"].handler("pytutor-architect", b.ctx);
     expect(b.notes.at(-1)).toBe("pick one of: python, rust, go, typescript, lua, javascript");
     expect(await saved()).toBeNull();
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
   });
   it("after two replies without a note the code asks the missing items itself, then moves on (Review Focus #1)", async () => {
     const b = await boot({ cwd: home });
@@ -1470,7 +1525,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(s.fields).toMatchObject({ experience: "none yet", known: [], target: "python", idea: null });
     expect(s.stage).toBe("read");
     expect(typeof s.level).toBe("number");
-    expect(b.sent.length).toBe(2); // the kickoff, then the turn where the tutor gives its read
+    expect(b.nudges.length).toBe(2); // the kickoff, then the turn where the tutor gives its read
   });
   it("a named language and a self-score of 7: a level task in the editor, run by /tutor-start check (Q7, Q20)", async () => {
     const { existsSync } = await import("node:fs");
@@ -1537,6 +1592,84 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(s.stage).toBe("choose");
     expect(b.notes.some((n) => n.includes(`cd ${dir} && pi`))).toBe(true);
   });
+  // Wayfinding spec §9.3 (re-run topic 3): the widget showed "level not set" until the project folder was made.
+  it("accepting the read sets the level at once, before any project exists", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello"));
+    b.replies.push(ONE);
+    await exchange(b, assistant("Here is my read: you are just starting."));
+    expect(b.widgets["tutor"]?.[0]).toMatch(/lvl \d+/);
+    expect(b.widgets["tutor"]?.[0]).not.toMatch(/level not set/);
+    expect(b.statuses["tutor"]).not.toMatch(/level not set/);
+  });
+  it("a resumed onboarding with no level yet still says level not set", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { newOnboarding } = await import("../extensions/tutor/onboard.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!); p.setSetting("onboarding", JSON.stringify(newOnboarding("python"))); p.close();
+    const b = await boot({ cwd: home });
+    expect(b.widgets["tutor"]?.[0]).toMatch(/level not set/);
+  });
+  it("a typed level shows at once too", async () => {
+    const b = await boot({ cwd: home });
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, assistant("hi"));
+    await exchange(b, assistant("hello"));
+    b.replies.push(ONE);
+    b.script.push("no", "30");
+    await exchange(b, assistant("Here is my read: you are just starting."));
+    expect(b.widgets["tutor"]?.[0]).toMatch(/lvl 30/);
+  });
+  // Wayfinding spec §9.2 (re-run topic 2): the learner's idea is the project, or a smaller version of it.
+  const ideaFlow = async (idea: string, replies: string[]) => {
+    const b = await boot({ cwd: home });
+    const seen: string[] = [];
+    (b.ctx as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async (_m: unknown, c: { messages: { content: { text: string }[] }[] }) => {
+      seen.push(c.messages.map((m) => m.content.map((x) => x.text).join("")).join("\n"));
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? ONE }] };
+    };
+    await b.commands["tutor-start"].handler("", b.ctx);
+    b.script.push("none yet", "", "");
+    await exchange(b, note({ experience: "none yet", known: [], idea }));
+    await exchange(b, assistant("hello"));
+    b.script.length = 0; // dialog answers the note made unneeded must not answer the project dialog
+    await exchange(b, assistant("Here is my read: you are just starting."));
+    return { b, seen };
+  };
+  const todo = { title: "Todo List CLI", summary: "Track todos.", size: "small", concepts: [] };
+  it("an idea that fits becomes the project, whatever the model names", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
+    expect(seen.some((t) => /the learner's idea \(keep it\): a number guessing game/.test(t))).toBe(true);
+    expect((await saved()).project).toMatchObject({ title: "Number Guessing Game" });
+    expect(b.nudges.at(-1)?.text).toMatch(/Number Guessing Game/);
+  });
+  it("an idea too big for the level: the tutor says so and offers the smaller version", async () => {
+    const smaller = { title: "Text Game Engine", summary: "Rooms in text.", concepts: [] };
+    const { b } = await ideaFlow("a 3D game engine", [JSON.stringify({ projects: [todo], fits: false, smaller })]);
+    expect((await saved()).project).toMatchObject({ title: "Text Game Engine" });
+    expect(b.nudges.at(-1)?.text).toMatch(/too big for level \d+.*smaller version.*Text Game Engine/);
+  });
+  // Final review I3: an idea the model cannot scale down left onboarding stuck at the same idea on every retry.
+  it("when no smaller version keeps the idea, the next try is free of it", async () => {
+    const off = { title: "Todo List", summary: "Track todos.", concepts: [] };
+    const bad = JSON.stringify({ projects: [todo], fits: false, smaller: off });
+    const { b, seen } = await ideaFlow("a 3D game engine", [bad, bad, JSON.stringify({ projects: [todo] })]);
+    expect(b.notes.some((n) => /could not make a smaller version/.test(n))).toBe(true);
+    expect((await saved()).ideaDropped).toBe(true);
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
+  });
+  it("'show me something else' frees the model from the idea", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
+    b.script.push("Show me something else");
+    await exchange(b, assistant("how about it?"));
+    expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
+    expect(seen.at(-1)).toMatch(/do not suggest: Number Guessing Game/);
+  });
   it("'show me something else' asks for another project, never one already shown", async () => {
     const b = await boot({ cwd: home });
     const seen: string[] = [];
@@ -1570,7 +1703,7 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     b.script.push("none yet", "", "");
     await exchange(b, assistant("hi"));
     await exchange(b, assistant("hello")); // fallback fills the checklist → stage read, the kick queues a follow-up
-    expect(b.sent.at(-1)?.text).toMatch(/level \d+\/100/); // the kick itself carries the stage's instruction
+    expect(b.nudges.at(-1)?.text).toMatch(/level \d+\/100/); // the kick itself carries the stage's instruction
     // Pi runs the queued follow-up in the same loop: no before_agent_start, then message_end, turn_end, agent_end.
     const reply = assistant("Here is my read of you.");
     await b.events["message_end"]({ type: "message_end", message: reply }, b.ctx);
@@ -1585,16 +1718,16 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await b.commands["tutor-start"].handler("", b.ctx);
     b.script.push("none yet", "", "");
     await exchange(b, assistant("hi"));
-    const sentBefore = b.sent.length;
+    const sentBefore = b.nudges.length;
     b.busy.value = true; // Pi is still finishing the run while agent_end handlers run
     await turn(b.events, b.ctx, "[tutor] onboarding", assistant("hello"));
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
     await new Promise((r) => setTimeout(r, 30));
-    expect(b.sent.length).toBe(sentBefore); // not queued into the ending run
+    expect(b.nudges.length).toBe(sentBefore); // not queued into the ending run
     b.busy.value = false;
     await new Promise((r) => setTimeout(r, 120));
-    expect(b.sent.length).toBe(sentBefore + 1);
-    expect(b.sent.at(-1)?.text).toMatch(/level \d+\/100/);
+    expect(b.nudges.length).toBe(sentBefore + 1);
+    expect(b.nudges.at(-1)?.text).toMatch(/level \d+\/100/);
   });
   it("the project suggestion shows Pi's cancellable loader and passes its signal (final review I1)", async () => {
     const { initTheme, BorderedLoader } = await import("@earendil-works/pi-coding-agent");
@@ -1663,9 +1796,10 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
   }
   const waitFor = async (ok: () => boolean) => { for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10)); expect(ok()).toBe(true); };
 
-  it("the new project session asks build-or-learn at once", async () => {
+  it("the new project session asks build-or-learn as soon as it has started", async () => {
     const b = await boot({ cwd: dir });
-    expect(b.sent.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { deliverAs: "followUp" } });
+    await new Promise((r) => setTimeout(r, 400)); // author 2026-11-09: after start-up returns, not inside it
+    expect(b.nudges.at(-1)).toMatchObject({ text: expect.stringMatching(/^\[tutor\] onboarding/), opts: { triggerTurn: true } });
   });
   it("learn first: lesson rounds start (a beginner gets what its concepts build on: conditionals needs bools) and the spec is written in milestones in the background", async () => {
     const b = await boot({ cwd: dir });
@@ -1678,7 +1812,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
     expect(readFileSync(pjoin(dir, "spec", "tasks.md"), "utf8")).toMatch(/## Milestone 1:/);
     expect(readFileSync(pjoin(dir, "README.md"), "utf8")).toMatch(/run: python3 src\/main\.py/);
-    expect(b.sent.at(-1)?.text).toMatch(/^\[tutor\] lesson/);
+    expect(b.nudges.at(-1)?.text).toMatch(/^\[tutor\] lesson/);
   });
   it("build now: only the spec, no lessons", async () => {
     const b = await boot({ cwd: dir });
@@ -1845,7 +1979,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
       wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 tip\n");
       const b = await boot({ cwd: dir });
       await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
-      const kickoff = b.sent.at(-1)?.text ?? "";
+      const kickoff = b.nudges.at(-1)?.text ?? "";
       expect(kickoff).toMatch(/skip/);
       expect(kickoff).toContain("/tutor-plan off");
       expect(kickoff).not.toMatch(/tell the learner/i); // the learner sees this bubble (re-run finding)
@@ -2144,6 +2278,14 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     expect(p.knownConcepts("python", Date.now() + 1000)).toEqual(expect.arrayContaining(["variables", "functions"]));
     p.close();
   }, 60_000);
+  // Author 2026-11-09 (freeze option B): once, the switched Pi ignored every key at this dialog. Its first turn started
+  // inside session_start, before Pi's screen was hooked up; it now starts only after start-up has returned.
+  it("the switched Pi asks build-or-learn only after its start-up has finished", async () => {
+    const b = await boot({ cwd: dir });
+    expect(b.nudges).toHaveLength(0);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(b.nudges.at(-1)?.text).toMatch(/start building now, or first learn/);
+  });
   it("a pending choice stays with its project: another project's Pi is untouched and its README kept (final review C1)", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");
     const { realpathSync } = await import("node:fs");
@@ -2151,7 +2293,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     wfile(pjoin(other, "README.md"), "my own readme");
     const p = Profile.open(file); p.addProject("python", other, "Older", 2); p.close();
     const b = await boot({ cwd: other });
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
     expect(b.notes.some((n) => n.includes(dir))).toBe(true); // where to go to continue
     b.replies.push(SPEC([]));
     const t = await exchange(b, note({ path: "build" }));
@@ -2164,7 +2306,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     b.replies.push(SPEC([]));
     await exchange(b, note({ path: "build" }));
     // The recipe's kickoff can follow once the (instant, here) plan is written; the project talk is still sent.
-    expect(b.sent.some((m) => /^\[tutor\] project: .*Tip Calculator/.test(m.text))).toBe(true);
+    expect(b.nudges.some((m) => /^\[tutor\] project: .*Tip Calculator/.test(m.text))).toBe(true);
   });
   it("a review returns the learner to where they were (final review I1)", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");
@@ -2625,5 +2767,121 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     await fix.commands["tutor-thinking"].handler("show", fix.ctx);
     await fix.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt: "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", systemPromptOptions: { sections: {} } }, fix.ctx);
     expect(fix.transformers[0]("so it is total / people", think)).toBe("so it is total / people");
+  });
+});
+
+// Wayfinding branch, author 2026-11-09 (option B): nemotron sometimes answered only in its hidden thinking; the visible
+// reply was just the judgment block, so the learner saw nothing. Every turn gets one re-ask, then an honest line.
+describe("empty replies", () => {
+  const JUDGED = '```tutor-judgment\n{"judgment":"none"}\n```';
+  const onlyThinking = () => ({ role: "assistant", stopReason: "stop", content: [{ type: "thinking", thinking: "What's happening: normal mode is…" }, { type: "text", text: JUDGED }] });
+  const visible = (m: unknown) => hideJudgment(((m as { content: { type: string; text?: string }[] }).content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n"))).trim();
+  const rewrites = (b: Awaited<ReturnType<typeof boot>>) => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_rewrite");
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+  const customTurn = async (b: Awaited<ReturnType<typeof boot>>, message: object, reply: unknown) => {
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message, systemPromptOptions: opts }, b.ctx);
+    const e = (await b.events["message_end"]({ type: "message_end", message: reply }, b.ctx)) as { message?: object } | undefined;
+    if (e?.message) { for (const k of Object.keys(reply as object)) delete (reply as Record<string, unknown>)[k]; Object.assign(reply as object, e.message); }
+    await b.events["turn_end"]({ type: "turn_end", message: reply }, b.ctx);
+  };
+
+  it("a reply with nothing for the learner is held and asked again once", async () => {
+    const b = await boot();
+    const m = onlyThinking();
+    await turn(b.events, b.ctx, "what is normal mode?", m);
+    expect(visible(m)).toMatch(/writing its answer/);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(1);
+    expect(String((rewrites(b)[0].message as { content: string }).content)).toMatch(/only in your thinking/);
+    // Review I1: the judgment counts only on the reply the learner reads, not on the empty one too.
+    expect(b.entries.filter((e) => e.type === "tutor_judgment")).toHaveLength(0);
+    const opts = { sections: {} as Record<string, string> };
+    const r = (await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "custom", message: rewrites(b)[0].message, systemPromptOptions: opts }, b.ctx)) as { message?: { content: string } } | undefined;
+    expect(r?.message?.content).toMatch(/\[tutor-check\][\s\S]*no text for the learner/); // same turn, told why
+    const good = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    const e = (await b.events["message_end"]({ type: "message_end", message: good }, b.ctx)) as { message?: object } | undefined;
+    await b.events["turn_end"]({ type: "turn_end", message: e?.message ?? good }, b.ctx);
+    expect(b.entries.filter((x) => x.type === "tutor_judgment")).toHaveLength(1);
+  });
+
+  it("onboarding skips the re-ask: its own dialogs fill the gaps (review I2)", async () => {
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "empty-onb-")), "p.sqlite");
+    try {
+      const b = await boot();
+      const m = onlyThinking();
+      await turn(b.events, b.ctx, "I want to learn python", m);
+      expect(visible(m)).not.toMatch(/writing its answer/);
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      expect(rewrites(b)).toHaveLength(0);
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+
+  it("a message typed after an empty reply, answered, cancels the re-ask (review I3)", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    await b.events["input"]({ type: "input", text: "hello?", source: "interactive", streamingBehavior: "steer" }, b.ctx);
+    await b.events["message_start"]({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "hello?" }], timestamp: 1 } }, b.ctx);
+    const good = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    await b.events["message_end"]({ type: "message_end", message: good }, b.ctx);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
+  });
+
+  it("a later notes turn gets its own re-ask, not 'lost my answer' at once (review I4)", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    await customTurn(b, rewrites(b)[0].message as object, assistant(`Normal mode is for commands.\n${JUDGED}`));
+    const notes = onlyThinking();
+    await customTurn(b, { role: "custom", customType: "tutor_notes", content: "[tutor-reply] notes", display: false, timestamp: 1 }, notes);
+    expect(visible(notes)).toMatch(/writing its answer/);
+  });
+
+  it("a reply cut off with nothing visible gets the honest line, no re-ask (review I5)", async () => {
+    const b = await boot();
+    const m = { role: "assistant", stopReason: "length", content: [{ type: "thinking", thinking: "long…" }] };
+    await turn(b.events, b.ctx, "what is normal mode?", m);
+    expect(visible(m)).toMatch(/lost my answer/i);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
+  });
+
+  it("empty again: an honest line, and no third try", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    const again = onlyThinking();
+    await customTurn(b, rewrites(b)[0].message as object, again);
+    expect(visible(again)).toMatch(/lost my answer/i);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(1);
+  });
+
+  it("a reply with text is left alone", async () => {
+    const b = await boot();
+    const m = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    await turn(b.events, b.ctx, "what is normal mode?", m);
+    expect(visible(m)).toBe("Normal mode is for commands.");
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
+  });
+
+  it("a tool-use step with no text is not an empty reply", async () => {
+    const b = await boot();
+    const m = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: { path: "a.py" } }] };
+    await turn(b.events, b.ctx, "look at my file", m);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
   });
 });

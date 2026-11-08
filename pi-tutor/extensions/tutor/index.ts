@@ -1,8 +1,9 @@
+import { Text } from "@earendil-works/pi-tui";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { retryAssistantCall } from "@earendil-works/pi-ai/compat";
 import { NvimLink, type EditorSnapshot, type TutorPayload } from "./nvim.js";
 import { renderWidget, renderStatus, type TutorState } from "./ui.js";
@@ -11,7 +12,7 @@ import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { cleanReply, guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
-import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, fallbackReply, turnInstruction } from "./turns.js";
+import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT, LOST_TEXT, fallbackReply, turnInstruction } from "./turns.js";
 /** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
 const CHECKER_TIMEOUT_MS = 180_000;
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
@@ -25,7 +26,9 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
-import { COMMANDS_NOTE, WELCOME } from "./commands-note.js";
+import { describe as describeCmd, commandNote } from "./commands.js";
+import { refreshPlanBuffers } from "./plan-reload.js";
+import { whereOf, nextStep, sessionCard, type Where, type WayInput } from "./wayfinding.js";
 import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
@@ -44,7 +47,7 @@ import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from 
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
-import { Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
+import { writeProjectsFile, Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, formatFeedback } from "./feedback.js";
 import { suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, LANGUAGES } from "./start.js";
 import { newOnboarding, checkInOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, type Onboarding, type Fields } from "./onboard.js";
@@ -280,6 +283,32 @@ export default function (pi: ExtensionAPI): void {
     if (!exam && examTimer) { clearInterval(examTimer); examTimer = null; }
   }
 
+  let lastNow = "";
+  /** Author 2026-11-09: one re-ask per learner turn for a reply with nothing visible; the re-ask is due at agent_end. */
+  let emptyAsked = false, pendingEmpty = false;
+  /** Wayfinding spec §8.3: the tour's current step, from Neovim's `tour` payloads; null when no tour runs. */
+  let tourState: { step: number; total: number; title: string } | null = null;
+  /** Wayfinding spec 2026-11-08 §7: what decides the next step, read from the extension's own state. */
+  function wayInput(): WayInput {
+    const o = onboarding;
+    const elsewhere = o && o.stage === "choose" && !o.paused && o.dir && !onboardingActive() ? o.dir : null;
+    const shown = !!o && o.stage !== "done" && (o.paused || onboardingActive() || !!elsewhere);
+    let passingTask: string | null = null;
+    if (signal === "run passed" && project) {
+      if (workflow) passingTask = workflow.task;
+      else { try { passingTask = openTaskIds(readFileSync(join(project.path, "spec", "tasks.md"), "utf8"))[0] ?? null; } catch { passingTask = null; } }
+    }
+    return {
+      firstRun: firstRun(), tour: tourState,
+      onboarding: shown ? { stage: o!.stage, paused: !!o!.paused, levelTaskOpen: o!.stage === "check" && o!.levelCheck?.passed === null,
+        dialog: (o!.stage === "read" && o!.presented === "read") || (o!.stage === "project" && o!.presented === "project"), elsewhere } : null,
+      spec: specStatus, project: !!project,
+      recipe: workflow ? { task: workflow.task, step: workflow.step, action: STEP_SPECS[workflow.step - 1].name.toLowerCase() } : null,
+      stuck: !!episode, passingTask, lesson: !!lesson, exam: !!exam, stepUp: !!stepUp,
+    };
+  }
+  function whereNow(): Where { return whereOf(wayInput()); }
+
   function paint() {
     state.attempt = episode?.attempts || undefined;
     state.exam = exam ? examLabel(exam, Date.now()) : undefined;
@@ -290,6 +319,12 @@ export default function (pi: ExtensionAPI): void {
     if (!r.ladder) state.attempt = undefined;
     state.task = workflow ? workflowLabel(workflow) : undefined;
     state.lesson = lesson ? lessonLabel(lesson) : undefined;
+    const way = wayInput();
+    state.next = nextStep(way);
+    // Wayfinding spec §8.2: Neovim's help tab opens with "Now: …"; sent only when it changed.
+    const now = { where: whereOf(way), next: state.next };
+    const nowKey = `${now.where}|${now.next}`;
+    if (link && nowKey !== lastNow) { lastNow = nowKey; link.setNow(now).catch(() => { lastNow = ""; }); }
     if (!ui) return;
     ui.setWidget("tutor", renderWidget(state));
     ui.setStatus("tutor", renderStatus(state));
@@ -372,7 +407,7 @@ export default function (pi: ExtensionAPI): void {
     // The architect discusses design: editor stuck signals still open episodes but do not interrupt it.
     if (nudge && roleNamed(activeRole).ladder && session?.isIdle() && (anyGap || now - lastNudge >= NUDGE_GAP_MS)) {
       lastNudge = now;
-      pi.sendUserMessage(`${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`, { deliverAs: "followUp" });
+      sendNudge(session, `${TUTOR_PREFIX} stuck signal: ${describeTrigger(trigger)}`);
     }
   }
 
@@ -431,6 +466,18 @@ export default function (pi: ExtensionAPI): void {
     }
   }
 
+  /** A step of the tour moved (or it ended): show it, record that the tour was seen, repaint. Code never the model. */
+  function onTour(p: Extract<TutorPayload, { kind: "tour" }>) {
+    const before = tourState;
+    tourState = p.status === "running" ? { step: p.step, total: p.total, title: p.title } : null;
+    if (profile) { const pr = profile; profileWrite(() => { if (!pr.setting("tour")) pr.setSetting("tour", "seen"); }); }
+    const card = p.status === "done" ? "tour done — tell me what you'd like to learn, or type /tutor-start"
+      : p.status === "running" ? `tour ${p.step}/${p.total}: ${p.title}` : null;
+    const same = before && tourState && before.step === tourState.step;
+    if (card && !same) pi.sendMessage({ customType: "tutor_card", display: true, content: card }, { triggerTurn: false });
+    paint();
+  }
+
   function onPayload(p: TutorPayload) {
     switch (p.kind) {
       case "diagnostics":
@@ -438,6 +485,7 @@ export default function (pi: ExtensionAPI): void {
         break;
       case "idle": signal = `idle ${Math.round(p.since_ms / 1000)}s`; break;
       case "churn": signal = `churning lines ${p.region[0]}-${p.region[1]}`; break;
+      case "tour": { onTour(p); return; }
       case "run_output": {
         signal = p.code === 0 ? "run passed" : p.timed_out ? "tests timed out" : `run failed (exit ${p.code})`;
         // Final review I5: a :TutorRun run is a run too, for small runs.
@@ -457,10 +505,13 @@ export default function (pi: ExtensionAPI): void {
     // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
     // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
     rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
+    emptyAsked = false; pendingEmpty = false;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
     }
+    // Wayfinding spec §8.4: Neovim reads the project folders at start-up to open the tutor by itself there.
+    if (profile) { const p = profile; profileWrite(() => writeProjectsFile(p)); }
     const proj = profile?.projectAt(realCwd(ctx.cwd));
     project = proj ?? null;
     if (proj) state.language = proj.language;
@@ -477,13 +528,17 @@ export default function (pi: ExtensionAPI): void {
     onboarding = loadOnboarding();
     onboardingHere = false;
     // Learner-session fixes (spec §2): a first run leads — a welcome line, and no level shown until one is known.
-    state.levelKnown = !(firstRun() || (onboardingActive() && onboarding?.level === undefined));
-    if (firstRun()) pi.sendMessage({ customType: "tutor_welcome", content: WELCOME, display: true }, { triggerTurn: false });
+    state.levelKnown = !(firstRun() || (onboardingActive() && (onboarding?.level === undefined || onboarding?.level === null)));
     generation++;
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
     // Q23: the Pi that restarted in the new project folder carries the conversation on: build or learn.
-    if (onboardingActive() && onboarding?.stage === "choose") kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises");
+    // Author 2026-11-09 (freeze option B): the first turn starts after session_start has returned, so Pi's screen is
+    // hooked up to the run before the build-or-learn dialog opens (once, a dialog opened earlier ignored every key).
+    if (onboardingActive() && onboarding?.stage === "choose") {
+      const mine = generation;
+      setTimeout(() => { if (generation === mine && onboardingActive() && onboarding?.stage === "choose") kick(ctx, "ask whether they want to start building now, or first learn the ideas the project needs in short lessons with small exercises"); }, 250).unref?.();
+    }
     // Final review C1: a pending choice belongs to its folder; elsewhere the learner is only told where to go.
     else if (onboarding?.stage === "choose" && !onboarding.paused && onboarding.dir) ctx.ui.notify(`your project "${onboarding.project?.title ?? "?"}" is waiting in ${onboarding.dir}: open it there to choose build now or learn first`, "info");
     // Final review I2 / Review Focus #4: a plan job that did not finish (Pi quit) is reported, not forgotten.
@@ -533,7 +588,7 @@ export default function (pi: ExtensionAPI): void {
         onDisconnect: () => { if (mine === null || link !== mine) return; state.connected = false; link = null; if (closing) return; state.lost = true; paint(); },
       });
       state.connected = link !== null;
-      if (link) state.lost = false;
+      if (link) { state.lost = false; link.tourHello().catch(() => {}); }
     }
     if (!tick) {
       tick = setInterval(() => {
@@ -541,6 +596,15 @@ export default function (pi: ExtensionAPI): void {
         if (ev.length) { onStuck(ev); paint(); }
       }, TICK_MS);
       tick.unref?.();
+    }
+    // Wayfinding spec §8.1: every session opens with a card (the first-run welcome is its first form).
+    {
+      let tourSeen = false;
+      if (profile) { const p = profile; profileWrite(() => { tourSeen = !!p.setting("tour"); }); }
+      const task = workflow?.task;
+      pi.sendMessage({ customType: "tutor_card", display: true, content: sessionCard(wayInput(), {
+        project: project?.title, task, level: state.levelKnown === false ? undefined : state.level, tourOffered: firstRun() && !tourSeen,
+      }) }, { triggerTurn: false });
     }
     examClock();
     paint();
@@ -572,10 +636,19 @@ export default function (pi: ExtensionAPI): void {
   }
 
   // Spec §4/§5: band prompt section, then the per-turn hidden context (episode + editor snapshot).
+  /** The text a run started with: the learner's prompt, or the content of our hidden nudge (wayfinding spec §9.1). */
+  function promptOf(event: BeforeAgentStartEvent): string {
+    if (event.messageType === "user") return event.prompt;
+    return event.message.customType === "tutor_nudge" && typeof event.message.content === "string" ? event.message.content : "";
+  }
   pi.on("before_agent_start", async (event) => {
-    event.systemPromptOptions.sections["tutor_commands"] = COMMANDS_NOTE;
+    // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
+    if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) emptyAsked = false;
+    event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
-    if (event.messageType === "user" && firstRun() && !event.prompt.trim().startsWith("/")) {
+    // Wayfinding spec §8.3: during the tour a question is about the tour, not the onboarding's first answer.
+    if (event.messageType === "user" && tourState && !event.prompt.trim().startsWith("/")) link?.tourEvent("asked").catch(() => {});
+    if (event.messageType === "user" && firstRun() && !tourState && !event.prompt.trim().startsWith("/")) {
       saveOnboarding(newOnboarding(null));
       onboardingHere = true;
     }
@@ -585,7 +658,7 @@ export default function (pi: ExtensionAPI): void {
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
       if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
       intake = undefined;
-      run = { prompt: event.messageType === "user" ? event.prompt : "", step: null, judged: true };
+      run = { prompt: promptOf(event), step: null, judged: true };
       return;
     }
     const band = bandFor(level());
@@ -593,8 +666,10 @@ export default function (pi: ExtensionAPI): void {
     const role = roleNamed(activeRole);
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
-    // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt.
-    const prompt = event.messageType === "user" ? event.prompt : "";
+    if (tourState) event.systemPromptOptions.sections["tutor_tour"] = `${systemText("tour")}\n[tour] the learner is on step ${tourState.step}/${tourState.total}: ${tourState.title}`;
+    // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt; our own
+    // hidden nudge's text stands in, so every "[tutor]" check below still knows the turn is the tutor's.
+    const prompt = promptOf(event);
     learnerMessage(prompt);
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
@@ -859,6 +934,7 @@ export default function (pi: ExtensionAPI): void {
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // Phase 8 review I3: a held reply that got the fallback marked the run rejected; the reply to this message is new.
     run = { ...run, prompt: text, judged: false, rejected: false, reasks: 0 };
+    emptyAsked = false; pendingEmpty = false; // review I3: the learner moved on; their message gets the next reply
     learnerMessage(text);
   });
 
@@ -915,7 +991,7 @@ export default function (pi: ExtensionAPI): void {
     ui?.notify(`the second reader did not answer (${why}); this reply was shown unread`, "info");
   }
   pi.registerCommand("tutor-checker", {
-    description: "A second model reads each held reply against the turn's rule: /tutor-checker <provider/model>|off",
+    description: describeCmd("/tutor-checker"),
     handler: async (args, ctx) => {
       const want = args.trim();
       const now = profile?.setting("checker") || "off";
@@ -931,6 +1007,8 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  // Wayfinding spec §8.1: the card is plain text, not shown under a "[tutor_card]" label.
+  pi.registerMessageRenderer("tutor_card", (m) => new Text(String(m.content), 1, 0));
   pi.registerMarkdownTransformer((md, c) => {
     // Spec 2026-10-21 §6: before the fix is allowed the thinking (where the model works the fix out) stays hidden.
     if (c.messageType === "assistant-thinking") return thinkingHidden(thinking, bandFor(level()), guarded()) ? THINKING_LABEL : md;
@@ -1004,6 +1082,30 @@ export default function (pi: ExtensionAPI): void {
         changed = true;
       }
     }
+    // Author 2026-11-09 (option B): a final reply with nothing for the learner — the answer stayed in the hidden thinking —
+    // is held and asked once more; empty again, an honest line. The judgment fence stays, so the turn still counts.
+    // Review I5: a reply cut off (length) or broken (error) with nothing visible gets the honest line, never a re-ask.
+    // Review I2: onboarding has no re-ask: note-only replies are its normal shape, and its own dialogs fill the gaps.
+    const ended = !m.content.some((c) => c.type === "toolCall");
+    const shown = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
+    if (ended && !onboardingActive() && !hideJudgment(shown).trim()) {
+      const reask = m.stopReason === "stop" && !emptyAsked;
+      const line = reask ? EMPTY_TEXT : LOST_TEXT;
+      if (reask) {
+        emptyAsked = true; pendingEmpty = true;
+        // Review I1: the judgment counts on the reply the learner reads, so this one's is dropped; the re-ask keeps
+        // this turn's step (a fix stays a fix) and is told why.
+        if (cur) {
+          cur.rejected = true;
+          if (cur.step) rewrite = { reasks: cur.reasks ?? 0, issues: ["empty"], step: cur.step };
+        }
+      }
+      pi.appendEntry("tutor_check", { issues: ["empty"], step: cur?.step ?? null, rejected: shown.slice(0, 2000) });
+      const i = content.findIndex((c) => c.type === "text");
+      content = i < 0 ? [...content, { type: "text" as const, text: line }]
+        : content.map((c, k) => (k === i && c.type === "text" ? { ...c, text: `${line}\n${c.text}` } : c));
+      changed = true;
+    }
     return changed ? { message: { ...m, content } } : undefined;
   });
 
@@ -1039,7 +1141,7 @@ export default function (pi: ExtensionAPI): void {
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
   const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
-  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check", "tutor_welcome"]);
+  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check", "tutor_welcome", "tutor_card"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
     const last = new Map<string, number>();
@@ -1051,7 +1153,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-architect", {
-    description: "Architecture professor: components, data flow, trade-offs; /tutor-architect off to return",
+    description: describeCmd("/tutor-architect"),
     handler: async (args, ctx) => {
       const q = args.trim();
       if (q === "off") { setRole(DEFAULT_ROLE); paint(); ctx.ui.notify("back to the coding tutor", "info"); return; }
@@ -1065,7 +1167,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-plan", {
-    description: "Design recipe: walk a task from spec/tasks.md to code in six steps (/tutor-plan P1.T1; next moves on; off stops)",
+    description: describeCmd("/tutor-plan"),
     handler: async (args, ctx) => {
       const id = args.trim();
       // Live check: the model may call a step complete and never set step_done; the learner moves on.
@@ -1086,7 +1188,7 @@ export default function (pi: ExtensionAPI): void {
         const moved = advanceWorkflow(true);
         paint();
         if (moved && moved.done === undefined && ctx.hasUI) {
-          pi.sendUserMessage(`${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`, { deliverAs: "followUp" });
+          sendNudge(ctx, `${TUTOR_PREFIX} the learner moved on to step ${moved.step} (${STEPS[moved.step - 1]}) of the design recipe for ${moved.task}.`);
         }
         return;
       }
@@ -1110,7 +1212,7 @@ export default function (pi: ExtensionAPI): void {
     paint();
     const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). (You can say "skip" to skip a step, or "/tutor-plan off" to stop.)`;
     // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-    if (ctx.hasUI) pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+    if (ctx.hasUI) sendNudge(ctx, kickoff);
     else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
   }
 
@@ -1215,7 +1317,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("tutor-exam", {
-    description: "Timed exam in this project: /tutor-exam [small|medium] [topic]; check runs the examples; off abandons; sandbox on|off",
+    description: describeCmd("/tutor-exam"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       const a = parseExamArgs(args);
       if (a.kind === "usage") { ctx.ui.notify("usage: /tutor-exam [small|medium] [topic] | check | off | sandbox [on|off] (for a topic that starts with \"sandbox\": /tutor-exam small sandbox …)", "warning"); return; }
@@ -1293,7 +1395,7 @@ export default function (pi: ExtensionAPI): void {
   const rubric = () => { try { return readFileSync(join(SKILLS_DIR, "tutor-exam-rubric", "SKILL.md"), "utf8").replace(/^---[\s\S]*?---\n/, ""); } catch { return ""; } };
 
   pi.registerCommand("tutor-submit", {
-    description: "Hand in the running exam: run its tests, grade it, write exam/<id>/grade.md",
+    description: describeCmd("/tutor-submit"),
     handler: (_args, ctx) => exclusive(ctx, async () => {
       if (!exam || !project || !profile) { ctx.ui.notify("no exam is running; start one with /tutor-exam", "info"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
@@ -1345,7 +1447,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-progress", {
-    description: "Your progress: hint use over time, exams, concept map (/tutor-progress [language])",
+    description: describeCmd("/tutor-progress"),
     handler: async (args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       const arg = args.trim().toLowerCase();
@@ -1375,7 +1477,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-memory", {
-    description: "List what the tutor remembers about you; pick one to forget it",
+    description: describeCmd("/tutor-memory"),
     handler: async (_args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       const rows = profile.memories({ language: null, limit: 200 });
@@ -1395,7 +1497,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-thinking", {
-    description: "Show or hide the model's thinking: auto (hidden) | show | hide",
+    description: describeCmd("/tutor-thinking"),
     handler: async (args, ctx) => {
       const shown = () => (thinkingHidden(thinking, bandFor(level())) ? "hidden" : "shown");
       if (!args.trim()) { ctx.ui.notify(`thinking: ${thinking} (${shown()} now)`, "info"); return; }
@@ -1410,7 +1512,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-feedback", {
-    description: "Tell the tutor how it is teaching: too-long | too-vague | too-much-help | good",
+    description: describeCmd("/tutor-feedback"),
     handler: async (args, ctx) => {
       const kind = args.trim() as FeedbackKind;
       if (!FEEDBACK_KINDS.includes(kind)) { ctx.ui.notify("usage: /tutor-feedback too-long|too-vague|too-much-help|good", "warning"); return; }
@@ -1468,7 +1570,7 @@ export default function (pi: ExtensionAPI): void {
     return { m, baseMs, failed: own.find((x) => !x.pass) ?? wrongTimed, missing: r.missing };
   }
   pi.registerCommand("tutor-improve", {
-    description: "Make a ticked task's working code better, measured before and after: /tutor-improve <task id>|done|off",
+    description: describeCmd("/tutor-improve"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       if (!project || !profile) { ctx.ui.notify("/tutor-improve works inside a project: /tutor-start makes one", "warning"); return; }
       const proj = project, p = profile, root = proj.path, arg = args.trim();
@@ -1567,7 +1669,7 @@ export default function (pi: ExtensionAPI): void {
 
   /** Task 16: the pro notes on design and naming (no points) are on by default; `/tutor-notes off` stops them. */
   pi.registerCommand("tutor-notes", {
-    description: "Notes on design and naming after a pro tick: /tutor-notes on|off",
+    description: describeCmd("/tutor-notes"),
     handler: async (args, ctx) => {
       const want = args.trim();
       if (want !== "on" && want !== "off") { ctx.ui.notify(`usage: /tutor-notes on|off (now ${profile?.setting("pro-notes") === "off" ? "off" : "on"})`, "info"); return; }
@@ -1582,7 +1684,7 @@ export default function (pi: ExtensionAPI): void {
    * no checks or no sandbox → ticked as self-checked; `anyway` → ticked by you. The model never ticks.
    */
   pi.registerCommand("tutor-done", {
-    description: "Tick a task when its checks pass: /tutor-done [task id] [anyway]",
+    description: describeCmd("/tutor-done"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       if (!project || !profile) { ctx.ui.notify("/tutor-done works inside a project: /tutor-start makes one", "warning"); return; }
       const proj = project, p = profile, root = proj.path, key = `checks:${root}`, path = join(root, "spec", "tasks.md");
@@ -1999,7 +2101,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("tutor-step-up", {
-    description: "The step-up to the next band: a talking test and a coding test (spec 2026-10-26 §6.3)",
+    description: describeCmd("/tutor-step-up"),
     handler: async (args, ctx) => {
       if (!project || !profile) { ctx.ui.notify("the step-up runs inside a project: /tutor-start makes one", "warning"); return; }
       const p = profile, lang = project.language, band = bandFor(level());
@@ -2070,7 +2172,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-fix", {
-    description: "Pro: show the fix for the spot you are stuck on (other levels get it after a few tries)",
+    description: describeCmd("/tutor-fix"),
     handler: async (_args, ctx) => {
       if (!episode || !roleNamed(activeRole).ladder) { ctx.ui.notify("nothing to fix: run your program first", "info"); return; }
       if (bandFor(level()) !== "pro") { ctx.ui.notify("the fix comes after a few tries on the same spot", "info"); return; }
@@ -2086,7 +2188,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-level", {
-    description: "Set the tutor level 0-100 (beginner → pro)",
+    description: describeCmd("/tutor-level"),
     handler: async (args, ctx) => {
       const arg = args.trim();
       if (arg === "") {
@@ -2139,7 +2241,7 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("tutor-docs", {
-    description: "Fetch (or re-fetch) official docs for a language into tutor-<lang>-* skills",
+    description: describeCmd("/tutor-docs"),
     handler: async (args, ctx) => {
       const language = (args.trim() || project?.language || editorLanguage() || "").toLowerCase();
       if (!/^[a-z][a-z0-9+#.-]{0,30}$/.test(language)) { ctx.ui.notify("usage: /tutor-docs <language>", "warning"); return; }
@@ -2241,14 +2343,22 @@ export default function (pi: ExtensionAPI): void {
     if (ctx.isIdle() || tries >= 600) { pi.sendMessage({ customType: "tutor_rewrite", content: text, display: false }, { triggerTurn: true }); return; }
     setTimeout(() => rewriteWhenIdle(ctx, text, tries + 1), 50).unref?.();
   }
-  function sendWhenIdle(ctx: ExtensionContext, text: string, tries = 0) {
+  /**
+   * Wayfinding spec §9.1: the tutor's own line to the model ("[tutor] …"), sent as a hidden custom message once Pi
+   * is idle, so it starts a fresh turn and never shows as the learner's message or in Pi's follow-up queue.
+   * Pi gives the model a custom message as user text (dist/core/messages.js); before_agent_start reads it back.
+   */
+  function sendNudge(ctx: ExtensionContext, text: string, tries = 0) {
     if (closing) return;
-    if (ctx.isIdle() || tries >= 600) { pi.sendUserMessage(text, { deliverAs: "followUp" }); return; }
-    setTimeout(() => sendWhenIdle(ctx, text, tries + 1), 50).unref?.();
+    if (ctx.isIdle() || tries >= 600) {
+      pi.sendMessage({ customType: "tutor_nudge", content: text, display: false }, { triggerTurn: true });
+      return;
+    }
+    setTimeout(() => sendNudge(ctx, text, tries + 1), 50).unref?.();
   }
   /** Start the model's next onboarding turn (only the TUI may start a turn, as for /tutor-plan). */
   function kick(ctx: ExtensionContext, what: string) {
-    if (ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} onboarding: ${what}`);
+    if (ctx.hasUI) sendNudge(ctx, `${TUTOR_PREFIX} onboarding: ${what}`);
     else ctx.ui.notify("send a message to continue", "info");
   }
   const checksRoot = (lang: string) => join(homedir(), "lazycourse", ".checks", lang);
@@ -2324,30 +2434,44 @@ export default function (pi: ExtensionAPI): void {
         if (a !== undefined && a.trim() !== "" && Number.isInteger(n) && n >= 0 && n <= 100) level = n;
       }
       o = { ...o, level, stage: "project", presented: null };
+      // Wayfinding spec §9.3: the accepted level shows at once (it was only saved when the project folder was made).
+      setLevel(level);
+      const lang = o.fields.target, p = profile;
+      if (lang) profileWrite(() => { if (p.language(lang)) p.setLevel(lang, level); });
+      paint();
     }
     if (o.stage === "project" && !o.project) {
       try {
-        const s = await suggestOne({ profile, complete: modelComplete(ctx, () => "tutor: finding a project for you…") }, { language: o.fields.target!, level: o.level ?? levelFrom(o), about: aboutOf(o), exclude: o.shown });
-        o = { ...o, project: { title: s.title, summary: s.summary, concepts: s.concepts }, shown: [...o.shown, s.title], presented: "project" };
+        // Wayfinding spec §9.2: the learner's idea is the project until they ask for something else.
+        const idea = o.ideaDropped ? null : o.fields.idea ?? null;
+        const lvl = o.level ?? levelFrom(o);
+        const s = await suggestOne({ profile, complete: modelComplete(ctx, () => "tutor: finding a project for you…") }, { language: o.fields.target!, level: lvl, about: aboutOf(o), exclude: o.shown, idea });
+        o = { ...o, project: { title: s.title, summary: s.summary, concepts: s.concepts, ...(s.slug ? { slug: s.slug } : {}) }, shown: [...o.shown, s.title], presented: "project" };
         saveOnboarding(o);
-        kick(ctx, `suggest this one project and say why it suits them: "${s.title}" — ${s.summary}; they can ask for something else`);
+        if (s.tooBig) kick(ctx, `say their idea "${idea}" is too big for level ${lvl} as it is, and offer this smaller version of it: "${s.title}" — ${s.summary}; they can ask for something else`);
+        else kick(ctx, `suggest this one project and say why it suits them: "${s.title}" — ${s.summary}; they can ask for something else`);
       } catch (e) {
-        saveOnboarding(o);
-        ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off" : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
+        // Final review I3: an idea no smaller version could keep is let go, so the next try can suggest something else.
+        const unscalable = e instanceof Error && /could not make a smaller version/.test(e.message);
+        saveOnboarding(unscalable ? { ...o, ideaDropped: true } : o);
+        ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off"
+          : unscalable ? `${e.message.split(";")[0]}; /tutor-start suggests another project for your level`
+          : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
       }
       return;
     }
     if (o.stage === "project" && o.project && o.presented === "project") {
       const pick = await ctx.ui.select(`Project: ${o.project.title}`, ["Start this project", "Show me something else"]);
       if (pick === undefined) { saveOnboarding(o); return; }
-      if (pick === "Show me something else") { onboarding = { ...o, project: null, presented: null }; return onboardStep(ctx); }
-      const lang = o.fields.target!, def = defaultProjectDir(homedir(), lang, o.project.title);
+      if (pick === "Show me something else") { onboarding = { ...o, project: null, presented: null, ideaDropped: true }; return onboardStep(ctx); }
+      const lang = o.fields.target!, def = defaultProjectDir(homedir(), lang, o.project.title, o.project.slug);
       const answer = await ctx.ui.input(`Project folder (Enter for ${def})`, def);
       if (answer === undefined) { saveOnboarding(o); return; }
       let dir: string;
       const lua = await luaRuntimeFor(lang);
       try {
         dir = createProject(profile, { language: lang, level: o.level ?? levelFrom(o), project: { ...o.project, size: "small" }, dir: resolve(expandHome(answer.trim() || def, homedir())), about: aboutOf(o), now: Date.now(), luaRuntime: lua }).dir;
+        { const p = profile; profileWrite(() => writeProjectsFile(p)); }
       } catch (e) { saveOnboarding(o); ctx.ui.notify(e instanceof Error ? e.message : String(e), "warning"); return; }
       saveOnboarding({ ...o, stage: "choose", presented: null, dir });
       await fetchDocs(ctx, lang, false); // the switched Pi loads the language's docs (spec §6 last step)
@@ -2472,7 +2596,7 @@ export default function (pi: ExtensionAPI): void {
     return parts.join("\n\n");
   }
   function lessonKick(ctx: ExtensionContext, what: string) {
-    if (ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} lesson: ${what}`);
+    if (ctx.hasUI) sendNudge(ctx, `${TUTOR_PREFIX} lesson: ${what}`);
   }
 
   interface SpecJob { rounds: string[][]; about: Record<string, string>; level: number; project: { title: string; summary: string; concepts: string[] } }
@@ -2496,7 +2620,12 @@ export default function (pi: ExtensionAPI): void {
           (v) => checkScaffold(v, job.rounds));
         writeScaffold(proj.path, spec, meta, { existing: true, luaRuntime: await luaRuntimeFor(proj.language), goVersion: await goVersionFor(proj.language) });
         if (profile) { const p = profile; profileWrite(() => p.setSetting(key, "")); }
-        if (generation === mine) { specStatus = null; ui?.notify("the project plan is ready: spec/tasks.md", "info"); }
+        if (generation === mine) {
+          specStatus = null;
+          ui?.notify("the project plan is ready: spec/tasks.md", "info");
+          // Wayfinding spec §9.4: the README the learner has open shows the plan's version (with its run: line).
+          if (link) await refreshPlanBuffers(link, proj.path, (m) => ui?.notify(m, "warning"));
+        }
         written = true;
       } catch (e) {
         if (generation === mine) {
@@ -2532,7 +2661,7 @@ export default function (pi: ExtensionAPI): void {
     saveLesson(l);
     if (l) lessonKick(ctx, `start the lesson on ${l.concept}`);
     // Final review I5 (Q10): building now, the tutor talks the project through while the plan is written.
-    else if (path === "build" && ctx.hasUI) sendWhenIdle(ctx, `${TUTOR_PREFIX} project: talk through what "${o.project.title}" involves (${o.project.summary}) and its first small step, while the plan is being written`);
+    else if (path === "build" && ctx.hasUI) sendNudge(ctx, `${TUTOR_PREFIX} project: talk through what "${o.project.title}" involves (${o.project.summary}) and its first small step, while the plan is being written`);
     else if (path === "learn") ctx.ui.notify("no prepared lessons cover this project's ideas yet; we build and learn as we go", "info");
   }
 
@@ -2541,7 +2670,7 @@ export default function (pi: ExtensionAPI): void {
   const backFromReview = (l: LessonState): LessonState => ({ ...l, ...l.resume!, fails: 0, stepBack: false, resume: null });
 
   pi.registerCommand("tutor-lesson", {
-    description: "Learn-first lessons: next (write the exercise / start the next round) | check | skip | review | off",
+    description: describeCmd("/tutor-lesson"),
     handler: (args, ctx) => exclusive(ctx, async () => {
       const a = args.trim().toLowerCase();
       if (!project || !profile) { ctx.ui.notify("lessons run inside a project: /tutor-start makes one", "warning"); return; }
@@ -2621,6 +2750,10 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (pendingEmpty) {
+      pendingEmpty = false;
+      if (!pendingRewrite) rewriteWhenIdle(ctx, "Your last reply had no text for the learner: your answer was only in your thinking. Write your answer to the learner now, following this turn's instruction.");
+    }
     if (pendingRewrite) {
       const issues = pendingRewrite;
       pendingRewrite = null;
@@ -2637,7 +2770,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-start", {
-    description: "Meet the tutor: a short conversation, one project, then build or learn first; check runs the level task; off pauses",
+    description: describeCmd("/tutor-start"),
     handler: async (args, ctx) => {
       if (!profile) { ctx.ui.notify("tutor profile unavailable; see the earlier warning", "error"); return; }
       if (!ctx.model) { ctx.ui.notify("no model selected; pick one with /model first", "error"); return; }
@@ -2675,7 +2808,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("tutor-learn", {
-    description: "Draft a skill from the last finished stuck episode; edit it, then submit to keep or Esc to discard",
+    description: describeCmd("/tutor-learn"),
     handler: async (_args, ctx) => {
       const branch = ctx.sessionManager.getBranch() as unknown[];
       const ep = lastClosedEpisode(branch);
@@ -2699,8 +2832,15 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("tutor-help", {
+    description: describeCmd("/tutor-help"),
+    handler: async (_args, ctx) => {
+      if (!link || !(await link.openHelp())) { ctx.ui.notify("help opens in Neovim: :TutorHelp (or <leader>t?) in the editor", "info"); return; }
+    },
+  });
+
   pi.registerCommand("tutor-status", {
-    description: "Show the tutor's current state",
+    description: describeCmd("/tutor-status"),
     handler: async (_args, ctx) => {
       ctx.ui.notify(renderWidget(state).join(" | "), "info");
     },

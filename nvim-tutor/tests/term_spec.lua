@@ -46,6 +46,24 @@ describe("tutor.term", function()
     t:hide()
   end)
 
+  -- Re-run topic 5 (live check 2026-11-09): LazyVim's sidescrolloff=8 scrolled the pane sideways whenever Pi's cursor
+  -- came near the right edge (a dialog, a long line), and the view stayed scrolled: the text looked cut off on the left.
+  it("the pane never scrolls sideways, whatever the global sidescrolloff", function()
+    local saved = vim.o.sidescrolloff
+    vim.o.sidescrolloff = 8
+    local t = new()
+    t:show()
+    local w = vim.fn.win_findbuf(t:bufnr())[1]
+    local first = vim.wo[w].sidescrolloff
+    t:restart()
+    w = vim.fn.win_findbuf(t:bufnr())[1]
+    local after = vim.wo[w].sidescrolloff
+    vim.o.sidescrolloff = saved
+    t:close()
+    assert.equals(0, first)
+    assert.equals(0, after)
+  end)
+
   it("sizes the split to the requested fraction of columns", function()
     local t = new()
     t:show()

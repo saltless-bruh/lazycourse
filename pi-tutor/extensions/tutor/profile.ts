@@ -1,7 +1,7 @@
 import type { HabitEvent, HabitId } from "./habits.js";
 import { emptyCard, nextCard, ratingFor, seedCard, type CardState } from "./review.js";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -44,6 +44,19 @@ export function defaultProfilePath(): string {
   if (process.env.PI_TUTOR_PROFILE) return process.env.PI_TUTOR_PROFILE;
   const data = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
   return join(data, "nvim-tutor", "profile.sqlite");
+}
+
+/**
+ * Wayfinding spec 2026-11-08 §8.4: the project folders, as JSON, next to the profile. nvim-tutor reads it at start-up
+ * to open the tutor by itself only in a project (it cannot query SQLite cheaply). Nothing for an in-memory profile.
+ */
+export function writeProjectsFile(profile: Profile, path = join(dirname(defaultProfilePath()), "projects.json"), profilePath = defaultProfilePath()): void {
+  if (profilePath === ":memory:") return;
+  const paths = profile.projectPaths();
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify([...new Set(paths)]));
+  renameSync(tmp, path); // a reader never sees half a file
 }
 
 type Row = Record<string, unknown>;
@@ -211,6 +224,11 @@ export class Profile {
   projectAt(path: string): ProjectRow | undefined {
     const r = this.db.prepare("SELECT * FROM projects WHERE path = ?").get(path) as Row | undefined;
     return r && project(r);
+  }
+
+  /** Every project's folder, all languages (wayfinding spec §8.4). */
+  projectPaths(): string[] {
+    return (this.db.prepare("SELECT path FROM projects ORDER BY id").all() as Row[]).map((r) => String(r.path));
   }
 
   projects(language: string): ProjectRow[] {

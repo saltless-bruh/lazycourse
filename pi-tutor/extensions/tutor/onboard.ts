@@ -18,13 +18,15 @@ export interface Onboarding {
   badNotes: number;
   levelCheck: { task: string; passed: boolean | null } | null;
   level: number | null;
-  project: { title: string; summary: string; concepts: string[] } | null;
+  project: { title: string; summary: string; concepts: string[]; /** folder name when the title has no Latin letters */ slug?: string } | null;
   shown: string[];
   stage: Stage;
   /** Exchanges held since a self-score below 5 was known: two technical-question turns (Q7). */
   probeTurns: number;
   /** The stage whose model turn was started; its dialog follows when that run ends. */
   presented: Stage | null;
+  /** Wayfinding spec §9.2: the learner asked for something else, so the idea no longer decides the project. */
+  ideaDropped?: boolean;
   /** Second /tutor-start for a language with a finished project (Q9): a short check-in. */
   checkIn: { last: string; due: string[] } | null;
   /** The project folder onboarding made (final review C1): the build-or-learn choice runs only there. */

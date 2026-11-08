@@ -73,6 +73,7 @@ function Term:_spawn()
     end,
   })
   vim.b[buf].tutor_term = true
+  for _, w in ipairs(vim.fn.win_findbuf(buf)) do vim.wo[w].sidescrolloff = 0 end -- also after a restart in place
   vim.keymap.set("t", "<Esc><Esc>", [[<C-\><C-n>]], { buffer = buf })
   return true
 end
@@ -87,6 +88,9 @@ function Term:show()
   vim.wo[self.win].relativenumber = false
   vim.wo[self.win].signcolumn = "no"
   vim.wo[self.win].winfixwidth = true
+  -- Re-run topic 5: LazyVim's sidescrolloff=8 scrolled the pane sideways when Pi's cursor neared the right edge,
+  -- and the view stayed scrolled (text cut off on the left). A terminal pane never needs side context.
+  vim.wo[self.win].sidescrolloff = 0
   if self.buf and vim.api.nvim_buf_is_valid(self.buf) then
     vim.api.nvim_win_set_buf(self.win, self.buf)
   elseif not self:_spawn() then

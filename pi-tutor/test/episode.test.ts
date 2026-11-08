@@ -89,7 +89,7 @@ describe("stuck episodes through a real Neovim", () => {
     const b = await linked();
     await setError("boom");
     await new Promise((r) => setTimeout(r, 600));
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
     expect(episodes(b.entries)).toEqual([]);
   }, 20000);
   it("a right-click question is answered as a question and records how long the error was on screen", async () => {
@@ -108,7 +108,7 @@ describe("stuck episodes through a real Neovim", () => {
     const b = await linked(true);
     await runPayload(1, "Traceback\nKeyError: 'x'");
     await until(() => b.widgets["tutor"]?.[1]?.startsWith("stuck: run failed") === true);
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
   }, 20000);
 
   it("an editor error leaves an open chat episode alone (spec 2026-10-26 §5.2)", async () => {
@@ -118,7 +118,7 @@ describe("stuck episodes through a real Neovim", () => {
     await setError("boom");
     await new Promise((r) => setTimeout(r, 600));
     expect(episodes(b.entries).find((e) => e.closeReason === "superseded")).toBeUndefined();
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
   }, 20000);
 
   it("a restored error episode closes when its error is gone (final review I1)", async () => {
@@ -127,7 +127,7 @@ describe("stuck episodes through a real Neovim", () => {
     expect(b.widgets["tutor"]?.[1]).toBe('stuck: error "boom" at a.py:1');
     await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 2, message = "only a warning" }})`);
     await until(() => b.widgets["tutor"]?.[1] === "episode closed (cleared)");
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
   }, 20000);
 });
 
@@ -1064,7 +1064,7 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(tasks()).toContain("- [ ] P2.T2");
     expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "check:P2.T2:split_amount(48, 3)" });
-    expect(b.sent.at(-1)?.text).toMatch(/run failed \(check P2\.T2\): split_amount\(48, 3\) gave 144, expected 16\.0/);
+    expect(b.nudges.at(-1)?.text).toMatch(/run failed \(check P2\.T2\): split_amount\(48, 3\) gave 144, expected 16\.0/);
     await b.commands["tutor-done"].handler("", b.ctx); // the first open task; nothing changed
     expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1 });
     writeFileSync(join(root, "src", "main.py"), "def split_amount(total, people):\n    return total / people\n");
@@ -1171,15 +1171,15 @@ describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
     await runPayload(1, '  File "a.py", line 1\n    x = (\n        ^\nSyntaxError: \'(\' was never closed');
     await until(() => /syntax error/.test(b.widgets["tutor"]?.[1] ?? ""));
     await new Promise((r) => setTimeout(r, 300));
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
     expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
   }, 20000);
   it("a test run stopped at its time limit is no graded try, but the tutor hears it timed out (author 2026-11-08)", async () => {
     const b = await linked();
     await nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["pytest"], code: 143, stdout: "", stderr: "[tutor] the tests were stopped after 60 s", timed_out: true }]);
     await until(() => /tests timed out/.test(b.widgets["tutor"]?.[1] ?? ""));
-    await until(() => b.sent.length > 0);
-    expect(b.sent[0].text).toMatch(/tests timed out \(likely an endless loop\): pytest/);
+    await until(() => b.nudges.length > 0);
+    expect(b.nudges[0].text).toMatch(/tests timed out \(likely an endless loop\): pytest/);
     expect(episodes(b.entries).filter((e) => (e.trigger as { kind: string }).kind === "run").every((e) => (e.attempts as number) === 0)).toBe(true);
   }, 20000);
   it("an error marked in the editor no longer makes a runtime error a typo run (author 2026-10-21)", async () => {
@@ -1210,7 +1210,7 @@ describe("architect role and stuck signals (M6a minor)", () => {
     await runPayload(1, "Traceback\nKeyError: 'x'");
     await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run"));
     await new Promise((r) => setTimeout(r, 300));
-    expect(b.sent).toEqual([]);
+    expect(b.nudges).toEqual([]);
   }, 20000);
 });
 
@@ -1220,21 +1220,21 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
   it("failed runs on one spot climb; an unchanged rerun and a typo run do not", async () => {
     const b = await linked();
     await runPayload(1, "ZeroDivisionError: division by zero");
-    await until(() => attempts(b) === 1 && b.sent.length === 1);
+    await until(() => attempts(b) === 1 && b.nudges.length === 1);
     edit("x = 1\n");
     await runPayload(1, "ZeroDivisionError: division by zero");
-    await until(() => attempts(b) === 2 && b.sent.length === 2);
+    await until(() => attempts(b) === 2 && b.nudges.length === 2);
     await runPayload(1, "ZeroDivisionError: division by zero"); // nothing changed
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2);
-    expect(b.sent).toHaveLength(2);
+    expect(b.nudges).toHaveLength(2);
     edit("x = (\n");
     const runs = b.entries.filter((e) => e.type === "tutor_signal").length;
     await runPayload(1, "SyntaxError: invalid syntax");
     await until(() => b.entries.filter((e) => e.type === "tutor_signal").length > runs);
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2); // a typo run: the run's own output is a syntax error
-    expect(b.sent).toHaveLength(2);
+    expect(b.nudges).toHaveLength(2);
   }, 30000);
   it("a run that fails on a new spot starts over on a new episode", async () => {
     const b = await linked();
@@ -1374,5 +1374,77 @@ describe("M6c: connected turn context (M2 #15)", () => {
     const b = await linked();
     const t = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(t.message?.content).toMatch(/\[editor\] .*a\.py \(python\), cursor line 1/);
+  }, 20000);
+});
+
+// Wayfinding spec 2026-11-08 §8.3: the tour runs in Neovim; Pi shows its step and answers questions about it.
+describe(":TutorTour through a real Neovim", () => {
+  let savedProfile: string | undefined;
+  /** A first-run learner (no onboarding yet, no language), linked to a headless Neovim with a stand-in tour module. */
+  async function firstRunLinked() {
+    savedProfile = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = join(mkdtempSync(join(tmpdir(), "tour-prof-")), "p.sqlite");
+    h = await startHeadlessNvim();
+    const b = await boot({ nvim: h.socket, cwd: h.root });
+    shutdown = () => b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    const { attach } = await import("neovim");
+    nvim = attach({ socket: h.socket });
+    await nvim.lua(`package.loaded["tutor.tour"] = { event = function(n) vim.g.tour_ev = n end, announce = function() vim.g.tour_hello = 1 end }`);
+    return b;
+  }
+  afterEach(() => { if (savedProfile === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = savedProfile; savedProfile = undefined; });
+  const tourPayload = (step: number, status = "running") =>
+    nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "tour", step, total: 18, title: "Delete with x", status }]);
+  const cards = (b: Awaited<ReturnType<typeof boot>>) => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_card").map((m) => String((m.message as { content: string }).content));
+  const userTurn = async (b: Awaited<ReturnType<typeof boot>>, prompt: string) => {
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: opts }, b.ctx);
+    return opts.sections;
+  };
+  const setting = async (k: string) => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!); const v = p.setting(k); p.close(); return v;
+  };
+
+  it("a tour payload records the offer as seen, shows the step and paints it", async () => {
+    const b = await firstRunLinked();
+    await tourPayload(4);
+    await until(() => /4\/18/.test(b.widgets["tutor"]?.[2] ?? ""));
+    expect(cards(b).at(-1)).toBe("tour 4/18: Delete with x");
+    expect(await setting("tour")).toBe("seen");
+    await tourPayload(4); // the same step again is no new card
+    await new Promise((r) => setTimeout(r, 100));
+    expect(cards(b).filter((c) => c.startsWith("tour 4/18"))).toHaveLength(1);
+  }, 20000);
+
+  it("a question during the tour is no onboarding answer, and Neovim hears it was asked (Review Focus 2)", async () => {
+    const b = await firstRunLinked();
+    await tourPayload(12);
+    await until(() => /12\/18/.test(b.widgets["tutor"]?.[2] ?? ""));
+    const s = await userTurn(b, "what is normal mode?");
+    expect(s["tutor_onboard"]).toBeUndefined();
+    expect(s["tutor_tour"]).toMatch(/step 12\/18/);
+    expect(s["tutor_tour"]).toMatch(/never say a step is done/i);
+    expect(await setting("onboarding")).toBeNull();
+    await until(() => true);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(await nvim!.lua("return vim.g.tour_ev")).toBe("asked");
+  }, 20000);
+
+  it("tour done hands over to onboarding", async () => {
+    const b = await firstRunLinked();
+    await tourPayload(18, "done");
+    await until(() => cards(b).some((c) => /tour done/.test(c)));
+    expect(cards(b).at(-1)).toMatch(/tell me what you'd like to learn/);
+    expect((await userTurn(b, "I want to learn Python"))["tutor_onboard"]).toBeTruthy();
+  }, 20000);
+
+  it("on connect the tutor asks Neovim to re-tell a running tour", async () => {
+    await firstRunLinked();
+    // The stand-in module was set after connect; a reconnect (as after the tour's folder switch) asks again.
+    const link = await NvimLink.connect({ socket: h!.socket, root: h!.root, onPayload: () => {} });
+    await link!.tourHello();
+    expect(await nvim!.lua("return vim.g.tour_hello")).toBe(1);
+    await link!.close();
   }, 20000);
 });

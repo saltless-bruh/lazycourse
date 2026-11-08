@@ -662,3 +662,149 @@ describe("tutor.init", function()
     assert.is_false(require("tutor").notify_tutor({ kind = "idle" }))
   end)
 end)
+
+-- Wayfinding spec 2026-11-08 §8.4: the plugin owns its keys; Neovim opens the tutor by itself in a project or
+-- ~/lazycourse; a first-ever start elsewhere gets one line.
+describe("tutor start-up", function()
+  local tmp = vim.fn.resolve(vim.fn.tempname()); vim.fn.mkdir(tmp, "p")
+  local project = tmp .. "/proj"; vim.fn.mkdir(project, "p")
+  local lazycourse = tmp .. "/lazycourse"; vim.fn.mkdir(lazycourse .. "/x", "p")
+  local home = tmp .. "/home"; vim.fn.mkdir(home, "p")
+  local commit = project .. "/COMMIT_EDITMSG"; vim.fn.writefile({ "msg" }, commit)
+
+  it("should_autostart decides from the start folder and arguments", function()
+    local s = require("tutor").should_autostart
+    assert.is_true(s({}, project, { project }, lazycourse))
+    assert.is_true(s({}, project .. "/src", { project }, lazycourse))
+    assert.is_true(s({}, lazycourse .. "/x", {}, lazycourse))
+    assert.is_true(s({}, lazycourse, {}, lazycourse))
+    assert.is_false(s({}, home, { project }, lazycourse))
+    assert.is_false(s({}, tmp .. "/proj-other", { project }, lazycourse))
+    assert.is_false(s({ commit }, project, { project }, lazycourse)) -- git's commit editor (Review Focus 4)
+    assert.is_true(s({ project }, home, { project }, lazycourse))   -- nvim <project dir>
+    assert.is_false(s({ home }, project, { project }, lazycourse))
+  end)
+
+  local function fresh(o)
+    package.loaded["tutor"] = nil
+    require("tutor").setup(vim.tbl_extend("force", { pi_cmd = { "cat" }, cwd = home, check_version = false }, o or {}))
+    return require("tutor")
+  end
+  local function capture(fn)
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    local ok, err = pcall(fn)
+    vim.notify = orig
+    assert(ok, err)
+    return table.concat(notes, "\n")
+  end
+
+  it("setup sets the four tutor keys", function()
+    fresh()
+    local leader = vim.g.mapleader or "\\"
+    for _, k in ipairs({ "tt", "tr", "te", "t?" }) do
+      assert.truthy(vim.fn.maparg(leader .. k, "n") ~= "", "missing <leader>" .. k)
+    end
+  end)
+
+  it("in a project folder the tutor opens; elsewhere it does not", function()
+    local pf = tmp .. "/projects.json"; vim.fn.writefile({ vim.json.encode({ project }) }, pf)
+    local t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse })
+    t.on_start({ argv = {}, cwd = project, ui = true })
+    assert.is_true(t.state.term:is_visible())
+    t.state.term:hide()
+    t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse })
+    t.on_start({ argv = {}, cwd = home, ui = true })
+    assert.is_false(t.state.term:is_visible())
+  end)
+
+  it("never opens headless or with auto_open off", function()
+    local pf = tmp .. "/projects.json"; vim.fn.writefile({ vim.json.encode({ project }) }, pf)
+    local t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse })
+    t.on_start({ argv = {}, cwd = project, ui = false })
+    assert.is_false(t.state.term:is_visible())
+    t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse, auto_open = false })
+    t.on_start({ argv = {}, cwd = project, ui = true })
+    assert.is_false(t.state.term:is_visible())
+  end)
+
+  it("the first-run hint shows only without a profile file", function()
+    local t = fresh({ projects_file = tmp .. "/none.json", profile_file = tmp .. "/none.sqlite", lazycourse = lazycourse })
+    local notes = capture(function() t.on_start({ argv = {}, cwd = home, ui = true }) end)
+    assert.truthy(notes:find("New to lazycourse? :TutorTour teaches Neovim and the tutor", 1, true), notes)
+    local pf = tmp .. "/p.sqlite"; vim.fn.writefile({ "x" }, pf)
+    t = fresh({ projects_file = tmp .. "/none.json", profile_file = pf, lazycourse = lazycourse })
+    notes = capture(function() t.on_start({ argv = {}, cwd = home, ui = true }) end)
+    assert.is_nil(notes:find("New to lazycourse", 1, true))
+  end)
+end)
+
+-- Wayfinding spec §9.5 (re-run topic 5): after the folder switch the pane looked cut off on the left. Screen-replay
+-- 2026-11-09 showed the cause: `:cd` printed the new folder (it does when the last key was typed, or at verbose ≥ 5),
+-- and that message popup covered the left of the tutor pane's lines until it timed out.
+describe("tutor.switch", function()
+  it("changes folder without printing it", function()
+    package.loaded["tutor"] = nil
+    local saved = vim.fn.getcwd()
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = saved, check_version = false, auto_open = false })
+    local dir = vim.fn.resolve(vim.fn.tempname()); vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "# x" }, dir .. "/README.md")
+    vim.o.verbose = 5
+    local out = vim.fn.execute("lua require('tutor').switch(" .. vim.inspect(dir) .. ", 'README.md')")
+    vim.o.verbose = 0
+    vim.cmd.cd(vim.fn.fnameescape(saved))
+    -- `:cd` prints the folder as :pwd does ("[global] <dir>", or the bare path); verbose also logs the chdir() call itself.
+    assert.is_nil(out:find("[global] " .. dir, 1, true), out)
+    for _, l in ipairs(vim.split(out, "\n")) do assert.are_not.equal(dir, vim.trim(l)) end
+  end)
+end)
+
+describe("tutor profile paths", function()
+  it("follow PI_TUTOR_PROFILE like pi-tutor does, so the projects list is found where Pi wrote it", function()
+    local saved = vim.env.PI_TUTOR_PROFILE
+    vim.env.PI_TUTOR_PROFILE = "/x/y/p.sqlite"
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, auto_open = false })
+    local p = require("tutor").paths()
+    vim.env.PI_TUTOR_PROFILE = saved
+    assert.same({ profile_file = "/x/y/p.sqlite", projects_file = "/x/y/projects.json" }, p)
+  end)
+end)
+
+describe("tutor start hook", function()
+  it("waits for the screen: it runs on UIEnter, which never fires headless (live check 2026-11-09: at VimEnter the UI was not attached yet)", function()
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false })
+    local au = vim.api.nvim_get_autocmds({ group = "tutor-start" })
+    assert.equals(1, #au)
+    assert.equals("UIEnter", au[1].event)
+  end)
+end)
+
+describe("run split scrolling", function()
+  it("the run split never scrolls sideways either", function()
+    local saved = vim.o.sidescrolloff
+    vim.o.sidescrolloff = 8
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, auto_open = false,
+      run_cmd = { "sh", "-c", "echo hi" } })
+    vim.cmd("TutorRun")
+    vim.wait(2000, function() for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.w[w].tutor_run then return true end end end)
+    local win
+    for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.w[w].tutor_run then win = w end end
+    local got = win and vim.wo[win].sidescrolloff
+    vim.o.sidescrolloff = saved
+    assert.is_not_nil(win)
+    assert.equals(0, got)
+  end)
+end)
+
+describe("start root", function()
+  -- Final review M6: nvim in a project's subfolder opened the tutor rooted at the subfolder (no project, no run:).
+  it("the tutor is rooted at the project, not the subfolder nvim started in", function()
+    local tmp = vim.fn.resolve(vim.fn.tempname()); vim.fn.mkdir(tmp .. "/proj/src", "p")
+    local root = require("tutor").autostart_root
+    assert.equals(tmp .. "/proj", root({}, tmp .. "/proj/src", { tmp .. "/proj" }, tmp .. "/lazycourse"))
+    assert.is_nil(root({}, tmp, { tmp .. "/proj" }, tmp .. "/lazycourse"))
+  end)
+end)

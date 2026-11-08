@@ -8,6 +8,9 @@ export const MAX_REASKS = 2;
 /** Shown while a held reply streams, and in place of a reply that is being written again. */
 export const HOLD_TEXT = "_(tutor is checking this reply…)_";
 export const REWRITE_TEXT = "_(tutor is rewriting this reply…)_";
+/** Author 2026-11-09: a reply with nothing for the learner (the answer stayed in the hidden thinking) is asked again. */
+export const EMPTY_TEXT = "_(tutor is writing its answer…)_";
+export const LOST_TEXT = "I lost my answer on the way — please ask again.";
 
 /** What a reply at each step may be; the reply check (compliance.checkTurn) holds it to these. */
 export const TURN_LIMITS: Record<TurnStep, { maxSentences: number | null; ownCode: boolean; question: boolean }> = {

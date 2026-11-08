@@ -39,7 +39,9 @@ export type TutorPayload =
   | { kind: "diagnostics"; buf: number; path: string; errors: number; warnings: number; first?: { line: number; msg: string } }
   | { kind: "idle"; buf: number; path: string; line: number; since_ms: number }
   | { kind: "churn"; buf: number; path: string; region: [number, number]; edits: number }
-  | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string; timed_out?: boolean };
+  | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string; timed_out?: boolean }
+  /** Wayfinding spec §8.3: nvim-tutor's tour, checked in Neovim; `step` is the one to do now. */
+  | { kind: "tour"; step: number; total: number; title: string; status: "running" | "done" | "off" };
 
 export interface EditorSnapshot {
   path: string;
@@ -223,6 +225,17 @@ export class NvimLink {
     await this.timed(this.raw.lua(`local b = vim.fn.bufnr(...) if b > 0 and vim.api.nvim_buf_is_loaded(b) then vim.cmd.checktime(b) end`, [path]), 2000, "reload");
   }
 
+  /**
+   * Final review I2: the file under a buffer with unsaved edits was rewritten (the plan job): keep the buffer and answer
+   * Neovim's next file-changed check for it silently (`v:fcs_choice = ""`), so no W12 prompt offers to drop the edits.
+   */
+  async holdBuffer(path: string): Promise<void> {
+    if (!this.isInRoot(path)) return;
+    await this.timed(this.raw.lua(`local b = vim.fn.bufnr(...) if b > 0 and vim.api.nvim_buf_is_loaded(b) then
+      vim.api.nvim_create_autocmd("FileChangedShell", { buffer = b, once = true, callback = function() vim.v.fcs_choice = "" end })
+    end`, [path]), 2000, "hold");
+  }
+
   /** Open `path` in the editor window, never the Pi pane (M8: the brief and the grade). */
   async openInEditor(path: string): Promise<boolean> {
     if (!this.isInRoot(path)) return false;
@@ -235,6 +248,28 @@ export class NvimLink {
   }
 
   /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */
+  /** Wayfinding spec §8.3: tell the tour an event only Pi sees (the learner asked the tutor something). */
+  async tourEvent(name: string): Promise<void> {
+    await this.timed(this.raw.lua(`local n = ... pcall(function() require("tutor.tour").event(n) end)`, [name]), 2000, "tour");
+  }
+
+  /** Ask a running tour to tell its step again: this Pi may have started after the tour's folder switch. */
+  async tourHello(): Promise<void> {
+    await this.timed(this.raw.lua(`pcall(function() require("tutor.tour").announce() end)`), 2000, "tour");
+  }
+
+  /** Wayfinding spec §8.2: open nvim-tutor's help tab; false when the plugin is not loaded in this Neovim. */
+  async openHelp(): Promise<boolean> {
+    try {
+      return (await this.timed(this.raw.lua(`local ok = pcall(function() require("tutor.help").open() end) return ok`), 2000, "help")) === true;
+    } catch { return false; }
+  }
+
+  /** Where the learner is, for the help tab's "Now" line (`vim.g.tutor_now`). */
+  async setNow(now: { where: string; next: string }): Promise<void> {
+    await this.timed(this.raw.setVar("tutor_now", now), 2000, "now");
+  }
+
   async switchProject(dir: string, file: string): Promise<void> {
     await this.raw.lua(`local d, f = ...; vim.defer_fn(function() require("tutor").switch(d, f) end, 500)`, [dir, file]);
   }
