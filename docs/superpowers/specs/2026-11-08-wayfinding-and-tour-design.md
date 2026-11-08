@@ -119,10 +119,11 @@ and carries the tour offer.
 From the editor: `:TutorHelp` and `<leader>t?` (my call on the key), in the which-key `<leader>t` group. From the
 tutor pane: a new Pi command **`/tutor-help`** (author), which asks Neovim over RPC to open the same panel (new
 RPC call: verify and record in `PI_SURFACE.md`). The leader key can't work in the pane because Space must reach Pi
-as text. A floating window over the editor (my call). Two columns or sections: **in the editor** and
+as text. It opens in **its own Neovim tab** (author 2026-11-08: a separate window with room to show every command
+with a clear explanation, not a floating window; tab rather than split is my call), and `q` closes the tab and
+returns to where the learner was. Each entry gets its full explanation and arguments, not only a one-liner. Two columns or sections: **in the editor** and
 **in the tutor pane**, plus a **moving around** row (`<Esc><Esc>` leave the pane, `<C-w>h` back to the code,
-`<leader>tt` open/close). Top: what is relevant now (from §6 "when"); below: everything, by group. `q`/`<Esc>`
-closes. Read-only.
+`<leader>tt` open/close). Top: what is relevant now (from §6 "when"); below: everything, by group. Read-only.
 
 ### 8.3 The tour (`:TutorTour`)
 
@@ -173,6 +174,11 @@ Neovim's start folder is a known tutor project (`profile.projectAt`) or `~/lazyc
 Neovim opens normally and `:Tutor` still works by hand — so plain `nvim` from `~` never roots Pi at home. A first-run
 learner (no profile yet) starts from `~/lazycourse`, which the README's first steps say to `cd` into (my call: the
 plugin creates the folder if missing when `:TutorTour` or `:Tutor` first runs).
+
+**First-ever start outside** (my call, after the folder rule left a gap): when no profile exists yet (the profile
+file `~/.local/share/nvim-tutor/profile.sqlite` is absent) and Neovim starts outside those folders, the tutor does
+not open, but one line says: "New to lazycourse? :TutorTour teaches Neovim and the tutor". `:TutorTour` moves Neovim
+into `~/lazycourse/.tour` (created if missing) through the existing project switch, so Pi is never rooted at `~`.
 
 Also guarded (my call): not with file arguments, not headless, not as git's `$EDITOR`; a plugin option turns
 auto-open off. The plugin can't ask the profile database cheaply from Lua — my call: the extension writes the list of
