@@ -266,6 +266,75 @@ The plugin sets its own keys: `<leader>tt` (open/close the tutor), `<leader>tr` 
 
 4. `:Tutor` (or `<leader>tt`) opens Pi in a right split; type at Pi's prompt. `<Esc><Esc>` leaves terminal mode.
 
+## First steps
+
+1. `mkdir -p ~/lazycourse && cd ~/lazycourse && nvim`. In `~/lazycourse` or a tutor project, Neovim opens the tutor
+   by itself; anywhere else it opens plain Neovim, and a brand-new learner gets a one-line hint about `:TutorTour`.
+2. New to Neovim? `:TutorTour` is one guided tour: the Neovim basics you need (cut down from Neovim's own tutor), then
+   the tutor (the pane, `<Esc><Esc>`, `<C-w>h`, `:TutorRun`, `<leader>te`, help). Code checks each step; the tutor
+   answers questions. It remembers where you stopped; `:TutorTour restart` starts over, `:TutorTour off` stops.
+3. Then tell the tutor what you'd like to learn (or `/tutor-start`): a short talk, a level, then your own project idea —
+   exactly that idea at your level, or a smaller version of it when it is too big.
+
+**Where am I, what next?** Every session opens with a three-line card (where you are, the next step, where help is),
+and the tutor's box always ends with a `next: …` line. Both come from code, never from the model. `<leader>t?`,
+`:TutorHelp` or `/tutor-help` opens every command, fully explained, in its own tab (`q` closes it).
+
+## Commands
+
+`:Tutor…` is typed in the editor, `/tutor-…` in the tutor pane. The one list behind this section, the help tab, the
+next-step line and the model's own note is `pi-tutor/commands.json`; a test fails when a command is missing from it,
+or from here.
+
+**Start and help**
+
+- `/tutor-start [language | check | off | spec]` (tutor pane) or `:TutorStart [language | check | off | spec]` (editor): begin or continue the course
+- `/tutor-help` (tutor pane): open the help tab with every command
+- `/tutor-level <0-100>` (tutor pane) or `:TutorLevel <0-100>` (editor): set your level by hand
+- `:TutorHelp` (editor, same as `/tutor-help`): open the help tab with every command
+- `:TutorTour [restart | off]` (editor): the tour: Neovim and the tutor, step by step
+- `<leader>t?` (key, same as `:TutorHelp`): open the help tab with every command
+
+**Moving around**
+
+- `:Tutor` (editor): open or close the tutor pane
+- `:TutorRestart` (editor): restart the tutor in its pane
+- `<leader>tt` (key, same as `:Tutor`): open or close the tutor pane
+- `<Esc><Esc>` (tutor pane): leave the tutor pane's typing mode
+- `<C-w>h` (key): move to the window on the left (your code)
+- `q` (run split): close the run split (after the program ends)
+
+**Coding a task**
+
+- `/tutor-plan <task id> | next | off` (tutor pane) or `:TutorPlan <task id> | next | off` (editor): walk a task from idea to code in six steps
+- `/tutor-done [task id] [anyway]` (tutor pane) or `:TutorDone [task id] [anyway]` (editor): check a task and tick it
+- `/tutor-fix` (tutor pane) or `:TutorFix` (editor): pro only: show the fix for where you are stuck
+- `/tutor-improve <task id> | done | off` (tutor pane): make a ticked task's code better, measured
+- `:TutorRun [run | test | stop]` (editor): run your program in a split below
+- `<leader>tr` (key, same as `:TutorRun`): run your program in a split below
+- `<leader>te` (key): ask the tutor about the error under the cursor
+
+**Learning paths and tests**
+
+- `/tutor-lesson next | check | skip | review | off` (tutor pane) or `:TutorLesson next | check | skip | review | off` (editor): learn-first lessons with small exercises
+- `/tutor-exam [small | medium] [topic] | check | off | sandbox on|off` (tutor pane) or `:TutorExam [small | medium] [topic] | check | off | sandbox on|off` (editor): a timed exam in this project
+- `/tutor-submit` (tutor pane) or `:TutorSubmit` (editor): hand in the exam and get it graded
+- `/tutor-step-up [check | submit]` (tutor pane) or `:TutorStepUp [check | submit]` (editor): step up to the next band
+- `/tutor-architect [question] | off` (tutor pane) or `:TutorArchitect [question] | off` (editor): talk architecture: parts, data flow, trade-offs
+
+**Your record and settings**
+
+- `/tutor-status` (tutor pane): show the tutor's current state
+- `/tutor-notes on | off` (tutor pane): design and naming notes after a pro tick
+- `/tutor-progress [language]` (tutor pane) or `:TutorProgress [language]` (editor): your habits, hint use, exams and concepts
+- `/tutor-memory` (tutor pane): what the tutor remembers about you
+- `/tutor-feedback too-long | too-vague | too-much-help | good` (tutor pane) or `:TutorFeedback too-long | too-vague | too-much-help | good` (editor): tell the tutor how it is teaching
+- `/tutor-thinking auto | show | hide` (tutor pane) or `:TutorThinking auto | show | hide` (editor): show or hide the model's thinking
+- `/tutor-learn` (tutor pane) or `:TutorLearn` (editor): keep what you learned from being stuck
+- `/tutor-docs [language]` (tutor pane) or `:TutorDocs [language]` (editor): fetch official docs for a language
+- `/tutor-checker <provider/model> | off` (tutor pane): a second model checks each reply
+- `/reload` (tutor pane) or `:TutorReload` (editor): reload the tutor extension
+
 ## Docs lookup with context7 (optional)
 
 The tutor answers from the offline DevDocs copy of your language's docs first. To let it also look up

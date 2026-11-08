@@ -40,3 +40,12 @@ describe("the command list", () => {
     expect(commandNote("recipe")).toMatch(/"skip"[^\n]*`off` to stop/);
   });
 });
+
+describe("the README", () => {
+  it("names every command and key in the list (wayfinding spec §6)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    const missing = loadCommands().filter((c) => !readme.includes(`\`${c.name}`)).map((c) => c.name);
+    expect(missing).toEqual([]);
+  });
+});
