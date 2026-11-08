@@ -68,3 +68,15 @@ export function nextStep(i: WayInput): string {
   };
   return `next: ${say[w]()}`;
 }
+
+/** Wayfinding spec §8.1: three lines on every session open — where you are, the next step, where help is. */
+export function sessionCard(i: WayInput, info: { project?: string; task?: string; level?: number; tourOffered: boolean }): string {
+  const w = whereOf(i);
+  let where: string;
+  if (w === "fresh" && info.tourOffered) where = "new here — :TutorTour teaches Neovim and the tutor, or just tell me what you'd like to learn";
+  else if (i.onboarding && !info.project) where = `onboarding (${i.onboarding.stage})`;
+  else if (info.project) where = [`project ${info.project}`, info.task && `task ${info.task}`, info.level !== undefined && `level ${info.level}`].filter(Boolean).join(" · ");
+  else where = w === "tour" ? "the tour" : "no project yet";
+  return [`Where you are: ${where}`, `Next: ${nextStep(i).replace(/^next: /, "")}`,
+    "Help: <leader>t? in the editor · /tutor-help in this pane · :TutorTour"].join("\n");
+}

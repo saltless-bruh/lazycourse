@@ -1,3 +1,4 @@
+import { Text } from "@earendil-works/pi-tui";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,9 +26,8 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
-import { WELCOME } from "./commands-note.js";
 import { describe as describeCmd, commandNote } from "./commands.js";
-import { whereOf, nextStep, type Where, type WayInput } from "./wayfinding.js";
+import { whereOf, nextStep, sessionCard, type Where, type WayInput } from "./wayfinding.js";
 import { taskTerms } from "./similarity.js";
 import { calledFunctions, pythonSources, codeMetrics, improvePrompt, improveResult, measuredLine, type Measured } from "./improve.js";
 import { projectRun, runChecks, type CheckResult } from "./check-run.js";
@@ -502,7 +502,6 @@ export default function (pi: ExtensionAPI): void {
     onboardingHere = false;
     // Learner-session fixes (spec §2): a first run leads — a welcome line, and no level shown until one is known.
     state.levelKnown = !(firstRun() || (onboardingActive() && onboarding?.level === undefined));
-    if (firstRun()) pi.sendMessage({ customType: "tutor_welcome", content: WELCOME, display: true }, { triggerTurn: false });
     generation++;
     lesson = null;
     if (project && profile) { const p = profile, key = `lesson:${project.path}`; profileWrite(() => { const raw = p.setting(key); if (raw) { try { lesson = JSON.parse(raw) as LessonState; } catch { lesson = null; } } }); }
@@ -565,6 +564,15 @@ export default function (pi: ExtensionAPI): void {
         if (ev.length) { onStuck(ev); paint(); }
       }, TICK_MS);
       tick.unref?.();
+    }
+    // Wayfinding spec §8.1: every session opens with a card (the first-run welcome is its first form).
+    {
+      let tourSeen = false;
+      if (profile) { const p = profile; profileWrite(() => { tourSeen = !!p.setting("tour"); }); }
+      const task = workflow?.task;
+      pi.sendMessage({ customType: "tutor_card", display: true, content: sessionCard(wayInput(), {
+        project: project?.title, task, level: state.levelKnown === false ? undefined : state.level, tourOffered: firstRun() && !tourSeen,
+      }) }, { triggerTurn: false });
     }
     examClock();
     paint();
@@ -955,6 +963,8 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  // Wayfinding spec §8.1: the card is plain text, not shown under a "[tutor_card]" label.
+  pi.registerMessageRenderer("tutor_card", (m) => new Text(String(m.content), 1, 0));
   pi.registerMarkdownTransformer((md, c) => {
     // Spec 2026-10-21 §6: before the fix is allowed the thinking (where the model works the fix out) stays hidden.
     if (c.messageType === "assistant-thinking") return thinkingHidden(thinking, bandFor(level()), guarded()) ? THINKING_LABEL : md;
@@ -1063,7 +1073,7 @@ export default function (pi: ExtensionAPI): void {
   // Spec §3.4/§4: every turn carries one hidden tutor_editor message. Keep only
   // the newest so stale snapshots do not pile up in the model's context; the same for progress reports (M8).
   const NEWEST_ONLY = new Set(["tutor_editor", "tutor_progress"]);
-  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check", "tutor_welcome"]);
+  const LEARNER_ONLY = new Set(["tutor_stepup", "tutor_exam_check", "tutor_welcome", "tutor_card"]);
   pi.on("context", (event) => {
     const msgs = event.messages;
     const last = new Map<string, number>();

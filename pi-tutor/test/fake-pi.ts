@@ -27,8 +27,10 @@ export function fakePi() {
   const execOut: Record<string, { stdout: string; stderr: string; code: number }> = {};
   const skills: { path: string }[] = [];
   const tools: Record<string, { execute: (...a: unknown[]) => Promise<unknown> }> = {};
+  const renderers: Record<string, (...a: unknown[]) => unknown> = {};
   const transformers: ((md: string, c: { messageType: string; isStreaming: boolean; availableWidth: number }) => string)[] = [];
   const pi = {
+    registerMessageRenderer: (type: string, r: (...a: unknown[]) => unknown) => { renderers[type] = r; },
     registerMarkdownTransformer: (t: (typeof transformers)[number]) => { transformers.push(t); },
     registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) => { tools[t.name] = t; },
     on: (name: string, h: Handler) => { events[name] = h; return () => {}; },
@@ -39,7 +41,7 @@ export function fakePi() {
     exec: async (command: string) => ({ ...(execOut[command] ?? { stdout: "", stderr: `${command}: not found`, code: 127 }), killed: false }),
     getCommands: () => skills.map((s) => ({ name: "skill:x", source: "skill", sourceInfo: { path: s.path } })),
   };
-  return { pi, events, commands, entries, sent, messages, skills, execOut, tools, transformers };
+  return { pi, events, commands, entries, sent, messages, skills, execOut, tools, transformers, renderers };
 }
 
 export function fakeCtx(branch: unknown[] = [], cwd = "/tmp/proj") {

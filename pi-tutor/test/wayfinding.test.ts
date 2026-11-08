@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { whereOf, nextStep, type WayInput, type Where } from "../extensions/tutor/wayfinding.js";
+import { whereOf, nextStep, sessionCard, type WayInput, type Where } from "../extensions/tutor/wayfinding.js";
 import { describe as describeCmd } from "../extensions/tutor/commands.js";
 
 // Wayfinding spec 2026-11-08 §7: the next step is worked out by code from the extension's state.
@@ -43,5 +43,26 @@ describe("next step per state", () => {
         expect(() => describeCmd(m.replace(/[.,;)]+$/, "")), m).not.toThrow();
       }
     }
+  });
+});
+
+describe("session card", () => {
+  it("has three lines: where, next, help", () => {
+    for (const input of [{ firstRun: true }, { onboarding: ob({}) }, { project: true }] as Partial<WayInput>[]) {
+      const lines = sessionCard({ ...none, ...input }, { tourOffered: false }).split("\n");
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toMatch(/^Where you are: /);
+      expect(lines[1]).toMatch(/^Next: /);
+      expect(lines[2]).toMatch(/^Help: <leader>t\? in the editor · \/tutor-help in this pane · :TutorTour/);
+    }
+  });
+  it("names the project, task and level when known", () => {
+    expect(sessionCard({ ...none, project: true }, { project: "Guess Number", task: "P1.T2", level: 14, tourOffered: false })).toMatch(/Where you are: project Guess Number · task P1\.T2 · level 14/);
+  });
+  it("a first run offers the tour", () => {
+    expect(sessionCard({ ...none, firstRun: true }, { tourOffered: true }).split("\n")[0]).toMatch(/new here — :TutorTour teaches Neovim and the tutor, or just tell me what you'd like to learn/);
+  });
+  it("onboarding says its stage", () => {
+    expect(sessionCard({ ...none, onboarding: ob({ stage: "check", levelTaskOpen: true }) }, { tourOffered: false })).toMatch(/Where you are: onboarding \(check\)/);
   });
 });

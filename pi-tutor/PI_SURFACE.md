@@ -149,6 +149,10 @@ Re-verify every line when bumping versions.
   listeners"), so an async check here runs before the screen gets the final message. Used for held teaching
   replies (spec 2026-10-21 §6): the reply is checked (compliance.checkTurn) and replaced when it fails. Live
   spike 2026-10-20: a reply held behind a placeholder through an 8 s async check, then released replaced.
+- `pi.registerMessageRenderer(customType, (message, options, theme) => Component | undefined)` (types.d.ts:1250,
+  `MessageRenderer` at :1169; Pi 1.3.0): the `tutor_card` session card renders as `new Text(content, 1, 0)` from
+  `@earendil-works/pi-tui` (`components/text.d.ts`: `constructor(text?, paddingX?, paddingY?, customBgFn?)`), so it
+  shows as plain text instead of under a `[tutor_card]` label (wayfinding spec 2026-11-08 §8.1).
 - `pi.registerMarkdownTransformer((markdown, { messageType, isStreaming, availableWidth }) => string)`
   (types.d.ts:1128-1141, 1228): interactive TUI only, display only; pi-tui caches the result by text
   and width (markdown.js:185), so it reruns on each streaming update and on resize. Only

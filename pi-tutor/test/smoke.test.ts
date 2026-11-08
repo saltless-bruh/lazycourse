@@ -1316,16 +1316,17 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
   let saved: string | undefined;
   beforeEach(() => { saved = process.env.PI_TUTOR_PROFILE; process.env.PI_TUTOR_PROFILE = pjoin(mkd(pjoin(tmp(), "first-")), "p.sqlite"); });
   afterEach(() => { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; });
-  const WELCOME = "New here? Tell me what you'd like to learn — or type /tutor-start.";
-  const shownTexts = (b: Awaited<ReturnType<typeof boot>>) => b.messages.map((m) => String((m.message as { content: string }).content));
+  // Wayfinding spec 2026-11-08 §8.1: the welcome is now the session card's first-run form.
+  const cards = (b: Awaited<ReturnType<typeof boot>>) => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_card");
+  const cardText = (b: Awaited<ReturnType<typeof boot>>) => String((cards(b).at(-1)?.message as { content: string } | undefined)?.content ?? "");
   const userTurn = async (b: Awaited<ReturnType<typeof boot>>, prompt: string) => {
     const opts = { sections: {} as Record<string, string> };
     await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: opts }, b.ctx);
     return opts.sections;
   };
-  it("a brand-new learner is welcomed and their first message starts onboarding", async () => {
+  it("a brand-new learner gets the card with the tour offer and their first message starts onboarding", async () => {
     const b = await boot();
-    expect(shownTexts(b)).toContain(WELCOME);
+    expect(cardText(b)).toMatch(/new here.*:TutorTour/);
     const sections = await userTurn(b, "hi, I want to learn Python. I have never programmed before.");
     expect(sections["tutor_onboard"]).toBeTruthy();
     const { Profile } = await import("../extensions/tutor/profile.js");
@@ -1338,17 +1339,26 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     const b = await boot();
     expect((await userTurn(b, "what is LazyVim?"))["tutor_onboard"]).toBeTruthy();
   });
-  it("a learner with a profile language is not welcomed", async () => {
+  it("a learner with a profile language gets a card without the tour offer", async () => {
     const { Profile } = await import("../extensions/tutor/profile.js");
     const p = Profile.open(process.env.PI_TUTOR_PROFILE!); p.saveLanguage("python", 10, {}, 1); p.close();
     const b = await boot();
-    expect(shownTexts(b)).not.toContain(WELCOME);
+    expect(cards(b)).toHaveLength(1);
+    expect(cardText(b)).not.toMatch(/new here/);
     expect((await userTurn(b, "hello"))["tutor_onboard"]).toBeUndefined();
   });
-  it("the welcome stays out of the model's context", async () => {
+  it("every session opens with one card the model never sees, shown without starting a turn", async () => {
     const b = await boot();
-    const welcome = b.messages.find((m) => (m.message as { customType: string }).customType === "tutor_welcome")!;
-    expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...(welcome.message as object), timestamp: 1 }] })).toMatchObject({ messages: [] });
+    expect(cards(b)).toHaveLength(1);
+    const card = cards(b)[0];
+    expect(card.message).toMatchObject({ display: true });
+    expect(card.options).toMatchObject({ triggerTurn: false });
+    expect(cardText(b).split("\n")).toHaveLength(3);
+    expect(b.events["context"]({ type: "context", messages: [{ role: "custom", ...(card.message as object), timestamp: 1 }] })).toMatchObject({ messages: [] });
+  });
+  it("the card renders as plain text under its own renderer", async () => {
+    const b = await boot();
+    expect(b.renderers["tutor_card"]).toBeTypeOf("function");
   });
   // Wayfinding spec 2026-11-08 §6: the note is built from the command list for where the learner is.
   it("every turn carries the tutor's commands for where the learner is, onboarding turns too", async () => {
