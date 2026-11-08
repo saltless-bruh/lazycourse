@@ -8,14 +8,14 @@ hands over the stuck line only after real tries. Code, not the model, decides ev
 done, how much help you get, and when your level moves.
 
 ```
-┌──────────────── Neovim (LazyVim) ───────────────────────────────────────────────┐
-│  your code                          │  tutor pane: Pi's own TUI (`pi`, PI_TUTOR=1) │
-│  nvim-tutor (Lua): commands, keys,  │  ┌── pi-tutor extension (TypeScript) ─────┐  │
-│  run split, help tab, :TutorTour,   │  │ levels · help ladder · checks/sandbox │  │
-│  editor signals ──── Neovim RPC ────┼─▶│ onboarding · recipe · habits · exams  │  │
-│                 ◀── open files, ────┼──│ next-step line · session card         │  │
-│                     reload, help    │  └───────────────────────────────────────┘  │
-└─────────────────────────────────────┴───────────────────────────────────────────┘
+┌──────────────── Neovim (LazyVim) ───────────────────────────────────────────────────┐
+│  your code                          │   tutor pane: Pi's own TUI (`pi`, PI_TUTOR=1) │
+│  nvim-tutor (Lua): commands, keys,  │   ┌── pi-tutor extension (TypeScript) ─────┐  │
+│  run split, help tab, :TutorTour,   │   │ levels · help ladder · checks/sandbox  │  │
+│  editor signals ──── Neovim RPC ────┼─▶│ onboarding · recipe · habits · exams   │  │
+│                 ◀── open files, ───┼───│ next-step line · session card          │  │
+│                     reload, help    │   └────────────────────────────────────────┘  │
+└─────────────────────────────────────┴───────────────────────────────────────────────┘
         profile: ~/.local/share/nvim-tutor/profile.sqlite   ·   projects: ~/lazycourse/<language>-<project>
 ```
 
