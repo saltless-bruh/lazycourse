@@ -2,250 +2,40 @@
 
 An AI tutor inside [LazyVim](https://github.com/LazyVim/LazyVim) that teaches you to code by making *you* write the code.
 
-It picks a project matched to your skill in a language you choose, scaffolds a spec folder for it, gathers that language's idioms and best practices, and then coaches you from a side panel while you build it. A level slider sets how much it says: beginner gets structure and explanations, pro gets hints and knowledge only, never code. Hints get more concrete only as you reason correctly.
+You pick a language and say what you'd like to build. The tutor finds your level, turns your idea into a project with a
+plan, and coaches you from a pane next to your code. It gives hints, questions and small unrelated examples, and
+hands over the stuck line only after real tries. Code, not the model, decides everything that counts: whether a task is
+done, how much help you get, and when your level moves.
 
 ```
-┌───────────── Neovim (LazyVim) ─────────────────────────────┐
-│ nvim-tutor (Lua): panel · level slider · editor signals     │
-│ spawns:  pi --mode rpc --tools read,grep,find,ls       │
-└────────────┬───────────────────────────────────────────────┘
-             │ Pi RPC: JSONL on stdin/stdout
-             ▼
-┌───────────── Pi (unmodified) ──────────────────────────────┐
-│ providers · sessions · skills · prompt templates           │
-│ ┌──── pi-tutor package (TypeScript extension, ours) ─────┐ │
-│ │ level policy · hint ladder · stuck detector            │ │
-│ │ profile · project suggester · spec scaffold            │ │
-│ └────────────────────────────────────────────────────────┘ │
-│ skills/  ← knowledge base: fetched docs, notes, learned    │
-└────────────────────────────────────────────────────────────┘
+┌──────────────── Neovim (LazyVim) ───────────────────────────────────────────────┐
+│  your code                          │  tutor pane: Pi's own TUI (`pi`, PI_TUTOR=1) │
+│  nvim-tutor (Lua): commands, keys,  │  ┌── pi-tutor extension (TypeScript) ─────┐  │
+│  run split, help tab, :TutorTour,   │  │ levels · help ladder · checks/sandbox │  │
+│  editor signals ──── Neovim RPC ────┼─▶│ onboarding · recipe · habits · exams  │  │
+│                 ◀── open files, ────┼──│ next-step line · session card         │  │
+│                     reload, help    │  └───────────────────────────────────────┘  │
+└─────────────────────────────────────┴───────────────────────────────────────────┘
+        profile: ~/.local/share/nvim-tutor/profile.sqlite   ·   projects: ~/lazycourse/<language>-<project>
 ```
 
-## Status
-
-Milestone 1b done: Pi's own TUI runs in a Neovim split; the extension watches the
-editor over Neovim's RPC and shows tutor state in a Pi widget.
-
-Milestone 2 done (2026-10-12): band system prompts (beginner / intermediate / pro)
-selected per turn from the level slider; each turn carries the current buffer
-(beginner) or ±20 lines (others) plus diagnostics as a hidden message;
-`/tutor-level` / `:TutorLevel` persists across session resume; the model's trailing
-`tutor-judgment` block is parsed and shown in the widget (`judged correct`).
-
-Milestone 3 done (2026-10-12): a persisting error, a long pause, or rewriting the same
-lines opens a stuck episode (widget shows `stuck: …`, Pi gets one `[tutor]` nudge); your
-chat questions open one too. Hints climb a five-rung ladder (question → concept → pointer
-→ pseudocode → reveal) only when the tutor judges your reasoning correct; pro stops at 4.
-A `tool_call` guard keeps the tutor to read-only tools inside the project folder.
-The tutor only exists in the Pi that `:Tutor` starts (`PI_TUTOR=1`); a plain `pi`
-elsewhere is untouched.
-
-First run (2026-11-07): the pane greets you ("New here? Tell me what you'd like to learn — or type
-/tutor-start.") and the widget says "level not set". Whatever you write first starts the getting-started
-talk; you do not need to know `/tutor-start`. Clicking or moving into the pane always puts it in input
-mode, so typing never runs as Neovim keys.
-
-Milestone 4 done (2026-10-12): `:TutorStart` (or `/tutor-start [language]`) runs a short
-interview the first time you pick a language, suggests three projects aimed at your weak
-concepts, and scaffolds the one you pick into `~/lazycourse/<language>-<project>` (or a folder
-you choose): `README.md`, `AGENTS.md`, `spec/design.md`, `spec/tasks.md`,
-`spec/requirements.md`, `src/<entry>`. Neovim then switches into that folder and restarts the
-tutor there. Your levels, projects and finished stuck episodes (with per-concept ease) live in
-`~/.local/share/nvim-tutor/profile.sqlite`.
-
-Milestone 5 done (2026-10-12): starting a project in Python, Rust, Go, TypeScript or Lua also
-fetches that language's full reference from DevDocs at the version installed on your machine,
-as a searchable Pi skill (`~/.pi/agent/skills/tutor-<lang>-ref`); `:TutorDocs [lang]` re-fetches. When the tutor points
-you at a reference (rung 3) it names the skill. After a stuck episode, `:TutorLearn` drafts a
-skill from it in Pi's editor — edit and submit to keep, Esc to discard. Concepts you've shown
-you know start one hint rung lower. Pin a docs version: `~/.config/nvim-tutor/sources.json` (`{ "python": "python~3.12" }`). See:
-
-- Design spec: [`docs/superpowers/specs/2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)
-Teaching turns, phase 1 (2026-10-21, branch `teaching-turns`): help climbs with failed tries instead of
-the tutor's judgment, and each reply is held and checked before you see it (see "How it works"). Design:
-[`docs/superpowers/specs/2026-10-21-teaching-turns-design.md`](docs/superpowers/specs/2026-10-21-teaching-turns-design.md).
-Phase 2 (2026-10-22, same branch): each milestone gets checks written in the background and
-cross-checked against a hidden reference; `:TutorDone <task>` runs them in a sandbox and ticks the
-task, and a failed check is a try. A run is a typo when its own output is a syntax error, and Lua
-projects get a `.luarc.json` naming the Lua you run.
-
-- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/) (M1 bootstrap, M1b terminal pane, M2 band prompts, M3 stuck/ladder/guard, M4 profile/start, M5 knowledge/learn, M6a roles & rules)
-
-Milestone 6a (2026-10-13): every tutor reply follows one structure: **What's happening**
-(a narrow diagram), **Why**, **Example**, **What to try**, **In short**. The extension checks
-each reply (code above the hint rung, diagrams wider than 40 columns, missing judgment) and
-tells the model what to fix on the next turn; a `correct` judgment needs your reasoning.
-
-- `:TutorPlan <task id>` walks a task from `spec/tasks.md` through the six-step design recipe
-  (Find, Shape, Examples, Steps, Map, Build); the widget shows `plan k/6`. The tutor moves to
-  the next step when your artifact is done; `:TutorPlan next` moves on yourself, `:TutorPlan off`
-  stops the recipe. During the recipe the hint rung stays where it started.
-- `:TutorArchitect [question|off]` switches to the architecture professor (components, data
-  flow, trade-offs, no code) until `off` or `:TutorPlan`.
-
-Milestone 6b (2026-10-13): the tutor remembers you across sessions. When you say how you learn,
-what you know or how you want to be taught, it saves one short fact with its `tutor_remember` tool
-(never secrets: keys and tokens are refused). From the next session on it sees those facts and can
-search them with `tutor_recall`. Everything lives in your profile (`profile.sqlite`).
-
-- `/tutor-memory` lists what the tutor remembers; pick an entry to forget it.
-- A failing `:TutorRun` opens a stuck episode carrying the end of the error output; the tutor
-  teaches you to read the trace (`tutor-stack-traces` skill).
-- `:TutorFeedback too-long|too-vague|too-much-help|good` tells the tutor how it is doing; it
-  adjusts its style (and the hint level for `too-much-help` / `too-vague`). Inside a project it
-  keeps that per language until you say `good`; outside a project it lasts for the session.
-- `:TutorThinking auto|show|hide` shows or hides the model's thinking in the pane. It is hidden
-  unless you choose `show` (2026-11-07: `auto` used to show it below the pro level, and a beginner
-  saw the model's planning); the choice is kept across sessions. It changes only
-  what is drawn: the model still thinks. While the tutor hides it, Pi's own click-to-expand on a
-  thinking block does nothing; run `:TutorThinking show` to read it.
-
-Getting started and learn-first lessons (2026-10-19, spec `docs/superpowers/specs/2026-10-19-onboarding-conversation-design.md`):
-
-- `:TutorStart [language]` is a conversation with the tutor, not a form. It asks how long you have
-  been coding and what you know, recommends Python (with its reasons) if you know no language, or
-  asks you to rate yourself 1–10 in the language you named: below 5 it asks a couple of short
-  technical questions; 5 and above it gives a small task (`~/lazycourse/.checks/<language>/…`, open
-  it with `:e`, then `:TutorStart check`) whose real tests set your starting level, with no grade.
-  It tells you its read of you (you can correct the level), suggests one project (or something
-  else), makes the folder and moves the editor and tutor there, then asks: build now, or learn the
-  ideas first? The project plan (`spec/`) is written in the background meanwhile. A second
-  `:TutorStart` is a short check-in. `:TutorStart off` pauses; the next `:TutorStart` picks up
-  where you left off. If the model's replies go off track, the tutor asks the missing questions
-  itself after a few exchanges.
-- `:TutorLesson next|check|skip|review|off` drives the learn-first lessons: at most three concepts
-  per round, then a milestone of your project that uses only those, then the next round. `next`
-  writes the exercise into `learn/<concept>/`, `check` runs its tests in the sandbox (two failures
-  and the tutor takes a smaller step), `skip` marks a concept you know, `review` brings back a
-  concept that is due. What you learn is remembered with spaced repetition (FSRS), so concepts come
-  back for a quick review when you are about to forget them.
-- Lessons come from established, openly licensed courses, never written by the model: Exercism
-  (MIT) for every language, rustlings (MIT) for Rust, and for reading input and files, excerpts from
-  the Python tutorial (PSF), Go by Example (CC BY 3.0), the Node.js docs, the Rust Book and the Lua
-  manual, with our own tested exercises. Each `pi-tutor/lessons/<language>/SOURCES.md` lists the
-  sources, pinned commits, licences, and anything dropped or fixed. TypeScript and Lua lessons are
-  **thin**: neither has a beginner syllabus upstream (TypeScript reuses the JavaScript exercises,
-  which run as `.ts`; Lua has three concept lessons plus input and files).
-
-Exams (Milestone 8):
-
-- `:TutorRun` runs the project's `run:` command and `:TutorRun test` its `test:` command, both
-  from the front matter at the top of `README.md` (`/tutor-start` writes them; older projects can
-  add a `test:` line). The program runs in a split below the editor (2026-11-07), so you see its
-  output and type into it when it asks for input; `q` closes the split once it has ended, and
-  `:TutorRun stop` (or closing the split, or Ctrl+C) stops it and says "run stopped" — a stopped run is never a
-  failed try. Running again restarts it. `:TutorRun test` runs hidden with no input and is stopped after 60 s
-  (plugin option `test_timeout_ms`); a stopped test says it timed out, the tutor is told, and it is never a
-  failed try. When the tutor saw you finish a task, the next passing run ticks it in
-  `spec/tasks.md` (never while the file has unsaved edits in Neovim).
-- `:TutorExam [small|medium] [topic]` writes a timed exam into `exam/<nn>-<name>/`: `brief.md`
-  (task, requirements R1…, examples, grading), a starter file and example tests. The tests are run
-  once before you see them, so a broken exam is replaced. The widget shows the time left
-  (`exam 01 18:55 left`); going over is recorded as late and still graded. Until you submit,
-  hints stay at a question or a concept, never code.
-- `:TutorExam check` runs the example tests; `:TutorExam off` abandons the exam.
-- The model writes the example tests, so every run of them (the one before you see the exam,
-  `check` and `:TutorSubmit`) happens in a [bubblewrap](https://github.com/containers/bubblewrap)
-  sandbox. Inside it the filesystem is read-only; the tests work on a throwaway copy of the exam
-  folder, so nothing they write or link reaches your files; your home, `/tmp`, `/run` (Neovim,
-  agent, Docker and system-bus sockets), `/mnt`, `/media` and `/srv` are hidden; there is no
-  network; and only `PATH`, `HOME` and `LANG` are passed through. Toolchains installed in your home
-  (rustup, nvm, pyenv) stay visible read-only. With a systemd user session each run also gets
-  kernel limits (4 GB of memory, the throwaway copy included, and 1024 processes and threads), so a
-  runaway test cannot take the machine down. Rust keeps one build folder per project folder in the
-  tutor's cache (`cargo-target/`), so a repeat check rebuilds only what changed; folders of gone
-  projects, unused for 14 days, or beyond the newest 8 are removed. `:TutorExam sandbox` shows whether
-  it can start. If bubblewrap is missing, install it with your package manager (Arch:
-  `pacman -S bubblewrap`; it needs Linux) or run `:TutorExam sandbox off` to run exam tests as you; the
-  choice is saved in your profile. `:TutorRun` runs your own commands, so it is never sandboxed.
-  `exam/conftest.py` keeps your own `pytest` from collecting exam tests. Grading uses the requirements
-  and brief as the exam wrote them, so editing `brief.md` changes nothing; `:TutorExam check` shows the
-  last 30 lines of a failing run.
-- `:TutorSubmit` runs the tests, has the model check each requirement against your code
-  (`file:line` evidence), and writes `grade.md`: score /100 (80 requirements, 20 idiomatic code),
-  the test output, three next fixes and an "In short". The score goes into your profile.
-- `:TutorProgress [language]` shows hints used per episode over time, recent exam scores and which
-  concepts are strong, shaky or weak.
-
-The widget's second line says `outside nvim` when Pi runs without Neovim and `nvim closed` when
-the editor exited; either way it still shows the tutor's state and last judgment.
-
-## How it works
-
-- **Level slider (0–100)** per language. Beginner (0–33) streams buffer snapshots, diagnostics, idle time and run output to the tutor and explains how code is structured. Intermediate (34–66) names concepts and points at docs. Pro (67–100) sends diagnostics, idle time and run output only, and gives hints, never code.
-- **Help climbs with your tries** (2026-10-21). Only graded tries count: a failed check from `:TutorDone`, or a `:TutorRun` that fails with anything but a syntax error. A run that stops on a syntax error (a typo: the output names the line), running unchanged code again, or chatting never moves help. The steps: teach (an unrelated example) → a small hint → why it is wrong → "what were you thinking?" → only the stuck line. Beginners get the line on try 4, intermediate on try 6; at pro it comes only when you ask with `/tutor-fix` (`:TutorFix` in Neovim). The widget shows `try N`. Coming back to a spot after a different error keeps its count until a run passes.
-- **Checks prove a task; the tutor never ticks one** (phase 2). While you are in a milestone, a background job asks the model for checks in two strict forms, `check P1.T1: split_amount(50, 3) == 16.666666666666668` (Python, Lua, Rust, Go) and `run P1.T2: stdin "52.8" -> stdout contains "17.60"` (every language), and, in a separate request that never sees them, for a reference solution. A check the reference passes is trusted; one it fails is shown as *unverified* and never blocks you. They are listed in `spec/checks.md` (rewritten by the tutor after each `:TutorDone`, passed or not; edits there are not kept). `:TutorDone P1.T1` runs the task's checks against your code in a throwaway sandbox (bubblewrap; your files are never changed, 20 s per check) and ticks the task with its open subtasks when they pass. A check that fails tells you what it got and expected and counts as a try; a file that does not load because of a syntax error says so and counts as nothing. A task with no checks, or no sandbox on this machine, ticks as self-checked; `:TutorDone P1.T1 anyway` ticks it as yours. The hidden reference never enters your project, and a reply that shows one of its lines before you wrote it counts as a leak.
-- **The design recipe is the beginner default** (2026-10-26, habits phase 1). At level 0–33 every task starts the six-step recipe by itself (Find → Shape → Examples → Steps → Map → Build); `/tutor-plan skip` — or just saying "skip" or "just let me code" — moves to the next step and `/tutor-plan off` ends it for this task (the next task starts it again); neither counts as a try. "I don't understand" or "what is a step?" gets the step explained in one sentence. A step moves on when your own message has its artifact, in plain words or in code form — the task named ("I'm doing P1.T1, it …"), what goes in and what comes back ("it takes the total and the people and gives back each share", or `total: float, people: int → float`), two or more cases with an edge case ("48 and 3 people should give 16, with 0 people it should say error", or `call → value` rows), the steps in order ("first …, then …, then …" or numbered), then each step matched to its construct ("dividing is the slash"). When code does not recognise your answer, the tutor may still accept a real attempt and move on, but only the steps code recognised count toward the steps-first habit. Type a new line in Pi's input with **Ctrl+J** (or Shift+Enter). Your Examples rows become checks for the task, confirmed against the hidden solution. The tutor shows each step on an unrelated example and never fills yours in.
-- **Habits move your level** (habits phase 2). The tutor records habits from what code sees, never from the model's opinion: tries that get closer, questions after which your next try improves, reading an error before asking (right-click after it has been on screen 5 s), small edits between runs, fixing a bug before the tutor hands you the line, and your own recipe steps turning into passing code. Each habit goes not yet → showing → solid (5 good across 2 projects); it carries to a new language once shown there. As your band's habits turn solid the level rises inside the band and says why ("level 10 → 14: you ran small pieces often"); it never crosses a band edge by itself, and drops 3 only on a streak of tasks that needed the handed line. `/tutor-progress` lists your habits with their latest evidence. Idle nudges pause while a recipe runs.
-- **The step-up** (habits phase 3). When your band's habits are solid the tutor offers the step-up (at most once a day; `/tutor-progress` says what is missing). `/tutor-step-up` (`:TutorStepUp`) starts it. Part 1, the talking test: talk the problem through in your own words, then give numbered steps and one `pieces:` line (`pieces: split, dict, sorted`); the pieces are compared with a hidden solution, close substitutes counting. Part 2, the coding test, in `stepup/`: solve a problem that needs a module you have not used (look it up), fix a program with one planted bug, and build your own plan. `:TutorStepUp check` shows each part's checks; `:TutorStepUp submit` decides (each part 3 of 4 checks, and your pieces). A pass tells you to type `/tutor-level 34` when you want the next band; the tutor never moves you itself. Python, Lua, Rust and Go (habits phase 7): in Rust and Go each part is its own small crate or module in `stepup/solve/`, `stepup/fix/` and `stepup/plan/`. Not yet: it names what to practise, and you can retake after 3 more tasks its checks solved (`anyway` and self-checked ticks do not count). No timer.
-- **Your own tests** (habits phase 4). From intermediate (34) on, the tutor teaches tests: arrange → act → check, the language's test tool (`pytest`/`unittest`, `cargo test`, `go test`), one behaviour per test. Name a task's test after it (`test_p1_t1_uneven` in Python, `p1_t1_uneven` in Rust, `TestP1T1Uneven` in Go) and `:TutorDone` runs it in the sandbox after the task's checks pass. Both must pass: a failing test of yours is a try; a test that still passes when code plants a small bug in a throwaway copy of your file (`/` for `*`, `+ 1`, `True` for `False`) "passes even on a broken version" and does not tick. Only an assertion that fails counts, so a test that checks nothing cannot pass by crashing. If nothing in the code your test calls can be broken that way, the checks tick it and the note says so. Without an own test the checks alone prove the task; if you wrote tests but none is named for the task, the tick says how to name one.
-- **The pro score** (habits phase 5). From level 67, a task ticked from its checks shows a score out of 100 built only from facts code checks, each with its points: the checks pass (25), your own tests pass (25), they catch a broken version (25), and they make the task's `done when` calls (25 × covered/total). Three scores in a row averaging 90 or more suggest `/tutor-level` 10 higher, 40 or less 10 lower; only tasks with your own tests count, and you decide. After a pro tick the tutor gives at most three notes on design and naming, each at a `path:line`, with no points; `/tutor-notes off` stops them.
-- **Improve it** (habits phase 5). `/tutor-improve P1.T2` on a ticked Python task: the model writes edge-case checks and one timed large-input check, kept only when the hidden solution passes them (the timed one's limit is that solution's time × 3), and code measures your code now: longest function, nesting, branches, edge cases passing, the timed call's milliseconds. Make it better, in that file or in helper files it imports (they are measured and timed too); the task's checks must still pass. The checks are written in the background, so you can keep working (`/tutor-improve done` waits for them; `/new` while they are written drops them, so start it again there). `/tutor-improve done` measures again and names what got better and worse (speed counts at 2× either way, so timing noise never does); better on something and worse on nothing counts toward "optimizes". `/tutor-improve off` drops it. A task that names three or more functions, or imports a module you have not used before, counts toward "figures out complex problems" when it ticks without the tutor handing you the fix.
-- **The intermediate step-up** (habits phase 5, Python). On top of the talking test and the three coding parts: `stepup/test_solve.py`, your tests for the solve problem, which run against a hidden solution and must catch a broken version of it; and `stepup/improve.py`, working but clumsy code to make better while its checks keep passing. A pass suggests `/tutor-level 67`. The model writes that clumsy code; when its version does not work (asked twice), or it gives no improve-it task, one of six ready-made programs is used instead (each checked by the test suite to work and to be measurably improvable), so the part is never skipped or passed for free.
-- **A second reader** (habits phase 6, optional). `/tutor-checker <provider/model>` (for example `nvidia/z-ai/glm-5.3-flash`) has a second model read each held reply, after code's own checks passed, against this turn's rule; its "no: <reason>" is handled like a failed code check (the reply is written again, at most twice). It can only make replies stricter: a reply code rejected never reaches it, and when it errs, answers unclearly, or takes over three minutes, the reply is shown with a note that it went unread. A message you type while it reads gets the short safe note instead of a rewrite, and your message is answered next. Off by default; `/tutor-checker off`.
-- **Ask the tutor about an error** (habits phase 1). Right-click a line with an error and pick "Ask tutor about this error", or press `<leader>te`: the message, the line and its code go to the tutor as your question. The tutor no longer nudges on its own about an error that just sits there; you ask when you want help.
-- **Rust and Go checks** (2026-10-23). New Rust and Go projects get a `Cargo.toml` / `go.mod` and an empty `main`, so they build from the start, and task lines name each function's exact signature. `:TutorDone` calls your function through a hidden test (a `#[cfg(test)]` module or a `_test.go` file, only in the sandbox's throwaway copy) as well as running the program. A function not written yet says so; a parse error is a typo; a compile error inside the checked function is a try; a test that cannot call your function as written, or a compile error elsewhere, is no try but does not tick. In every language a **near-miss guard** tries rounded and one-character-slip answers against the checks and asks the model once for one more check when they would pass; a task still weak is marked in `spec/checks.md`.
-- **Every teaching reply is checked before you see it.** It shows "tutor is checking this reply…" while it is written; code checks it against this step (no code with your task's names before the fix, short enough, a question when it must ask, no talk about the tutor's machinery). A reply that fails is written again (at most twice), else you get a short safe note. The model's thinking stays hidden until the fix is allowed.
-- **Getting started.** A short conversation builds your profile (the model talks; the code keeps the checklist and makes the decisions). The tutor proposes one project targeting your weak or unknown concepts and writes `spec/design.md`, `spec/tasks.md`, `spec/requirements.md` with stable task ids, grouped into milestones when you learn first.
-- **Knowledge base.** Instructions, skills, and workflows map onto Pi's `AGENTS.md`, `SKILL.md`, and prompt templates. Official docs are fetched into skills per language; you can edit them, and `/tutor-learn` drafts a new skill from a finished stuck episode.
-- **Language packs** (Python, Rust, Go, TypeScript, Lua, JavaScript, plus the editor). Every turn carries a short
-  language card: the version installed here and the project's constraint (`pyproject.toml`,
-  `Cargo.toml`, `go.mod`, `package.json`, rockspec), formatter, naming, error style, layout, test
-  command, pitfalls, and the concept tags the tutor may record. An editor card covers the LazyVim
-  keys you need. JavaScript's version is Node's, so its card and its DevDocs reference are
-  Node's; `.jsx` buffers use it too, and `.tsx` buffers the TypeScript card. Skills per language: `tutor-<lang>-cookbook` (a plain step such as "count how often
-  each item appears" → the idiom, on an unrelated example, with bridge lines from the other
-  languages), `tutor-<lang>-expert` (patterns and review checklists; Python, Rust, Go and TypeScript
-  are adapted from [fullstack-dev-skills](https://github.com/Jeffallan/claude-skills) by Jeffallan,
-  MIT, licence kept in each folder) and `tutor-<lang>-ref` (`:TutorDocs`). The design recipe's Map
-  step uses the cookbook.
-
-## Layout
-
-| Path | What |
-|---|---|
-| `pi-tutor/` | Pi package: extension, bundled skills, prompt templates. Install with `pi install ./pi-tutor`. |
-| `nvim-tutor/` | Neovim plugin. Load with lazy.nvim `dir = "<repo>/nvim-tutor"`. |
-| `docs/superpowers/specs/` | Design specs. |
-| `docs/superpowers/plans/` | Implementation plans, one per milestone. |
+The tutor exists only in the Pi that the plugin starts (`PI_TUTOR=1`); a plain `pi` elsewhere is untouched. The
+model gets read-only tools (`read`, `grep`, `find`, `ls`, its two memory tools and context7's two docs tools)
+inside the project folder; `bash` stays off.
 
 ## Requirements
 
 - Neovim ≥ 0.11 with LazyVim
 - Node ≥ 22.19
-- Pi ≥ 1.0: `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
+- Pi 1.x (verified on 1.3): `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
 - A provider configured in Pi (`pi` then `/login`)
-
-## Tests
-
-- `cd pi-tutor && npm test` (unit + a real headless Neovim for the link tests)
-  Each run keeps every temp folder under one `lazycourse-test-<pid>` folder in `/tmp` and removes it at the end (a crashed run's folder goes on the next run).
-- `cd pi-tutor && npm run golden`: golden transcripts through the real `pi -p` and your configured
-  model (network; `GOLDEN_MODEL=provider/id` to try another, `GOLDEN_COLS=n` for the diagram width
-  your pane fits, default 67). Evidence of how well a model follows
-  the style, ladder and judgment rules; not part of `npm test`.
-- `cd pi-tutor && npm run cookbooks`: runs every cookbook example with the toolchains installed here
-  (TypeScript examples are also type-checked, Lua ones also run on LuaJIT); a missing toolchain is
-  skipped.
-- `cd pi-tutor && npm run lessons`: every lesson exercise and level task runs with the toolchains
-  installed here (in the sandbox when bubblewrap can start): its reference solution must pass and
-  its starter file must fail. Every lesson's text is checked for leftover markup and broken links,
-  and the Python excerpts we cut by hand run as doctests. Not part of `npm test`.
-- `cd pi-tutor && node scripts/vendor-lessons.ts <language>` re-vendors a language's lessons from
-  the pinned upstream commits (network); `python3 scripts/gap-lessons.py <sources> lessons` rewrites
-  the input and files lessons.
-- `cd pi-tutor && npm run upstream-diff`: compares the adapted expert skills with a
-  fullstack-dev-skills checkout (default `~/.claude/plugins/marketplaces/fullstack-dev-skills`).
-- `cd pi-tutor && SKILL_EVAL_WORKSPACE=<dir>/iteration-N SKILL_EVAL_BASELINE=<checkout without the
-  packs> npm run skill-evals`: skill-creator test runs, each request with and without the pack
-  skills through the real `pi -p`, written in skill-creator's layout for its benchmark and review
-  page.
-- `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
+- Optional: [bubblewrap](https://github.com/containers/bubblewrap) for the checks and exam sandbox (Linux; Arch:
+  `pacman -S bubblewrap`)
 
 ## Setup
 
-1. Install Pi and log in to a provider: `pi` then `/login`. Set `defaultModel` in
-   `~/.pi/agent/settings.json` to a model that provider serves.
+1. Install Pi and log in to a provider: `pi` then `/login`. Set `defaultModel` in `~/.pi/agent/settings.json` to a
+   model that provider serves.
 2. `cd pi-tutor && npm install && pi install "$(pwd)"`
 3. Add to your LazyVim config (`lua/plugins/tutor.lua`):
 
@@ -261,24 +51,186 @@ return {
 }
 ```
 
-The plugin sets its own keys: `<leader>tt` (open/close the tutor), `<leader>tr` (`:TutorRun`), `<leader>te`
-(ask about the error under the cursor) and `<leader>t?` (help: every command, in its own tab).
-
-4. `:Tutor` (or `<leader>tt`) opens Pi in a right split; type at Pi's prompt. `<Esc><Esc>` leaves terminal mode.
+The plugin sets its own keys: `<leader>tt` (open/close the tutor), `<leader>tr` (`:TutorRun`), `<leader>te` (ask about
+the error under the cursor) and `<leader>t?` (help: every command, in its own tab). Other options: `width` (the
+pane's share of the screen, default 0.45), `run_cmd` / `test_cmd` (instead of the README front matter),
+`test_timeout_ms` (default 60000), `pi_cmd`.
 
 ## First steps
 
 1. `mkdir -p ~/lazycourse && cd ~/lazycourse && nvim`. In `~/lazycourse` or a tutor project, Neovim opens the tutor
-   by itself; anywhere else it opens plain Neovim, and a brand-new learner gets a one-line hint about `:TutorTour`.
-2. New to Neovim? `:TutorTour` is one guided tour: the Neovim basics you need (cut down from Neovim's own tutor), then
-   the tutor (the pane, `<Esc><Esc>`, `<C-w>h`, `:TutorRun`, `<leader>te`, help). Code checks each step; the tutor
-   answers questions. It remembers where you stopped; `:TutorTour restart` starts over, `:TutorTour off` stops.
-3. Then tell the tutor what you'd like to learn (or `/tutor-start`): a short talk, a level, then your own project idea —
-   exactly that idea at your level, or a smaller version of it when it is too big.
+   by itself (rooted at the project even from a subfolder); anywhere else it opens plain Neovim, and a brand-new
+   learner gets a one-line hint about `:TutorTour`. `:Tutor` opens the pane anywhere.
+2. New to Neovim? `:TutorTour` is one guided tour in 18 steps: the Neovim basics you need (cut down from Neovim's own
+   tutor), then the tutor (the pane, `<Esc><Esc>`, `<C-w>h`, `:TutorRun`, `<leader>te`, help). Code checks each step
+   in the editor; the tutor only answers your questions about it. It remembers where you stopped:
+   `:TutorTour restart` starts over, `:TutorTour off` stops.
+3. Tell the tutor what you'd like to learn (or type `/tutor-start`): a short talk, a level, then your own project
+   idea — exactly that idea at your level, or a smaller version of it when it is too big.
 
 **Where am I, what next?** Every session opens with a three-line card (where you are, the next step, where help is),
 and the tutor's box always ends with a `next: …` line. Both come from code, never from the model. `<leader>t?`,
-`:TutorHelp` or `/tutor-help` opens every command, fully explained, in its own tab (`q` closes it).
+`:TutorHelp` or `/tutor-help` opens every command, fully explained, in its own tab (`q` closes it). Inside the pane
+you type to the tutor; `<Esc><Esc>` gives Neovim back, and `<C-w>h` moves to your code. A new line in Pi's input is
+**Ctrl+J** (or Shift+Enter).
+
+## A course, start to finish
+
+```
+:TutorTour (optional) ─▶ getting started ─▶ your project ─▶ build now ──▶ tasks: recipe ─▶ run ─▶ :TutorDone
+                         talk · level       spec/ plan        or                  ▲                    │
+                                                            learn first ─▶ lessons ┘      habits ─▶ step-up ─▶ next band
+                                                                                         exams any time (:TutorExam)
+```
+
+### Getting started
+
+- `/tutor-start [language]` is a conversation, not a form. It asks how long you have been coding and what you know,
+  recommends Python (with its reasons) if you know no language, or asks you to rate yourself 1–10 in the one you
+  named: below 5 it asks a couple of short technical questions; 5 and above it gives a small task
+  (`~/lazycourse/.checks/<language>/…`, open it with `:e`, then `/tutor-start check`) whose real tests set your
+  starting level, with no grade. The model talks; code keeps the checklist, asks anything still missing itself after a
+  few exchanges, and makes the decisions.
+- It gives its read of you; you accept or type another level, and the level shows at once.
+- **Your idea is the project.** If you named one, the project is exactly that idea (your words as the title), sized
+  to your level; an idea too big for your level gets a smaller version of the same idea, and "Show me something
+  else" frees the tutor to suggest another. Without an idea it suggests one project aimed at your weak or unknown
+  concepts.
+- It makes the folder (`~/lazycourse/<language>-<project>`, or one you choose), moves the editor and tutor there, and
+  asks: build now, or learn the ideas first? Meanwhile the plan is written in the background: `spec/design.md`,
+  `spec/requirements.md`, `spec/tasks.md` with stable task ids (`P1.T1`), grouped into milestones when you learn
+  first, plus the README front matter (`run:`, `test:`) — the README you have open updates by itself (with unsaved
+  edits, you are told how to see the new one instead). New Rust and Go projects get a `Cargo.toml` / `go.mod` and an
+  empty `main` so they build from the start; Lua projects get a `.luarc.json` naming the Lua you run.
+- A second `/tutor-start` is a short check-in. `/tutor-start off` pauses; the next one picks up where you left off;
+  `/tutor-start spec` writes the plan again if it failed.
+
+### Learn first: lessons
+
+- `/tutor-lesson next|check|skip|review|off` drives the learn-first path: at most three concepts per round, then a
+  milestone of your project that uses only those, then the next round. `next` writes the exercise into
+  `learn/<concept>/`, `check` runs its tests in the sandbox (two failures and the tutor takes a smaller step), `skip`
+  marks a concept you know, `review` brings back one that is due. What you learn is scheduled with spaced repetition
+  (FSRS), so concepts come back for a quick review when you are about to forget them.
+- Lessons come from established, openly licensed courses, never written by the model: Exercism (MIT) for every
+  language, rustlings (MIT) for Rust, and for reading input and files, excerpts from the Python tutorial (PSF), Go by
+  Example (CC BY 3.0), the Node.js docs, the Rust Book and the Lua manual, with our own tested exercises. Each
+  `pi-tutor/lessons/<language>/SOURCES.md` lists sources, pinned commits, licences and anything dropped or fixed.
+  TypeScript and Lua lessons are **thin**: neither has a beginner syllabus upstream (TypeScript reuses the JavaScript
+  exercises, run as `.ts`; Lua has three concept lessons plus input and files).
+
+### Working on a task
+
+- **The design recipe is the beginner default.** At level 0–33 every task starts the six-step recipe by itself (Find →
+  Shape → Examples → Steps → Map → Build); at any level `/tutor-plan P1.T1` starts it. Saying "skip" (or "just let me
+  code", or `/tutor-plan next`) moves on; `/tutor-plan off` ends it for this task; neither counts as a try. "I don't
+  understand" gets the step explained in one sentence. A step moves on when your own message has its artifact, in
+  plain words or code form: the task named, what goes in and what comes back, two or more cases with an edge case, the
+  steps in order, then each step matched to its construct. The tutor shows each step on an unrelated example and never
+  fills yours in; your Examples rows become checks for the task.
+- **Running.** `:TutorRun` (`<leader>tr`) runs the README's `run:` command in a split below the editor: you see the
+  output and type its input there; `q` closes the split once it has ended; `:TutorRun stop`, closing the split or
+  Ctrl+C stops it and says "run stopped" (never a failed try). `:TutorRun test` runs the `test:` command hidden, with
+  no input, stopped after 60 s; a stopped test says it timed out, the tutor is told, and it is never a failed try.
+  When the tutor saw you finish a task, the next passing run ticks it in `spec/tasks.md` (never while the file has
+  unsaved edits).
+- **Checks prove a task; the tutor never ticks one.** In the background the model writes checks in two strict forms,
+  `check P1.T1: split_amount(50, 3) == 16.666666666666668` and `run P1.T2: stdin "52.8" -> stdout contains "17.60"`,
+  and, in a separate request that never sees them, a hidden reference solution. A check the reference passes is
+  trusted; one it fails is shown as *unverified* and never blocks you. They are listed in `spec/checks.md`.
+  `/tutor-done P1.T1` (`:TutorDone`) runs them against your code in a throwaway sandbox (your files are never
+  changed, 20 s per check) and ticks the task with its open subtasks when they pass; a failing check says what it got
+  and expected and counts as a try. A task with no checks, or no sandbox here, ticks as self-checked;
+  `/tutor-done P1.T1 anyway` ticks it as yours. In Rust and Go your function is also called through a hidden test
+  (only in the sandbox copy). A **near-miss guard** tries rounded and one-character-slip answers against the checks
+  and asks for one more check when they would pass.
+- **Help climbs with your tries.** Only graded tries count: a failed check from `/tutor-done`, or a `:TutorRun` that
+  fails with anything but a syntax error. A typo run, running unchanged code again, or chatting never moves help. The
+  steps: teach (an unrelated example) → a small hint → why it is wrong → "what were you thinking?" → only the stuck
+  line. Beginners get the line on try 4, intermediate on try 6; at pro it comes only when you ask with `/tutor-fix`.
+  The widget shows `try N`.
+- **Ask about an error.** Right-click a line with an error and pick "Ask tutor about this error", or press
+  `<leader>te`: the message, the line and its code go to the tutor as your question. The tutor does not nudge on its
+  own about an error that just sits there; it does speak up after a failed run, a long pause, or rewriting the same
+  lines.
+- **Every teaching reply is checked before you see it.** While it is written you see "tutor is checking this reply…";
+  code holds it to this step's rules (no code with your task's names before the fix, short enough, a question when it
+  must ask, no talk about the tutor's machinery). A reply that fails is written again (at most twice), else you get a
+  short safe note. A reply with nothing for you to read (the answer stayed in the model's hidden thinking) is asked
+  once more ("tutor is writing its answer…"), then you get an honest "I lost my answer — please ask again". Every
+  reply follows one shape: **What's happening** (a narrow diagram), **Why**, **Example**, **What to try**, **In short**.
+- The model's thinking stays hidden (`/tutor-thinking show` to read it; Pi's click-to-expand does nothing while it is
+  hidden). The tutor's own messages to the model are hidden too: you never see them as yours.
+
+### Your level and habits
+
+- **The level (0–100)** is per language and sets the band: beginner (0–33) explains structure and sees your whole
+  buffer; intermediate (34–66) names concepts and points at docs; pro (67–100) gives hints only, never code.
+  `/tutor-level` sets it by hand.
+- **Habits move it.** Code records habits from what it sees, never from the model's opinion: tries that get closer,
+  questions after which your next try improves, reading an error before asking (right-click after it has been on
+  screen 5 s), small edits between runs, fixing a bug before the tutor hands you the line, your own recipe steps
+  turning into passing code. Each habit goes not yet → showing → solid (5 good across 2 projects). As your band's
+  habits turn solid the level rises inside the band and says why ("level 10 → 14: you ran small pieces often"); it
+  never crosses a band edge by itself, and drops 3 only on a streak of tasks that needed the handed line.
+  `/tutor-progress` lists your habits, hint use over time, exam scores and strong/shaky/weak concepts.
+- **The step-up** to the next band, once your band's habits are solid (offered at most once a day). `/tutor-step-up`
+  starts it. Part 1, the talking test: talk the problem through in your own words, then numbered steps and one
+  `pieces:` line compared with a hidden solution. Part 2, the coding test in `stepup/`: solve a problem that needs a
+  module you have not used, fix a program with one planted bug, and build your own plan; the intermediate step-up adds
+  your own tests for the solve problem (they must catch a broken version of a hidden solution) and clumsy working code
+  to improve. `/tutor-step-up check` shows each part's checks, `/tutor-step-up submit` decides. A pass tells you to
+  type the next band's level yourself; the tutor never moves you. Python, Lua, Rust and Go.
+- **Your own tests** (from 34). The tutor teaches arrange → act → check with the language's test tool. Name a task's
+  test after it (`test_p1_t1_uneven`, `p1_t1_uneven`, `TestP1T1Uneven`) and `/tutor-done` runs it after the checks
+  pass; a test that still passes when code plants a small bug in a throwaway copy of your file does not tick.
+- **The pro score** (from 67): a task ticked from its checks scores out of 100 from facts code checks (checks pass,
+  your tests pass, they catch a broken version, they cover the task's `done when` calls), and three scores in a row
+  can suggest a level change — you decide. After a pro tick the tutor gives at most three design and naming notes
+  (`/tutor-notes off` stops them).
+- **Improve it.** `/tutor-improve P1.T2` on a ticked Python task: edge-case and timed checks (kept only when the hidden
+  solution passes them) and measurements of your code now; `/tutor-improve done` measures again and names what got
+  better and worse.
+
+### Exams
+
+- `/tutor-exam [small|medium] [topic]` writes a timed exam into `exam/<nn>-<name>/`: `brief.md` (task, requirements,
+  examples, grading), a starter file and example tests, run once before you see them so a broken exam is replaced.
+  The widget shows the time left; going over is recorded as late and still graded. Until you submit, hints stay at a
+  question or a concept. `/tutor-exam check` runs the examples; `/tutor-exam off` abandons it.
+- `/tutor-submit` runs the tests, checks each requirement against your code (`file:line` evidence) and writes
+  `grade.md`: score /100 (80 requirements, 20 idiomatic code), the test output, three next fixes and an "In short".
+
+### The sandbox
+
+Every run of model-written tests (task checks, lessons, exam tests, step-up checks) happens in a bubblewrap sandbox:
+the filesystem is read-only and the tests work on a throwaway copy; your home, `/tmp`, `/run` (Neovim, agent, Docker
+and system-bus sockets), `/mnt`, `/media` and `/srv` are hidden; there is no network; only `PATH`, `HOME` and `LANG`
+pass through; toolchains in your home (rustup, nvm, pyenv) stay visible read-only. With a systemd user session each run
+also gets kernel limits (4 GB of memory, 1024 processes and threads). Rust keeps one build folder per project in the
+tutor's cache. `/tutor-exam sandbox` shows whether it can start; `/tutor-exam sandbox off` runs exam tests as you.
+`:TutorRun` runs your own commands, so it is never sandboxed.
+
+### What the tutor knows and remembers
+
+- **Language packs** (Python, Rust, Go, TypeScript, Lua, JavaScript, plus the editor): every turn carries a short card —
+  the version installed here and the project's constraint, formatter, naming, error style, layout, test command,
+  pitfalls and the concept tags the tutor may record. Skills per language: `tutor-<lang>-cookbook` (a plain step →
+  the idiom, on an unrelated example), `tutor-<lang>-expert` (patterns and review checklists; Python, Rust, Go and
+  TypeScript adapted from [fullstack-dev-skills](https://github.com/Jeffallan/claude-skills) by Jeffallan, MIT) and
+  `tutor-<lang>-ref`: the official docs from DevDocs at your installed version (`/tutor-docs` re-fetches; pin a
+  version in `~/.config/nvim-tutor/sources.json`, e.g. `{ "python": "python~3.12" }`).
+- **Memory.** When you say how you learn, what you know or how you want to be taught, the tutor saves one short fact
+  (never secrets); later sessions see them. `/tutor-memory` lists them; pick one to forget it.
+- **Feedback.** `/tutor-feedback too-long|too-vague|too-much-help|good` adjusts its style (and help level), per
+  language inside a project until you say `good`.
+- `/tutor-learn` drafts a skill from your last finished stuck episode; edit and submit to keep it, Esc to discard.
+- `/tutor-architect [question]` switches to an architecture professor (components, data flow, trade-offs, no code)
+  until `off`. `/tutor-checker <provider/model>` adds an optional second model that reads each held reply after
+  code's checks passed; it can only make replies stricter.
+
+The widget's second line says `outside nvim` when Pi runs without Neovim and `nvim closed` when the editor exited;
+it still shows the tutor's state.
 
 ## Commands
 
@@ -335,6 +287,43 @@ or from here.
 - `/tutor-checker <provider/model> | off` (tutor pane): a second model checks each reply
 - `/reload` (tutor pane) or `:TutorReload` (editor): reload the tutor extension
 
+## Files and data
+
+| Where | What |
+|---|---|
+| `~/.local/share/nvim-tutor/profile.sqlite` | your profile: levels, habits, projects, memories, exam scores, settings (`PI_TUTOR_PROFILE` overrides) |
+| `~/.local/share/nvim-tutor/projects.json` | your project folders, read by Neovim at start to decide whether to open the tutor |
+| `~/lazycourse/<language>-<project>/` | a project: `README.md` (front matter `run:` / `test:`), `AGENTS.md`, `spec/`, `src/`, `learn/`, `exam/`, `stepup/` |
+| `~/lazycourse/.checks/` | the getting-started level tasks |
+| `~/lazycourse/.tour/` | the tour's practice files and progress (`state.json`) |
+| `~/.pi/agent/skills/tutor-<lang>-ref` | fetched official docs |
+
+## Tests
+
+- `cd pi-tutor && npm test` (unit tests, plus a real headless Neovim for the link tests) and `npm run typecheck`.
+  Each run keeps its temp folders under one `lazycourse-test-<pid>` folder in `/tmp` and removes it at the end.
+- `cd nvim-tutor && nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init='tests/minimal_init.lua'}"`
+- `cd pi-tutor && npm run golden`: golden transcripts through the real `pi -p` and your configured model (network;
+  `GOLDEN_MODEL=provider/id` to try another, `GOLDEN_COLS=n` for your pane width, default 67). Evidence of how well a
+  model follows the rules; not part of `npm test`.
+- `cd pi-tutor && npm run cookbooks`: runs every cookbook example with the toolchains installed here.
+- `cd pi-tutor && npm run lessons`: every lesson exercise and level task runs (in the sandbox when it can start): its
+  reference must pass and its starter must fail; lesson texts are checked for leftover markup and broken links.
+- `cd pi-tutor && node scripts/vendor-lessons.ts <language>` re-vendors a language's lessons from the pinned upstream
+  commits (network); `python3 scripts/gap-lessons.py <sources> lessons` rewrites the input and files lessons.
+- `cd pi-tutor && npm run upstream-diff`: compares the adapted expert skills with a fullstack-dev-skills checkout.
+- `cd pi-tutor && SKILL_EVAL_WORKSPACE=<dir>/iteration-N SKILL_EVAL_BASELINE=<checkout without the packs> npm run skill-evals`:
+  skill-creator test runs, each request with and without the pack skills.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `pi-tutor/` | Pi package: the extension (`extensions/tutor/`), skills, prompts, packs, lessons, `commands.json`. `PI_SURFACE.md` lists every Pi and Neovim API it depends on. |
+| `nvim-tutor/` | Neovim plugin: the pane (`term.lua`), commands and start-up (`init.lua`), run split (`runpane.lua`), help tab (`help.lua`), tour (`tour.lua`, `tour/steps.lua`). |
+| `docs/superpowers/specs/` | Design specs, from the first design ([`2026-10-07-nvim-tutor-design.md`](docs/superpowers/specs/2026-10-07-nvim-tutor-design.md)) to the tour and wayfinding ([`2026-11-08-wayfinding-and-tour-design.md`](docs/superpowers/specs/2026-11-08-wayfinding-and-tour-design.md)). |
+| `docs/superpowers/plans/` | Implementation plans, one per milestone. |
+
 ## Docs lookup with context7 (optional)
 
 The tutor answers from the offline DevDocs copy of your language's docs first. To let it also look up
@@ -362,3 +351,11 @@ docs DevDocs lacks (third-party libraries such as `requests` or `serde`), add co
 ## Upgrading Pi
 
 `pi-tutor/PI_SURFACE.md` lists every Pi API this project touches and the version it was verified against. To upgrade: read Pi's CHANGELOG "Breaking Changes" since that version, update the file, bump `peerDependencies` in `pi-tutor/package.json`, and run `npm run test:contract`.
+
+## Credits
+
+- The tour's Neovim part is cut down and reworded from Neovim's own tutor (`vim-01/02-beginner`, by Michael C. Pierce
+  and Robert K. Ware, modified by Bram Moolenaar, Felipe Morales and Rory Nesbitt), under the Vim license:
+  `nvim-tutor/tour/LICENSE-vim.txt`.
+- Lessons: Exercism, rustlings, the Python tutorial, Go by Example, the Node.js docs, the Rust Book and the Lua manual
+  (see each `pi-tutor/lessons/<language>/SOURCES.md`). Expert skills adapted from fullstack-dev-skills (MIT).
