@@ -216,6 +216,7 @@ function M.ask_error()
   local code = vim.trim(vim.api.nvim_get_current_line())
   local msg = d[1].message:gsub("%s*\n%s*", " ")
   slash(string.format("[ask-error] %s:%d: %s | code: %s", rel, row, msg, code))()
+  pcall(function() require("tutor.tour").event("asked_error") end)
 end
 
 --- Re-root the tutor at `dir`: cd there, open `file` in the editor window, restart Pi with cwd = dir.

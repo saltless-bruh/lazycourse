@@ -284,6 +284,8 @@ export default function (pi: ExtensionAPI): void {
   }
 
   let lastNow = "";
+  /** Wayfinding spec §8.3: the tour's current step, from Neovim's `tour` payloads; null when no tour runs. */
+  let tourState: { step: number; total: number; title: string } | null = null;
   /** Wayfinding spec 2026-11-08 §7: what decides the next step, read from the extension's own state. */
   function wayInput(): WayInput {
     const o = onboarding;
@@ -295,7 +297,7 @@ export default function (pi: ExtensionAPI): void {
       else { try { passingTask = openTaskIds(readFileSync(join(project.path, "spec", "tasks.md"), "utf8"))[0] ?? null; } catch { passingTask = null; } }
     }
     return {
-      firstRun: firstRun(), tour: null,
+      firstRun: firstRun(), tour: tourState,
       onboarding: shown ? { stage: o!.stage, paused: !!o!.paused, levelTaskOpen: o!.stage === "check" && o!.levelCheck?.passed === null,
         dialog: (o!.stage === "read" && o!.presented === "read") || (o!.stage === "project" && o!.presented === "project"), elsewhere } : null,
       spec: specStatus, project: !!project,
@@ -462,6 +464,18 @@ export default function (pi: ExtensionAPI): void {
     }
   }
 
+  /** A step of the tour moved (or it ended): show it, record that the tour was seen, repaint. Code never the model. */
+  function onTour(p: Extract<TutorPayload, { kind: "tour" }>) {
+    const before = tourState;
+    tourState = p.status === "running" ? { step: p.step, total: p.total, title: p.title } : null;
+    if (profile) { const pr = profile; profileWrite(() => { if (!pr.setting("tour")) pr.setSetting("tour", "seen"); }); }
+    const card = p.status === "done" ? "tour done — tell me what you'd like to learn, or type /tutor-start"
+      : p.status === "running" ? `tour ${p.step}/${p.total}: ${p.title}` : null;
+    const same = before && tourState && before.step === tourState.step;
+    if (card && !same) pi.sendMessage({ customType: "tutor_card", display: true, content: card }, { triggerTurn: false });
+    paint();
+  }
+
   function onPayload(p: TutorPayload) {
     switch (p.kind) {
       case "diagnostics":
@@ -469,6 +483,7 @@ export default function (pi: ExtensionAPI): void {
         break;
       case "idle": signal = `idle ${Math.round(p.since_ms / 1000)}s`; break;
       case "churn": signal = `churning lines ${p.region[0]}-${p.region[1]}`; break;
+      case "tour": { onTour(p); return; }
       case "run_output": {
         signal = p.code === 0 ? "run passed" : p.timed_out ? "tests timed out" : `run failed (exit ${p.code})`;
         // Final review I5: a :TutorRun run is a run too, for small runs.
@@ -565,7 +580,7 @@ export default function (pi: ExtensionAPI): void {
         onDisconnect: () => { if (mine === null || link !== mine) return; state.connected = false; link = null; if (closing) return; state.lost = true; paint(); },
       });
       state.connected = link !== null;
-      if (link) state.lost = false;
+      if (link) { state.lost = false; link.tourHello().catch(() => {}); }
     }
     if (!tick) {
       tick = setInterval(() => {
@@ -621,7 +636,9 @@ export default function (pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event) => {
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
-    if (event.messageType === "user" && firstRun() && !event.prompt.trim().startsWith("/")) {
+    // Wayfinding spec §8.3: during the tour a question is about the tour, not the onboarding's first answer.
+    if (event.messageType === "user" && tourState && !event.prompt.trim().startsWith("/")) link?.tourEvent("asked").catch(() => {});
+    if (event.messageType === "user" && firstRun() && !tourState && !event.prompt.trim().startsWith("/")) {
       saveOnboarding(newOnboarding(null));
       onboardingHere = true;
     }
@@ -639,6 +656,7 @@ export default function (pi: ExtensionAPI): void {
     const role = roleNamed(activeRole);
     event.systemPromptOptions.sections["tutor"] = tutorPrompt(band, { role: rolePrompt(role), ladder: role.ladder });
     if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
+    if (tourState) event.systemPromptOptions.sections["tutor_tour"] = `${systemText("tour")}\n[tour] the learner is on step ${tourState.step}/${tourState.total}: ${tourState.title}`;
     // Pi 1.2+: runs started by an extension's custom message (`messageType: "custom"`) carry no prompt; our own
     // hidden nudge's text stands in, so every "[tutor]" check below still knows the turn is the tutor's.
     const prompt = promptOf(event);

@@ -159,6 +159,13 @@ Re-verify every line when bumping versions.
 - Neovim RPC, wayfinding spec 2026-11-08 §8.2: `nvim.setVar("tutor_now", { where, next })` (node-client
   `Neovim.setVar` → `nvim_set_var`) from `paint()`, only when the value changed; `nvim.lua('… require("tutor.help").open()')`
   in a `pcall` for `/tutor-help` (false when the plugin is not on the runtimepath). Probed headless with Neovim 0.12.6.
+- Neovim RPC, wayfinding spec 2026-11-08 §8.3 (the tour): payload `{ kind: "tour", step, total, title, status }`
+  pushed by nvim-tutor's `tour.lua` over the existing `rpcnotify(vim.g.tutor_chan, "tutor", …)`; Pi calls
+  `nvim.lua('pcall(… require("tutor.tour").event(n))')` when the learner asks something during the tour, and
+  `… .announce()` right after connecting (the Pi the tour's folder switch restarted missed the first payload).
+  Tour autocmds (Lua side): TermEnter/TermLeave in the tutor pane, WinEnter, TermClose and WinClosed of the run
+  split (`vim.b.tutor_run`/`vim.w.tutor_run`), BufWritePost, CmdlineLeave (`getcmdtype() == "/"`), BufEnter in
+  ~/lazycourse/.tour, `vim.diagnostic.set` on hello.lua for the ask-error step. Probed headless on Neovim 0.12.6.
 - `pi.registerMessageRenderer(customType, (message, options, theme) => Component | undefined)` (types.d.ts:1250,
   `MessageRenderer` at :1169; Pi 1.3.0): the `tutor_card` session card renders as `new Text(content, 1, 0)` from
   `@earendil-works/pi-tui` (`components/text.d.ts`: `constructor(text?, paddingX?, paddingY?, customBgFn?)`), so it

@@ -78,6 +78,7 @@ function M.open()
   pcall(vim.api.nvim_buf_set_name, buf, "tutor-help")
   vim.keymap.set("n", "q", "<Cmd>tabclose<CR>", { buffer = buf, nowait = true, desc = "close the tutor help" })
   tab_buf = buf
+  pcall(function() require("tutor.tour").event("help_opened") end)
   return buf
 end
 

@@ -39,7 +39,9 @@ export type TutorPayload =
   | { kind: "diagnostics"; buf: number; path: string; errors: number; warnings: number; first?: { line: number; msg: string } }
   | { kind: "idle"; buf: number; path: string; line: number; since_ms: number }
   | { kind: "churn"; buf: number; path: string; region: [number, number]; edits: number }
-  | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string; timed_out?: boolean };
+  | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string; timed_out?: boolean }
+  /** Wayfinding spec §8.3: nvim-tutor's tour, checked in Neovim; `step` is the one to do now. */
+  | { kind: "tour"; step: number; total: number; title: string; status: "running" | "done" | "off" };
 
 export interface EditorSnapshot {
   path: string;
@@ -235,6 +237,16 @@ export class NvimLink {
   }
 
   /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */
+  /** Wayfinding spec §8.3: tell the tour an event only Pi sees (the learner asked the tutor something). */
+  async tourEvent(name: string): Promise<void> {
+    await this.timed(this.raw.lua(`local n = ... pcall(function() require("tutor.tour").event(n) end)`, [name]), 2000, "tour");
+  }
+
+  /** Ask a running tour to tell its step again: this Pi may have started after the tour's folder switch. */
+  async tourHello(): Promise<void> {
+    await this.timed(this.raw.lua(`pcall(function() require("tutor.tour").announce() end)`), 2000, "tour");
+  }
+
   /** Wayfinding spec §8.2: open nvim-tutor's help tab; false when the plugin is not loaded in this Neovim. */
   async openHelp(): Promise<boolean> {
     try {

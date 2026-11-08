@@ -157,8 +157,45 @@ local function attach(buf)
     if vim.fn.getcmdtype() == "/" and not vim.v.event.abort then M.event("searched") end
   end })
   vim.api.nvim_create_autocmd("BufEnter", { group = g, pattern = M.dir() .. "/*", callback = function(a)
-    if vim.fs.basename(a.file) ~= "tour.txt" then M.event("opened") end
+    local name = vim.fs.basename(a.file)
+    if name == "hello.lua" then M.practice_error(a.buf) end
+    if name ~= "tour.txt" then M.event("opened") end
   end })
+  -- Part 2: the tutor pane, the run split.
+  local function in_pane()
+    local t = require("tutor").state.term
+    return t and t:bufnr() == vim.api.nvim_get_current_buf()
+  end
+  vim.api.nvim_create_autocmd("TermEnter", { group = g, callback = function() if in_pane() then M.event("pane_open") end end })
+  vim.api.nvim_create_autocmd("TermLeave", { group = g, callback = function() if in_pane() then M.event("pane_left") end end })
+  vim.api.nvim_create_autocmd("WinEnter", { group = g, callback = function()
+    if vim.bo.buftype == "" then M.event("editor_back") end
+  end })
+  vim.api.nvim_create_autocmd("TermClose", { group = g, callback = function(a)
+    if vim.b[a.buf].tutor_run then M.event("run_done") end
+  end })
+  vim.api.nvim_create_autocmd("WinClosed", { group = g, callback = function(a)
+    local w = tonumber(a.match)
+    local ok, b = pcall(vim.api.nvim_win_get_buf, w)
+    if ok and (vim.b[b].tutor_run or vim.w[w].tutor_run) then M.event("run_closed") end
+  end })
+end
+
+local ERR_NS = vim.api.nvim_create_namespace("tutor.tour.error")
+--- The ask-error step's own error mark on hello.lua line 2, so it never depends on a language server.
+function M.practice_error(buf)
+  local st = M.state()
+  if st.status ~= "running" or M.steps()[st.step].check.name ~= "asked_error" then return end
+  vim.diagnostic.set(ERR_NS, buf, { {
+    lnum = 1, col = 0, severity = vim.diagnostic.severity.ERROR, source = "tour",
+    message = "practice error from the tour: press <leader>te to ask the tutor about this line",
+  } })
+end
+
+--- Tell the tutor a running tour's step again (the Pi that the tour's folder switch restarted missed it).
+function M.announce()
+  local st = M.state()
+  if st.status == "running" then tell(st) end
 end
 
 --- Start or resume the tour (`restart` starts over at step 1); opens tour.txt at the current step.

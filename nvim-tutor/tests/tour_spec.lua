@@ -125,4 +125,94 @@ describe("tutor.tour", function()
       if s.check.kind == "lines" then assert.truthy(#s.practice > 0, i) end
     end
   end)
+
+  -- Part 2: the tutor. Steps pass on the editor's own events (or Pi's "asked"), in order.
+  local function advance_to(name)
+    local tour = require("tutor.tour")
+    for _ = 1, #tour.steps() do
+      local c = tour.steps()[tour.state().step].check
+      if c.kind == "event" and c.name == name then return tour.state().step end
+      if c.kind == "lines" then
+        local f = tour.dir() .. "/tour.txt"
+        if vim.api.nvim_buf_get_name(0) ~= f then vim.cmd.edit(vim.fn.fnameescape(f)) end
+        set_practice(tour.state().step, c.expect)
+      else tour.event(c.name) end
+    end
+    error("no step " .. name)
+  end
+
+  it("Part 2 has the pane, asking, running, the error and help steps, in that order", function()
+    local names = {}
+    for _, st in ipairs(require("tutor.tour").steps()) do
+      if st.part == 2 then table.insert(names, st.check.name) end
+    end
+    assert.same({ "pane_open", "asked", "pane_left", "editor_back", "run_done", "run_closed", "asked_error", "help_opened" }, names)
+  end)
+
+  it("each Part 2 event passes only its own step", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    local n = advance_to("pane_open")
+    tour.event("pane_left"); assert.equals(n, tour.state().step)
+    tour.event("pane_open"); assert.equals(n + 1, tour.state().step)
+  end)
+
+  it("entering and leaving the tutor pane's terminal mode are the pane steps", function()
+    local tutor, tour = require("tutor"), require("tutor.tour")
+    tour.start()
+    local n = advance_to("pane_open")
+    local tw = vim.fn.win_findbuf(tutor.state.term:bufnr())[1]
+    vim.api.nvim_set_current_win(tw)
+    vim.api.nvim_exec_autocmds("TermEnter", {})
+    assert.equals(n + 1, tour.state().step)
+    tour.event("asked")
+    vim.api.nvim_exec_autocmds("TermLeave", {})
+    assert.equals(n + 3, tour.state().step)
+    vim.cmd("wincmd p")
+    if vim.bo.buftype ~= "" then vim.cmd("wincmd h") end
+    vim.api.nvim_exec_autocmds("WinEnter", {})
+    assert.equals(n + 4, tour.state().step)
+  end)
+
+  it("a run that ends, then its split closing, are the run steps", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    local n = advance_to("run_done")
+    vim.cmd("botright split | enew")
+    local b, w = vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win()
+    vim.b[b].tutor_run = true
+    vim.api.nvim_exec_autocmds("TermClose", { buffer = b })
+    assert.equals(n + 1, tour.state().step)
+    vim.api.nvim_win_close(w, true)
+    assert.equals(n + 2, tour.state().step)
+  end)
+
+  it("the ask-error step works with no language server", function()
+    local tutor, tour = require("tutor"), require("tutor.tour")
+    tour.start()
+    local n = advance_to("asked_error")
+    vim.cmd.edit(vim.fn.fnameescape(tour.dir() .. "/hello.lua"))
+    assert.equals(1, #vim.diagnostic.get(0, { lnum = 1 }))
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    tutor.ask_error()
+    assert.equals(n + 1, tour.state().step)
+  end)
+
+  it("opening help is the last step, and the tour is then done", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    advance_to("help_opened")
+    require("tutor.help").open()
+    assert.equals("done", tour.state().status)
+    assert.same("done", payloads[#payloads].status)
+  end)
+
+  it("announce re-tells a running tour (a restarted Pi missed it)", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    payloads = {}
+    tour.announce()
+    assert.equals(1, #payloads)
+    assert.equals("running", payloads[1].status)
+  end)
 end)

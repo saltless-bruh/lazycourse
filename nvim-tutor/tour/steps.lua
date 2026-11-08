@@ -107,4 +107,87 @@ return {
     },
     check = { kind = "event", name = "opened" },
   },
+  -- Part 2: the tutor.
+  {
+    part = 2,
+    title = "Open the tutor pane",
+    text = {
+      "The tutor lives in a pane on the right. <leader>tt opens or closes it (<leader> is the Space key:",
+      "press Space, then t, then t). Inside it you are in TERMINAL mode: what you type goes to the tutor.",
+      "",
+      "Do it: press <leader>tt (or type :Tutor), then click or move into the pane so you can type.",
+    },
+    check = { kind = "event", name = "pane_open" },
+  },
+  {
+    part = 2,
+    title = "Ask the tutor something",
+    text = {
+      "Type a question at the tutor's prompt and press <Enter>, for example: what is normal mode?",
+      "It answers with hints and questions, not finished code. Commands for it start with / (like /tutor-start).",
+    },
+    check = { kind = "event", name = "asked" },
+  },
+  {
+    part = 2,
+    title = "Leave the pane: <Esc><Esc>",
+    text = {
+      "To stop typing into the tutor, press <Esc> twice. That gives you Neovim's NORMAL mode back in the pane.",
+    },
+    check = { kind = "event", name = "pane_left" },
+  },
+  {
+    part = 2,
+    title = "Back to your code: Ctrl-w h",
+    text = {
+      "Ctrl-w then h moves to the window on the left (your code); Ctrl-w then l moves right, to the tutor.",
+      "",
+      "Do it: after <Esc><Esc>, press Ctrl-w then h.",
+    },
+    check = { kind = "event", name = "editor_back" },
+  },
+  {
+    part = 2,
+    title = "Run a program: :TutorRun",
+    text = {
+      ":TutorRun runs your project's program in a split below (<leader>tr does the same). You see its output",
+      "there and type its input there. This folder's program is hello.lua; it asks your name.",
+      "",
+      "Do it: type :TutorRun and press <Enter>, then type your name in the split and press <Enter>.",
+    },
+    check = { kind = "event", name = "run_done" },
+  },
+  {
+    part = 2,
+    title = "Close the run split: q",
+    text = {
+      "When the program has ended, press q in the run split to close it.",
+      "(:TutorRun test runs your project's tests instead; :TutorRun stop stops a program that runs too long.)",
+    },
+    check = { kind = "event", name = "run_closed" },
+  },
+  {
+    part = 2,
+    title = "Ask about an error: <leader>te",
+    text = {
+      "On a line with an error, <leader>te (or right-click, \"Ask tutor about this error\") sends the error and",
+      "the line to the tutor as your question.",
+      "",
+      "Do it: open hello.lua (:e hello.lua). Line 2 has a practice error mark: put the cursor on line 2 and",
+      "press <leader>te. Then Ctrl-o comes back here.",
+    },
+    check = { kind = "event", name = "asked_error" },
+  },
+  {
+    part = 2,
+    title = "Help, and the next step",
+    text = {
+      "The tutor's box at the top of its pane always says what to do next (\"next: …\").",
+      "<leader>t? (or :TutorHelp, or /tutor-help in the pane) opens every command, explained, in its own tab;",
+      "q closes it. :TutorTour comes back to this tour any time.",
+      "",
+      "Do it: press <leader>t? and then q. That ends the tour: then tell the tutor what you'd like to learn.",
+    },
+    check = { kind = "event", name = "help_opened" },
+  },
 }

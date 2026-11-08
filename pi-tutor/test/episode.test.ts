@@ -1376,3 +1376,75 @@ describe("M6c: connected turn context (M2 #15)", () => {
     expect(t.message?.content).toMatch(/\[editor\] .*a\.py \(python\), cursor line 1/);
   }, 20000);
 });
+
+// Wayfinding spec 2026-11-08 §8.3: the tour runs in Neovim; Pi shows its step and answers questions about it.
+describe(":TutorTour through a real Neovim", () => {
+  let savedProfile: string | undefined;
+  /** A first-run learner (no onboarding yet, no language), linked to a headless Neovim with a stand-in tour module. */
+  async function firstRunLinked() {
+    savedProfile = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = join(mkdtempSync(join(tmpdir(), "tour-prof-")), "p.sqlite");
+    h = await startHeadlessNvim();
+    const b = await boot({ nvim: h.socket, cwd: h.root });
+    shutdown = () => b.events["session_shutdown"]({ type: "session_shutdown" }, b.ctx);
+    const { attach } = await import("neovim");
+    nvim = attach({ socket: h.socket });
+    await nvim.lua(`package.loaded["tutor.tour"] = { event = function(n) vim.g.tour_ev = n end, announce = function() vim.g.tour_hello = 1 end }`);
+    return b;
+  }
+  afterEach(() => { if (savedProfile === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = savedProfile; savedProfile = undefined; });
+  const tourPayload = (step: number, status = "running") =>
+    nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "tour", step, total: 18, title: "Delete with x", status }]);
+  const cards = (b: Awaited<ReturnType<typeof boot>>) => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_card").map((m) => String((m.message as { content: string }).content));
+  const userTurn = async (b: Awaited<ReturnType<typeof boot>>, prompt: string) => {
+    const opts = { sections: {} as Record<string, string> };
+    await b.events["before_agent_start"]({ type: "before_agent_start", messageType: "user", prompt, systemPromptOptions: opts }, b.ctx);
+    return opts.sections;
+  };
+  const setting = async (k: string) => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!); const v = p.setting(k); p.close(); return v;
+  };
+
+  it("a tour payload records the offer as seen, shows the step and paints it", async () => {
+    const b = await firstRunLinked();
+    await tourPayload(4);
+    await until(() => /4\/18/.test(b.widgets["tutor"]?.[2] ?? ""));
+    expect(cards(b).at(-1)).toBe("tour 4/18: Delete with x");
+    expect(await setting("tour")).toBe("seen");
+    await tourPayload(4); // the same step again is no new card
+    await new Promise((r) => setTimeout(r, 100));
+    expect(cards(b).filter((c) => c.startsWith("tour 4/18"))).toHaveLength(1);
+  }, 20000);
+
+  it("a question during the tour is no onboarding answer, and Neovim hears it was asked (Review Focus 2)", async () => {
+    const b = await firstRunLinked();
+    await tourPayload(12);
+    await until(() => /12\/18/.test(b.widgets["tutor"]?.[2] ?? ""));
+    const s = await userTurn(b, "what is normal mode?");
+    expect(s["tutor_onboard"]).toBeUndefined();
+    expect(s["tutor_tour"]).toMatch(/step 12\/18/);
+    expect(s["tutor_tour"]).toMatch(/never say a step is done/i);
+    expect(await setting("onboarding")).toBeNull();
+    await until(() => true);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(await nvim!.lua("return vim.g.tour_ev")).toBe("asked");
+  }, 20000);
+
+  it("tour done hands over to onboarding", async () => {
+    const b = await firstRunLinked();
+    await tourPayload(18, "done");
+    await until(() => cards(b).some((c) => /tour done/.test(c)));
+    expect(cards(b).at(-1)).toMatch(/tell me what you'd like to learn/);
+    expect((await userTurn(b, "I want to learn Python"))["tutor_onboard"]).toBeTruthy();
+  }, 20000);
+
+  it("on connect the tutor asks Neovim to re-tell a running tour", async () => {
+    await firstRunLinked();
+    // The stand-in module was set after connect; a reconnect (as after the tour's folder switch) asks again.
+    const link = await NvimLink.connect({ socket: h!.socket, root: h!.root, onPayload: () => {} });
+    await link!.tourHello();
+    expect(await nvim!.lua("return vim.g.tour_hello")).toBe(1);
+    await link!.close();
+  }, 20000);
+});
