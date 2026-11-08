@@ -286,6 +286,12 @@ export default function (pi: ExtensionAPI): void {
   let lastNow = "";
   /** Author 2026-11-09: one re-ask per learner turn for a reply with nothing visible; the re-ask is due at agent_end. */
   let emptyAsked = false, pendingEmpty = false;
+  /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
+  let onboardWaits = false;
+  /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
+  let waitNote: Partial<Fields> | null = null;
+  /** Third review M1: a queued rewrite belongs to the turn it was asked for; a learner's new message cancels it. */
+  let rewriteToken = 0;
   /** Wayfinding spec §8.3: the tour's current step, from Neovim's `tour` payloads; null when no tour runs. */
   let tourState: { step: number; total: number; title: string } | null = null;
   /** Wayfinding spec 2026-11-08 §7: what decides the next step, read from the extension's own state. */
@@ -505,7 +511,7 @@ export default function (pi: ExtensionAPI): void {
     // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
     // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
     rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
-    emptyAsked = false; pendingEmpty = false;
+    emptyAsked = false; pendingEmpty = false; onboardWaits = false; waitNote = null;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
@@ -644,6 +650,8 @@ export default function (pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event) => {
     // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
     if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) emptyAsked = false;
+    // Third review M1: a new message from the learner is the next turn: no queued rewrite or onboarding wait survives it.
+    if (event.messageType === "user") { rewriteToken++; onboardWaits = false; }
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
     // Learner-session fixes (spec §2): a first run's first message is the onboarding's first answer.
     // Wayfinding spec §8.3: during the tour a question is about the tour, not the onboarding's first answer.
@@ -657,7 +665,7 @@ export default function (pi: ExtensionAPI): void {
       event.systemPromptOptions.sections["tutor"] = systemText("onboard");
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
       if (memoryNote) event.systemPromptOptions.sections["tutor_memory"] = memoryNote;
-      intake = undefined;
+      if (!onboardWaits) intake = undefined; // a retry of a blank reply keeps the note that reply carried
       run = { prompt: promptOf(event), step: null, judged: true };
       return;
     }
@@ -934,7 +942,7 @@ export default function (pi: ExtensionAPI): void {
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // Phase 8 review I3: a held reply that got the fallback marked the run rejected; the reply to this message is new.
     run = { ...run, prompt: text, judged: false, rejected: false, reasks: 0 };
-    emptyAsked = false; pendingEmpty = false; // review I3: the learner moved on; their message gets the next reply
+    emptyAsked = false; pendingEmpty = false; onboardWaits = false; // review I3: the learner moved on; their message gets the next reply
     learnerMessage(text);
   });
 
@@ -1027,7 +1035,8 @@ export default function (pi: ExtensionAPI): void {
     if (onboardingActive()) {
       // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
       const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-      if (text.trim()) intake = parseIntake(text, { json: true });
+      // A retry's reply without a note keeps the note the blank reply carried (author 2026-11-09).
+      if (text.trim()) { const note = parseIntake(text, { json: true }); if (note !== null || !onboardWaits) intake = note; }
     }
     let changed = false;
     let content = m.content.map((c) => {
@@ -1085,14 +1094,15 @@ export default function (pi: ExtensionAPI): void {
     // Author 2026-11-09 (option B): a final reply with nothing for the learner — the answer stayed in the hidden thinking —
     // is held and asked once more; empty again, an honest line. The judgment fence stays, so the turn still counts.
     // Review I5: a reply cut off (length) or broken (error) with nothing visible gets the honest line, never a re-ask.
-    // Review I2: onboarding has no re-ask: note-only replies are its normal shape, and its own dialogs fill the gaps.
+    // Author 2026-11-09: getting-started is re-asked too; its own next step waits for the retry (agent_end).
     const ended = !m.content.some((c) => c.type === "toolCall");
     const shown = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
-    if (ended && !onboardingActive() && !hideJudgment(shown).trim()) {
+    if (ended && !hideJudgment(shown).trim()) {
       const reask = m.stopReason === "stop" && !emptyAsked;
       const line = reask ? EMPTY_TEXT : LOST_TEXT;
       if (reask) {
         emptyAsked = true; pendingEmpty = true;
+        if (onboardingActive()) { onboardWaits = true; waitNote = intake ?? null; }
         // Review I1: the judgment counts on the reply the learner reads, so this one's is dropped; the re-ask keeps
         // this turn's step (a fix stays a fix) and is told why.
         if (cur) {
@@ -2338,10 +2348,10 @@ export default function (pi: ExtensionAPI): void {
    * in that loop with no before_agent_start, so the model never gets the onboarding or lesson section.
    * Sent once Pi is idle, it starts a fresh run.
    */
-  function rewriteWhenIdle(ctx: ExtensionContext, text: string, tries = 0) {
-    if (closing) return;
+  function rewriteWhenIdle(ctx: ExtensionContext, text: string, tries = 0, token = rewriteToken) {
+    if (closing || token !== rewriteToken) return; // third review M1: the learner sent a new message meanwhile
     if (ctx.isIdle() || tries >= 600) { pi.sendMessage({ customType: "tutor_rewrite", content: text, display: false }, { triggerTurn: true }); return; }
-    setTimeout(() => rewriteWhenIdle(ctx, text, tries + 1), 50).unref?.();
+    setTimeout(() => rewriteWhenIdle(ctx, text, tries + 1, token), 50).unref?.();
   }
   /**
    * Wayfinding spec §9.1: the tutor's own line to the model ("[tutor] …"), sent as a hidden custom message once Pi
@@ -2753,7 +2763,10 @@ export default function (pi: ExtensionAPI): void {
     if (pendingEmpty) {
       pendingEmpty = false;
       if (!pendingRewrite) rewriteWhenIdle(ctx, "Your last reply had no text for the learner: your answer was only in your thinking. Write your answer to the learner now, following this turn's instruction.");
+      // Author 2026-11-09: getting-started's own step (the note, the next question or dialog) runs after the retry.
+      if (onboardWaits && !pendingRewrite) return;
     }
+    onboardWaits = false;
     if (pendingRewrite) {
       const issues = pendingRewrite;
       pendingRewrite = null;
@@ -2762,8 +2775,9 @@ export default function (pi: ExtensionAPI): void {
       rewriteWhenIdle(ctx, `Your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
     }
     if (!onboardingActive() || !onboarding) return;
-    const note = intake;
-    intake = undefined;
+    // Third review I1/M2: what the blank reply recorded stays; the retry's (or the learner's next) note adds to it.
+    const note = waitNote ? { ...waitNote, ...(intake ?? {}) } : intake;
+    intake = undefined; waitNote = null;
     saveOnboarding(applyTurn(onboarding, note === undefined ? null : note));
     try { await onboardStep(ctx); } catch (e) { ctx.ui.notify(`onboarding: ${e instanceof Error ? e.message : String(e)}`, "error"); }
     paint();
