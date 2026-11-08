@@ -798,3 +798,13 @@ describe("run split scrolling", function()
     assert.equals(0, got)
   end)
 end)
+
+describe("start root", function()
+  -- Final review M6: nvim in a project's subfolder opened the tutor rooted at the subfolder (no project, no run:).
+  it("the tutor is rooted at the project, not the subfolder nvim started in", function()
+    local tmp = vim.fn.resolve(vim.fn.tempname()); vim.fn.mkdir(tmp .. "/proj/src", "p")
+    local root = require("tutor").autostart_root
+    assert.equals(tmp .. "/proj", root({}, tmp .. "/proj/src", { tmp .. "/proj" }, tmp .. "/lazycourse"))
+    assert.is_nil(root({}, tmp, { tmp .. "/proj" }, tmp .. "/lazycourse"))
+  end)
+end)

@@ -2,6 +2,10 @@
 -- the tutor with a `tour` payload. The tutor (the model) only explains; it never passes a step.
 local M = {}
 
+--- Final review I1: true only while this Neovim runs the tour (start() attached its checks). A "running" state.json
+--- left by a Neovim that quit mid-tour is resumed by :TutorTour, never announced or advanced on its own.
+M.active = false
+
 local here = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 local STEPS_FILE = vim.fs.normalize(here .. "/../../tour/steps.lua")
 local NS = vim.api.nvim_create_namespace("tutor.tour")
@@ -115,7 +119,11 @@ local function pass(st)
   if buf then mark(buf, st.step, true) end
   local done_title = M.steps()[st.step].title
   st.step = st.step + 1
-  if st.step > #M.steps() then st.step, st.status = #M.steps(), "done" end
+  if st.step > #M.steps() then
+    st.step, st.status = #M.steps(), "done"
+    M.active = false
+    pcall(vim.api.nvim_del_augroup_by_name, GROUP)
+  end
   save(st)
   tell(st)
   vim.notify(st.status == "done" and "[tutor] ✓ tour done — tell the tutor what you'd like to learn"
@@ -124,6 +132,7 @@ end
 
 --- Check the current step's practice lines (on every edit of tour.txt).
 function M.check_lines()
+  if not M.active then return end
   local st, buf = M.state(), tour_buf()
   if st.status ~= "running" or not buf then return end
   local c = M.steps()[st.step].check
@@ -139,6 +148,7 @@ end
 
 --- An editor event (Part 1: undo, written, searched, opened; Part 2 adds the pane's). Passes only its own step.
 function M.event(name)
+  if not M.active then return end
   local st = M.state()
   if st.status ~= "running" then return end
   local c = M.steps()[st.step].check
@@ -194,6 +204,7 @@ end
 
 --- Tell the tutor a running tour's step again (the Pi that the tour's folder switch restarted missed it).
 function M.announce()
+  if not M.active then return end
   local st = M.state()
   if st.status == "running" then tell(st) end
 end
@@ -209,8 +220,14 @@ function M.start(o)
   write_files(restart)
   save(st)
   local tutor = require("tutor")
-  if not (tutor.state.term and tutor.switch(M.dir(), "tour.txt")) then vim.cmd.edit(vim.fn.fnameescape(file("tour.txt"))) end
-  local buf = tour_buf() or vim.api.nvim_get_current_buf()
+  if not (tutor.state.term and tutor.switch(M.dir(), "tour.txt")) then pcall(vim.cmd.edit, vim.fn.fnameescape(file("tour.txt"))) end
+  -- Final review M2: never fall back to the current buffer — it is the learner's own (restart would wipe its edits).
+  local buf = tour_buf()
+  if not buf then
+    vim.notify("[tutor] could not open the tour (" .. file("tour.txt") .. "): save or close the current file, then :TutorTour", vim.log.levels.WARN)
+    return
+  end
+  M.active = true
   if restart then
     vim.api.nvim_buf_call(buf, function() vim.cmd("silent edit!") end)
     vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
@@ -231,6 +248,7 @@ end
 --- Stop the tour (`:TutorTour off`); progress is kept for the next :TutorTour.
 function M.stop()
   local st = M.state()
+  M.active = false
   pcall(vim.api.nvim_del_augroup_by_name, GROUP)
   if st.status == "off" then return end
   st.status = "off"

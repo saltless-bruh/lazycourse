@@ -276,16 +276,22 @@ end
 --- a directory argument is the start folder; then only inside a known project or `lazycourse`.
 ---@param argv string[] @param cwd string @param projects string[] @param lazycourse string
 function M.should_autostart(argv, cwd, projects, lazycourse)
+  return M.autostart_root(argv, cwd, projects, lazycourse) ~= nil
+end
+
+--- The tutor's root when Neovim opens it by itself: the project the start folder is in (final review M6: not the
+--- subfolder), else the start folder inside `lazycourse`; nil when it should not open.
+function M.autostart_root(argv, cwd, projects, lazycourse)
   local start = cwd
   for _, a in ipairs(argv) do
-    if vim.fn.isdirectory(a) == 1 then start = a else return false end
+    if vim.fn.isdirectory(a) == 1 then start = a else return nil end
   end
   start = real(start)
-  if inside(start, real(lazycourse)) then return true end
   for _, p in ipairs(projects) do
-    if inside(start, real(p)) then return true end
+    if inside(start, real(p)) then return real(p) end
   end
-  return false
+  if inside(start, real(lazycourse)) then return start end
+  return nil
 end
 
 local function read_projects(file)
@@ -300,8 +306,9 @@ end
 ---@param s { argv: string[], cwd: string, ui: boolean }
 function M.on_start(s)
   if not s.ui or not opts.auto_open then return end
-  if M.should_autostart(s.argv, s.cwd, read_projects(opts.projects_file), opts.lazycourse) then
-    opts.cwd = real(#s.argv == 1 and s.argv[1] or s.cwd) -- the tutor's project root, and :TutorRun's folder
+  local root = M.autostart_root(s.argv, s.cwd, read_projects(opts.projects_file), opts.lazycourse)
+  if root then
+    opts.cwd = root -- the tutor's project root, and :TutorRun's folder
     M.state.term.opts.cwd = opts.cwd
     M.state.term:show()
   elseif vim.fn.filereadable(opts.profile_file) == 0 then

@@ -215,4 +215,36 @@ describe("tutor.tour", function()
     assert.equals(1, #payloads)
     assert.equals("running", payloads[1].status)
   end)
+
+  -- Final review I1: a tour left "running" in state.json (Neovim quit mid-tour) must not take over a later Neovim.
+  it("a tour this Neovim never started is not announced and passes no step", function()
+    local tour = require("tutor.tour")
+    vim.fn.mkdir(tour.dir(), "p")
+    vim.fn.writefile({ vim.json.encode({ step = 5, status = "running" }) }, tour.dir() .. "/state.json")
+    package.loaded["tutor.tour"] = nil
+    tour = require("tutor.tour")
+    payloads = {}
+    tour.announce()
+    assert.same({}, payloads)
+    tour.event(tour.steps()[5].check.name or "x")
+    assert.equals(5, tour.state().step)
+  end)
+
+  -- Final review M2: when the tour file cannot be opened, the tour never hooks the learner's own buffer.
+  it("if tour.txt does not open, the learner's buffer is left alone", function()
+    vim.cmd("enew")
+    local mine = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(mine, 0, -1, false, { "my unsaved work" })
+    -- switch() reports success even when its :edit failed (E37 with nohidden, E325 swap prompt answered Quit).
+    local tutor = require("tutor")
+    local real_switch = tutor.switch
+    tutor.switch = function() return true end
+    local ok = pcall(require("tutor.tour").start, { restart = true })
+    tutor.switch = real_switch
+    assert.is_true(ok)
+    assert.same({ "my unsaved work" }, vim.api.nvim_buf_get_lines(mine, 0, -1, false))
+    local has_group, hooks = pcall(vim.api.nvim_get_autocmds, { group = "tutor-tour", buffer = mine })
+    assert.same({}, has_group and hooks or {})
+    vim.api.nvim_buf_delete(mine, { force = true })
+  end)
 end)
