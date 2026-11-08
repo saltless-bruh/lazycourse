@@ -305,7 +305,7 @@ function M.on_start(s)
     M.state.term.opts.cwd = opts.cwd
     M.state.term:show()
   elseif vim.fn.filereadable(opts.profile_file) == 0 then
-    vim.notify("[tutor] New to lazycourse? :TutorTour teaches Neovim and the tutor", vim.log.levels.INFO)
+    vim.notify("[tutor] New to lazycourse? :TutorTour teaches Neovim and the tutor", vim.log.levels.INFO, { timeout = 15000 })
   end
 end
 
@@ -384,14 +384,15 @@ function M.setup(user_opts)
   vim.keymap.set("n", "<leader>t?", "<Cmd>TutorHelp<CR>", { desc = "tutor: " .. commands.describe("<leader>t?") })
   local ok, wk = pcall(require, "which-key")
   if ok and wk.add then wk.add({ { "<leader>t", group = "tutor" } }) end
-  if vim.v.vim_did_enter == 0 then
-    vim.api.nvim_create_autocmd("VimEnter", {
-      group = vim.api.nvim_create_augroup("tutor-start", { clear = true }), once = true,
-      callback = function()
-        M.on_start({ argv = vim.fn.argv(), cwd = vim.fn.getcwd(), ui = #vim.api.nvim_list_uis() > 0 })
-      end,
-    })
-  end
+  -- Live check 2026-11-09: at VimEnter the terminal UI was not attached yet (no UI, so nothing opened). UIEnter fires
+  -- once a screen is attached, never headless; the short delay lets the notification popups load first.
+  vim.api.nvim_create_autocmd("UIEnter", {
+    group = vim.api.nvim_create_augroup("tutor-start", { clear = true }), once = true,
+    callback = function()
+      local argv, cwd = vim.fn.argv(), vim.fn.getcwd()
+      vim.defer_fn(function() M.on_start({ argv = argv, cwd = cwd, ui = true }) end, 300)
+    end,
+  })
 end
 
 return M

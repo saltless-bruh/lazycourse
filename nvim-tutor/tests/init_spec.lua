@@ -770,3 +770,13 @@ describe("tutor profile paths", function()
     assert.same({ profile_file = "/x/y/p.sqlite", projects_file = "/x/y/projects.json" }, p)
   end)
 end)
+
+describe("tutor start hook", function()
+  it("waits for the screen: it runs on UIEnter, which never fires headless (live check 2026-11-09: at VimEnter the UI was not attached yet)", function()
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false })
+    local au = vim.api.nvim_get_autocmds({ group = "tutor-start" })
+    assert.equals(1, #au)
+    assert.equals("UIEnter", au[1].event)
+  end)
+end)
