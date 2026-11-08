@@ -225,6 +225,17 @@ export class NvimLink {
     await this.timed(this.raw.lua(`local b = vim.fn.bufnr(...) if b > 0 and vim.api.nvim_buf_is_loaded(b) then vim.cmd.checktime(b) end`, [path]), 2000, "reload");
   }
 
+  /**
+   * Final review I2: the file under a buffer with unsaved edits was rewritten (the plan job): keep the buffer and answer
+   * Neovim's next file-changed check for it silently (`v:fcs_choice = ""`), so no W12 prompt offers to drop the edits.
+   */
+  async holdBuffer(path: string): Promise<void> {
+    if (!this.isInRoot(path)) return;
+    await this.timed(this.raw.lua(`local b = vim.fn.bufnr(...) if b > 0 and vim.api.nvim_buf_is_loaded(b) then
+      vim.api.nvim_create_autocmd("FileChangedShell", { buffer = b, once = true, callback = function() vim.v.fcs_choice = "" end })
+    end`, [path]), 2000, "hold");
+  }
+
   /** Open `path` in the editor window, never the Pi pane (M8: the brief and the grade). */
   async openInEditor(path: string): Promise<boolean> {
     if (!this.isInRoot(path)) return false;

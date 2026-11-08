@@ -4,6 +4,7 @@ import { join } from "node:path";
 export interface PlanBufferLink {
   isModified(path: string): Promise<boolean>;
   reloadFile(path: string): Promise<void>;
+  holdBuffer(path: string): Promise<void>;
 }
 
 /** The files the plan job rewrites in an existing project (writeScaffold `{ existing: true }`). */
@@ -17,7 +18,10 @@ export async function refreshPlanBuffers(link: PlanBufferLink, root: string, not
   for (const rel of PLAN_FILES) {
     const path = join(root, rel);
     try {
-      if (await link.isModified(path)) notify(`${rel} changed on disk with the plan: :e! to see it (your unsaved edits there would be lost)`);
+      if (await link.isModified(path)) {
+        await link.holdBuffer(path); // final review I2: no W12 prompt when Neovim next checks the file
+        notify(`${rel} changed on disk with the plan: :e! to see it (your unsaved edits there would be lost)`);
+      }
       else await link.reloadFile(path);
     } catch { /* the file is written; the buffer reloads on focus */ }
   }

@@ -105,6 +105,25 @@ describe("NvimLink", () => {
     expect(await nvim.lua("return vim.api.nvim_get_mode().blocking")).toBe(false);
   }, 20000);
 
+  // Final review I2: a README with unsaved edits, rewritten on disk by the plan job, must not raise W12 later.
+  it("holdBuffer keeps a modified buffer and stops the file-changed prompt", async () => {
+    const { link, h } = await setup();
+    const nvim = link.raw;
+    const f = join(h.root, "README.md");
+    writeFileSync(f, "old\n");
+    await link.openLocation(f, 1);
+    await nvim.lua(`vim.api.nvim_buf_set_lines(0, 0, -1, false, { "my edit" })`);
+    await new Promise((r) => setTimeout(r, 1100));
+    writeFileSync(f, "---\nrun: python main.py\n---\n");
+    await link.holdBuffer(f);
+    const hooks = `return #vim.api.nvim_get_autocmds({ event = "FileChangedShell", buffer = vim.fn.bufnr(...) })`;
+    expect(await nvim.lua(hooks, [f])).toBe(1); // headless Neovim never shows W12; the handler that answers it must fire
+    await nvim.lua(`vim.cmd("checktime")`);
+    expect(await nvim.lua(hooks, [f])).toBe(0); // it ran (once)
+    expect(await nvim.lua("return vim.api.nvim_get_mode().blocking")).toBe(false);
+    expect(await nvim.lua("return vim.api.nvim_buf_get_lines(0, 0, -1, false)")).toEqual(["my edit"]);
+  }, 20000);
+
   // Wayfinding spec §8.2: /tutor-help opens the plugin's help tab; paint() tells Neovim where the learner is.
   it("openHelp opens the help tab and setNow tells Neovim where the learner is", async () => {
     const { link } = await setup();
