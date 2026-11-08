@@ -2851,6 +2851,30 @@ describe("empty replies", () => {
     });
   });
 
+  it("getting-started: the retry's own empty note does not wipe what the blank reply recorded (third review I1)", async () => {
+    await onboardingRun(async (b, saved) => {
+      const m = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: NOTE({ experience: "1-3 years", known: ["python"] }) }] };
+      await turn(b.events, b.ctx, "I've coded Python for 2 years", m);
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      await customTurn(b, rewrites(b)[0].message as object, assistant(`Great, two years! What would you like to build?\n\n${NOTE({})}`));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      expect((await saved()).fields).toMatchObject({ experience: "1-3 years", known: ["python"] });
+    });
+  });
+
+  it("a fresh message typed before the retry starts cancels it (third review M1)", async () => {
+    const b = await boot();
+    await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
+    b.busy.value = true;
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await turn(b.events, b.ctx, "never mind, what is insert mode?", assistant(`Insert mode is for typing.\n${JUDGED}`));
+    b.busy.value = false;
+    await settle();
+    expect(rewrites(b)).toHaveLength(0);
+  });
+
   it("a message typed after an empty reply, answered, cancels the re-ask (review I3)", async () => {
     const b = await boot();
     await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
