@@ -183,7 +183,10 @@ export async function writeMilestoneChecks(d: {
       const failed = checks.filter((c) => lacking.includes(c.task)).map((c) => (c.kind === "io" ? `run ${c.task}: stdin ${JSON.stringify(c.stdin)} -> stdout contains ${JSON.stringify(c.contains)}` : `check ${c.task}: ${c.expr} == ${c.expected}`));
       const again = `${ask}\n\nThese checks could not be confirmed on a working solution${failed.length ? ":\n" + failed.join("\n") : " (there were none)"}\n` +
         `Write new lines for ${lacking.join(", ")} that a working solution passes. ${SHAPE_RULE}`;
-      const more = parseChecks(await d.complete(systemText("checks"), again), { language: d.language, taskIds: lacking, milestone: d.milestone }).checks;
+      // Minor M1: a check the model returns again is the same check, kept once.
+      const key = (c: Check) => JSON.stringify([c.task, c.kind, c.expr, c.expected, c.stdin, c.contains]);
+      const had = new Set(checks.map(key));
+      const more = parseChecks(await d.complete(systemText("checks"), again), { language: d.language, taskIds: lacking, milestone: d.milestone }).checks.filter((c) => !had.has(key(c)));
       if (more.length) {
         const r2 = await run(more);
         if (!r2.missing) {
