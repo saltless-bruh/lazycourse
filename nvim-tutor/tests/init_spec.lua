@@ -780,3 +780,21 @@ describe("tutor start hook", function()
     assert.equals("UIEnter", au[1].event)
   end)
 end)
+
+describe("run split scrolling", function()
+  it("the run split never scrolls sideways either", function()
+    local saved = vim.o.sidescrolloff
+    vim.o.sidescrolloff = 8
+    package.loaded["tutor"] = nil
+    require("tutor").setup({ pi_cmd = { "cat" }, cwd = vim.fn.getcwd(), check_version = false, auto_open = false,
+      run_cmd = { "sh", "-c", "echo hi" } })
+    vim.cmd("TutorRun")
+    vim.wait(2000, function() for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.w[w].tutor_run then return true end end end)
+    local win
+    for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.w[w].tutor_run then win = w end end
+    local got = win and vim.wo[win].sidescrolloff
+    vim.o.sidescrolloff = saved
+    assert.is_not_nil(win)
+    assert.equals(0, got)
+  end)
+end)

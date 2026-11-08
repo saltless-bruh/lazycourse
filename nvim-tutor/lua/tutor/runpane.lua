@@ -60,6 +60,7 @@ function M.start(argv, cwd, on_exit, on_end)
   if vim.api.nvim_buf_is_valid(old) and vim.b[old].tutor_run and old ~= buf then pcall(vim.api.nvim_buf_delete, old, { force = true }) end
   vim.b[buf].tutor_run = true
   vim.w[win].tutor_run = true
+  vim.wo[win].sidescrolloff = 0 -- re-run topic 5: no sideways scroll that cuts the output's left edge
   local c = { buf = buf, win = win, job = nil, stopped = false }
   -- jobstart{term=true} attaches to the current window's buffer (CLAUDE.md): run it inside the split.
   local ok, job = pcall(vim.api.nvim_win_call, win, function()

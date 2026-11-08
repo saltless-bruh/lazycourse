@@ -14,6 +14,8 @@ const rows: [string, Partial<WayInput>, Where, RegExp][] = [
   ["dialog", { onboarding: ob({ stage: "read", dialog: true }) }, "onboarding-dialog", /dialog/],
   ["elsewhere", { onboarding: ob({ stage: "choose", elsewhere: "/home/x/p" }) }, "project-elsewhere", /\/home\/x\/p/],
   ["paused", { onboarding: ob({ paused: true }) }, "onboarding-paused", /\/tutor-start/],
+  // Live check 2026-11-09: in the new project folder the tutor asks build-or-learn; the line said /tutor-plan.
+  ["choose here", { project: true, onboarding: ob({ stage: "choose" }) }, "onboarding-talk", /answer the tutor/],
   ["plan writing", { project: true, spec: "writing" }, "plan-writing", /plan is being written/],
   ["plan failed", { project: true, spec: "failed" }, "plan-failed", /\/tutor-start spec/],
   ["project", { project: true }, "project", /\/tutor-plan/],

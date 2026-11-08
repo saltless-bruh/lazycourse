@@ -34,7 +34,7 @@ export function whereOf(i: WayInput): Where {
     if (o.elsewhere) return "project-elsewhere";
     if (o.dialog) return "onboarding-dialog";
     if (o.levelTaskOpen) return "level-task";
-    if (o.stage !== "done" && o.stage !== "choose") return "onboarding-talk";
+    if (o.stage !== "done") return "onboarding-talk"; // "choose" here: the tutor asks build now or learn first
   }
   if (i.spec === "writing") return "plan-writing";
   if (i.spec === "failed") return "plan-failed";
