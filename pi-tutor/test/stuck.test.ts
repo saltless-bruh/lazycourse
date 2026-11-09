@@ -72,6 +72,18 @@ describe("StuckDetector idle and churn", () => {
     expect(at("/p/learn/x/solution.py", 300_000)).toEqual([]);
     expect(at("/p/learn/x/solution.py", 330_000)).toHaveLength(1);
   });
+  // Re-review I-a: one stretch without typing gives at most one nudge, even across a trip to the instructions.
+  it("leaving the code file and coming back without typing never nudges a second time", () => {
+    const d = det(60_000, 120_000);
+    const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 1, since_ms }, 0);
+    expect(at("/p/a.py", 30_000)).toEqual([]);
+    expect(at("/p/a.py", 150_000)).toHaveLength(1);
+    expect(at("/p/instructions.md", 180_000)).toEqual([]);
+    expect(at("/p/a.py", 210_000)).toEqual([]);
+    expect(at("/p/a.py", 600_000)).toEqual([]);
+    expect(at("/p/a.py", 30_000)).toEqual([]); // typed: a new stretch
+    expect(at("/p/a.py", 150_000)).toHaveLength(1);
+  });
   it("moving to another code file starts its pause again", () => {
     const d = det(60_000, 120_000);
     const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 1, since_ms }, 0);

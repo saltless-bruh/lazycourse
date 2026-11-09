@@ -137,8 +137,8 @@ export class StuckDetector {
         if (!CODE_FILE.test(p.path)) { this.idlePath = null; break; }
         // Review I1: since_ms counts from the last edit anywhere; the pause counts from entering this code file.
         if (p.path !== this.idlePath) {
+          // Re-review I-a: only typing starts a new stretch's nudge; a trip to the instructions and back does not.
           this.idlePath = p.path;
-          this.idleFired = false;
           this.idleBase = typed || first ? 0 : p.since_ms;
         }
         if (!this.idleFired && p.since_ms - this.idleBase >= this.limits().idleMs && this.canOpen()) {
