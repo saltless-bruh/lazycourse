@@ -72,7 +72,9 @@ end
 
 local function write_files(restart)
   vim.fn.mkdir(M.dir(), "p")
-  write("tour.txt", M.render(), restart)
+  -- 2026-11-09 live: a learner's dd removed a step heading and the tour lost that step. The text is generated, so
+  -- every :TutorTour writes it fresh; progress lives in state.json, not in this file.
+  write("tour.txt", M.render(), true)
   write("notes.txt", { "You opened notes.txt. Press Ctrl-o to go back to the tour." })
   write("hello.lua", {
     'io.write("What is your name? ")',
@@ -130,6 +132,8 @@ local function pass(st)
     or ("[tutor] ✓ %s — next: step %d"):format(done_title, st.step), vim.log.levels.INFO)
 end
 
+local warned -- the step whose missing text was already reported
+
 --- Check the current step's practice lines (on every edit of tour.txt).
 function M.check_lines()
   if not M.active then return end
@@ -138,7 +142,14 @@ function M.check_lines()
   local c = M.steps()[st.step].check
   if c.kind ~= "lines" then return end
   local s, e = block(buf, st.step)
-  if not s then return end
+  if not s then
+    -- The step's heading or its >>> <<< markers were edited away: say how to get them back, once per step.
+    if warned ~= st.step then
+      warned = st.step
+      vim.notify(("[tutor] step %d's text was changed, so it can't be checked: type :TutorTour to put the tour text back (your progress is kept)"):format(st.step), vim.log.levels.WARN)
+    end
+    return
+  end
   local got = vim.api.nvim_buf_get_lines(buf, s, e - 1, false)
   local ok = #got == #c.expect
   for i = 1, #c.expect do ok = ok and vim.trim(got[i] or "") == c.expect[i] end
@@ -235,10 +246,8 @@ function M.start(o)
     return
   end
   M.active = true
-  if restart then
-    vim.api.nvim_buf_call(buf, function() vim.cmd("silent edit!") end)
-    vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
-  end
+  vim.api.nvim_buf_call(buf, function() vim.cmd("silent edit!") end) -- the fresh text, also over unsaved edits
+  vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
   attach(buf)
   for n = 1, st.step - 1 do mark(buf, n, true) end
   local h = find(buf, ("## %d/"):format(st.step))

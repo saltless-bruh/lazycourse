@@ -256,4 +256,31 @@ describe("tutor.tour", function()
     vim.api.nvim_exec_autocmds("SwapExists", { pattern = require("tutor.tour").dir() .. "/tour.txt" })
     assert.equals("e", vim.v.swapchoice)
   end)
+
+  -- 2026-11-09 live: the learner's dd removed step 3's "## 3/18" heading; the tour could no longer find step 3 and the
+  -- learner was stuck with no word why. :TutorTour (resume) now writes the tour text fresh at the current step.
+  it("resuming rewrites a damaged tour text and keeps the progress", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    set_practice(1, tour.steps()[1].check.expect)
+    local h = find("## 2/")
+    vim.api.nvim_buf_set_lines(0, h - 1, h, false, {})
+    vim.cmd("silent write")
+    tour.start()
+    assert.equals(2, tour.state().step)
+    assert.truthy(find("## 2/"))
+    assert.truthy(vim.api.nvim_get_current_line():find("## 2/", 1, true))
+  end)
+
+  it("a missing heading for the current step says how to put it back", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    local h = find("## 1/")
+    vim.api.nvim_buf_set_lines(0, h - 1, h, false, {})
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = 0 })
+    vim.notify = orig
+    assert.truthy(table.concat(notes, "\n"):find(":TutorTour", 1, true), table.concat(notes, "\n"))
+  end)
 end)
