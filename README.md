@@ -128,11 +128,11 @@ return {
 ## First steps
 
 ```
- ┌─ 1 ──────────────────────┐   ┌─ 2 (optional) ─────────────┐   ┌─ 3 ──────────────────────────┐
+ ┌─ 1 ──────────────────────┐    ┌─ 2 (optional) ─────────────┐    ┌─ 3 ──────────────────────────┐
  │ mkdir -p ~/lazycourse    │──▶│ :TutorTour                 │──▶│ tell the tutor what you want │
- │ cd ~/lazycourse && nvim  │   │ 18 steps: Neovim basics,   │   │ to learn (or /tutor-start)   │
- │ → the tutor opens itself │   │ then the tutor itself      │   │ → talk · level · your idea   │
- └──────────────────────────┘   └────────────────────────────┘   └──────────────────────────────┘
+ │ cd ~/lazycourse && nvim  │    │ 18 steps: Neovim basics,   │    │ to learn (or /tutor-start)   │
+ │ → the tutor opens itself │    │ then the tutor itself      │    │ → talk · level · your idea   │
+ └──────────────────────────┘    └────────────────────────────┘    └──────────────────────────────┘
 ```
 
 - **Where it opens.** In `~/lazycourse` or a tutor project (even a subfolder), Neovim opens the tutor by itself.
