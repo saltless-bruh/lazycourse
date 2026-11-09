@@ -176,6 +176,27 @@ describe("tutor.init", function()
     assert.are_not.equal(old, tutor.state.term:job_id())
   end)
 
+  -- Review 2026-11-09 #4: the tour's warning says to type :TutorTour while tour.txt has unsaved edits; :edit of the
+  -- file the window already shows failed with E37 and the learner saw "could not open tour.txt".
+  it("switch to the file the editor already shows, with unsaved edits, is no error", function()
+    local tutor = require("tutor")
+    vim.cmd("silent! only")
+    local dir = project()
+    vim.cmd.edit(vim.fn.fnameescape(dir .. "/spec/tasks.md"))
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "edited" })
+    local hidden = vim.o.hidden
+    vim.o.hidden = false
+    vim.cmd("Tutor")
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    local ok, res = pcall(tutor.switch, dir, "spec/tasks.md")
+    vim.notify, vim.o.hidden = orig, hidden
+    assert.is_true(ok, tostring(res))
+    assert.is_nil(table.concat(notes, "\n"):find("could not open", 1, true), table.concat(notes, "\n"))
+    assert.is_true(shows(dir .. "/spec/tasks.md"))
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do vim.bo[b].modified = false end
+  end)
+
   it("wrappers type slash commands into the terminal", function()
     local tutor = require("tutor")
     vim.cmd("Tutor")
@@ -705,6 +726,20 @@ describe("tutor start-up", function()
     for _, k in ipairs({ "tt", "tr", "te", "t?" }) do
       assert.truthy(vim.fn.maparg(leader .. k, "n") ~= "", "missing <leader>" .. k)
     end
+  end)
+
+  -- 2026-11-09: :TutorTour typed right after start-up went into the pane (the cursor was there, in typing mode) and
+  -- reached the model as a chat message. Auto-open shows the pane but leaves the learner in the editor.
+  it("auto-open leaves the cursor in the editor, in normal mode", function()
+    local pf = tmp .. "/projects.json"; vim.fn.writefile({ vim.json.encode({ project }) }, pf)
+    local t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse })
+    local editor = vim.api.nvim_get_current_win()
+    t.on_start({ argv = {}, cwd = project, ui = true })
+    vim.wait(50)
+    assert.is_true(t.state.term:is_visible())
+    assert.equals(editor, vim.api.nvim_get_current_win())
+    assert.equals("n", vim.api.nvim_get_mode().mode)
+    t.state.term:hide()
   end)
 
   it("in a project folder the tutor opens; elsewhere it does not", function()

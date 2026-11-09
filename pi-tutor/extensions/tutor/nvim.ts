@@ -248,6 +248,18 @@ export class NvimLink {
   }
 
   /** Re-root the editor and the Pi pane at `dir` once this command has returned (the restart kills this Pi). */
+  /**
+   * 2026-11-09: run a listed `:Tutor…` command the learner typed into the pane. `nvim_cmd` takes the command and its
+   * arguments as data, so a `|` in them never starts another Ex command; one-argument commands get the rest as one.
+   */
+  async runEditorCommand(name: string, args: string[]): Promise<void> {
+    await this.timed(this.raw.lua(`local n, a = ... vim.schedule(function()
+      local c = vim.api.nvim_get_commands({})[n]
+      local one = c and (c.nargs == "?" or c.nargs == "1")
+      pcall(vim.api.nvim_cmd, { cmd = n, args = one and (#a > 0 and { table.concat(a, " ") } or {}) or a }, {})
+    end)`, [name, args]), 2000, "command");
+  }
+
   /** Wayfinding spec §8.3: tell the tour an event only Pi sees (the learner asked the tutor something). */
   async tourEvent(name: string): Promise<void> {
     await this.timed(this.raw.lua(`local n = ... pcall(function() require("tutor.tour").event(n) end)`, [name]), 2000, "tour");

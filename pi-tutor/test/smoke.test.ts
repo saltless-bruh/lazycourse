@@ -1663,6 +1663,25 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
   });
+  // 2026-11-09 live: any reply the idea path rejects twice let /tutor-start fail the same way forever.
+  // Review 2026-11-09 #3: only a failure about the idea itself lets the idea go; a formatting slip keeps it.
+  it("two replies that are not JSON keep the idea, and the next try uses it again", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", ["not json", "still not json", JSON.stringify({ projects: [todo], fits: true })]);
+    expect(b.notes.some((n) => /rejected twice.*tries again/.test(n))).toBe(true);
+    expect((await saved()).ideaDropped).toBeFalsy();
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seen.at(-1)).toMatch(/idea \(keep it\): a number guessing game/);
+  });
+  it("a smaller version that twice drops the idea lets the idea go, so the next try suggests for the level", async () => {
+    const off = { title: "Todo List CLI", summary: "Track todos.", concepts: [] };
+    const { b, seen } = await ideaFlow("a 3D game engine", [JSON.stringify({ projects: [todo], fits: false, smaller: off }), JSON.stringify({ projects: [todo], fits: false, smaller: off }), JSON.stringify({ projects: [todo] })]);
+    expect(b.notes.some((n) => /could not make a smaller version of your idea.*suggests a project for your level/.test(n))).toBe(true);
+    expect((await saved()).ideaDropped).toBe(true);
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
+  });
   it("'show me something else' frees the model from the idea", async () => {
     const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
     b.script.push("Show me something else");
@@ -2938,5 +2957,19 @@ describe("empty replies", () => {
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
     await settle();
     expect(rewrites(b)).toHaveLength(0);
+  });
+});
+
+describe("Neovim commands typed into the pane (2026-11-09)", () => {
+  it("without Neovim, a :Tutor command is not sent to the model; the learner is told where to type it", async () => {
+    const b = await boot();
+    const r = await b.events["input"]({ type: "input", text: ":TutorRun test", source: "interactive" }, b.ctx);
+    expect(r).toEqual({ action: "handled" });
+    expect(b.notes.at(-1)).toMatch(/:TutorRun test.*editor/);
+  });
+  it("ordinary text and unknown commands go on as before", async () => {
+    const b = await boot();
+    expect(await b.events["input"]({ type: "input", text: "hello", source: "interactive" }, b.ctx)).toBeUndefined();
+    expect(await b.events["input"]({ type: "input", text: ":TutorBogus", source: "interactive" }, b.ctx)).toBeUndefined();
   });
 });

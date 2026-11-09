@@ -49,3 +49,41 @@ describe("the README", () => {
     expect(missing).toEqual([]);
   });
 });
+
+import { editorCommandOf } from "../extensions/tutor/commands.js";
+describe("editorCommandOf (2026-11-09: :TutorTour typed into the pane reached the model)", () => {
+  it.each([
+    [":TutorTour", { name: "TutorTour", args: [] }],
+    ["  :TutorRun test  ", { name: "TutorRun", args: ["test"] }],
+    [":TutorDone P1.T2 anyway", { name: "TutorDone", args: ["P1.T2", "anyway"] }],
+    [":TutorStart python", { name: "TutorStart", args: ["python"] }],
+    [":TutorLevel 40", { name: "TutorLevel", args: ["40"] }],
+    [":TutorExam small", { name: "TutorExam", args: ["small"] }],
+    [":TutorExam sandbox on", { name: "TutorExam", args: ["sandbox", "on"] }],
+    [":TutorArchitect off", { name: "TutorArchitect", args: ["off"] }],
+    // Review 2026-11-09 #1: words the command does not take make the line a question for the tutor.
+    [":TutorExam what is this for?", null],
+    [":TutorStart over please", null],
+    [":TutorDone says it's not done, why?", null],
+    [":TutorLevel 400", null],
+    [":TutorArchitect what about caching", null],
+    [":TutorTour restart | let g:bad = 1", null],
+    [":TutorHelp foo", null],
+    [":TutorBogus", null],
+    [":w", null],
+    ["what does :TutorRun do?", null],
+    ["/tutor-start", null],
+  ])("%j", (text, want) => expect(editorCommandOf(text)).toEqual(want));
+});
+
+describe("the pane's input handler (review 2026-11-09 #1)", () => {
+  it("only a line the learner typed runs as a Neovim command; text from an extension or rpc goes on", async () => {
+    const { pi, events } = fakePi() as unknown as { pi: unknown; events: Record<string, (e: unknown, c: unknown) => Promise<unknown>> };
+    extension(pi as never);
+    const notes: string[] = [];
+    const ctx = { ui: { notify: (m: string) => notes.push(m) } };
+    for (const source of ["extension", "rpc"]) expect(await events["input"]({ type: "input", text: ":TutorTour", source }, ctx)).toBeUndefined();
+    expect(await events["input"]({ type: "input", text: ":TutorTour", source: "interactive" }, ctx)).toEqual({ action: "handled" });
+    expect(notes.at(-1)).toMatch(/Neovim command/);
+  });
+});

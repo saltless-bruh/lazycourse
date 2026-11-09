@@ -1,7 +1,8 @@
 # Pi and Neovim surface used by pi-tutor
 
-Verified against `@earendil-works/pi-coding-agent` 1.3.0 `dist/core/extensions/types.d.ts`
-(2026-10-19; was 1.1.0 on 2026-10-12), installed binary 1.3.0 (2026-10-19), `neovim` npm client 5.5.0,
+Verified against `@earendil-works/pi-coding-agent` 1.5.0 `dist/core/extensions/types.d.ts`
+(2026-11-09; 1.3.0 → 1.5.0 adds only `keyText`/`keyHint`/`KeybindingHints` and the 1.5.0 tool-argument validator
+(pi-schema; our two tools use plain JSON-Schema TypeBox); was 1.3.0 on 2026-10-19, 1.1.0 on 2026-10-12), installed binary 1.5.0 (2026-11-09), `neovim` npm client 5.5.0,
 Neovim 0.12.6 (2026-10-12). 1.1.0 → 1.3.0 types diff: `before_agent_start` became a union (below),
 tool definitions gained optional `reachesTools`, namespaces optional `aliases` (unused here).
 Re-verify every line when bumping versions.
@@ -75,7 +76,8 @@ Re-verify every line when bumping versions.
 - `ExtensionCommandContext.hasUI`: `/tutor-plan` and `/tutor-architect <q>` start a turn only when true.
   `pi.sendUserMessage` is fire-and-forget (agent-session.js:2712); in print mode the caller's next
   prompt would throw "Agent is already processing" (agent-session.js:1552).
-- `pi.on("input", (e: InputEvent) => …)` (types.d.ts:886-903, 1203): `e.text`, `e.streamingBehavior?:
+- `pi.on("input", (e: InputEvent, ctx) => …)` (types.d.ts:927-950, 1250; Pi 1.5.0): `e.text`, `e.source:
+  "interactive" | "rpc" | "extension"`, `e.streamingBehavior?:
   "steer" | "followUp"` (undefined when idle). A message typed mid-reply is delivered into the running
   loop without a new `before_agent_start` (agent-session.js:1550-1560). `input` fires before queueing,
   while the current reply still streams; the extension only counts the queued message there (M6c #56).
@@ -166,6 +168,16 @@ Re-verify every line when bumping versions.
   Tour autocmds (Lua side): TermEnter/TermLeave in the tutor pane, WinEnter, TermClose and WinClosed of the run
   split (`vim.b.tutor_run`/`vim.w.tutor_run`), BufWritePost, CmdlineLeave (`getcmdtype() == "/"`), BufEnter in
   ~/lazycourse/.tour, `vim.diagnostic.set` on hello.lua for the ask-error step. Probed headless on Neovim 0.12.6.
+- `pi.on("input", …)` returning `{ action: "handled" }` (types.d.ts `InputEventResult`, Pi 1.5.0), 2026-11-09: a listed
+  `:Tutor…` command typed into the pane never reaches the model; Pi asks Neovim to run it with
+  `vim.api.nvim_cmd({ cmd = name, args = … }, {})` inside `vim.schedule` (arguments as data, so `|` cannot chain another
+  Ex command; one-argument commands get the rest of the line as one argument). Only `e.source === "interactive"`, and
+  only words the command's `args` in commands.json take (review 2026-11-09: other text is a question for the tutor).
+  The argument count comes from `vim.api.nvim_get_commands({})[name].nargs` (a string: "0", "1", "?", "*", "+").
+- Neovim side, 2026-11-09: a `SwapExists` autocmd on `~/lazycourse/.tour/*` sets `vim.v.swapchoice = "e"` (the tour's
+  practice files open past a leftover swap file); `on_start` (auto-open) calls `nvim_set_current_win` back to the
+  editor window and `:stopinsert` after the pane's `show()`, so the cursor starts in the editor in NORMAL mode;
+  `switch` skips `:edit` when the target window already shows the file (E37 with unsaved edits and 'nohidden').
 - `pi.registerMessageRenderer(customType, (message, options, theme) => Component | undefined)` (types.d.ts:1250,
   `MessageRenderer` at :1169; Pi 1.3.0): the `tutor_card` session card renders as `new Text(content, 1, 0)` from
   `@earendil-works/pi-tui` (`components/text.d.ts`: `constructor(text?, paddingX?, paddingY?, customBgFn?)`), so it

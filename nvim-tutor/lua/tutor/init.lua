@@ -241,7 +241,10 @@ function M.switch(dir, file)
   -- The open may fail (E37 unsaved buffer with 'nohidden'); Pi must follow the :cd regardless.
   local ok, err = pcall(function()
     if target then
-      vim.api.nvim_win_call(target, function() vim.cmd.edit(path) end)
+      -- Review 2026-11-09 #4: the window already showing the file (with unsaved edits) keeps it; :edit would be E37.
+      local want = vim.fn.resolve(vim.fn.fnamemodify(dir .. "/" .. file, ":p"))
+      local shown = vim.fn.resolve(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(target)), ":p"))
+      if shown ~= want then vim.api.nvim_win_call(target, function() vim.cmd.edit(path) end) end
     else
       vim.cmd("topleft vsplit " .. path)
     end
@@ -310,7 +313,12 @@ function M.on_start(s)
   if root then
     opts.cwd = root -- the tutor's project root, and :TutorRun's folder
     M.state.term.opts.cwd = opts.cwd
+    local editor = vim.api.nvim_get_current_win()
     M.state.term:show()
+    -- 2026-11-09: the learner starts in the editor, in normal mode, so a first `:TutorTour` reaches Neovim, not the
+    -- model; the pane is beside it and the session card there says how to move over.
+    if vim.api.nvim_win_is_valid(editor) then vim.api.nvim_set_current_win(editor) end
+    vim.cmd.stopinsert()
   elseif vim.fn.filereadable(opts.profile_file) == 0 then
     vim.notify("[tutor] New to lazycourse? :TutorTour teaches Neovim and the tutor", vim.log.levels.INFO, { timeout = 15000 })
   end

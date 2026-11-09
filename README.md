@@ -27,7 +27,7 @@ inside the project folder; `bash` stays off.
 
 - Neovim ≥ 0.11 with LazyVim
 - Node ≥ 22.19
-- Pi 1.x (verified on 1.3): `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
+- Pi 1.x (verified on 1.5): `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`, or `pi update`
 - A provider configured in Pi (`pi` then `/login`)
 - Optional: [bubblewrap](https://github.com/containers/bubblewrap) for the checks and exam sandbox (Linux; Arch:
   `pacman -S bubblewrap`)
@@ -350,7 +350,7 @@ docs DevDocs lacks (third-party libraries such as `requests` or `serde`), add co
 
 ## Upgrading Pi
 
-`pi-tutor/PI_SURFACE.md` lists every Pi API this project touches and the version it was verified against. To upgrade: read Pi's CHANGELOG "Breaking Changes" since that version, update the file, bump `peerDependencies` in `pi-tutor/package.json`, and run `npm run test:contract`.
+`pi-tutor/PI_SURFACE.md` lists every Pi API this project touches and the version it was verified against. To upgrade: read Pi's CHANGELOG "Breaking Changes" since that version, update the file, bump the Pi version in `pi-tutor/package.json` (`devDependencies`, and `peerDependencies` when an older Pi no longer works), `npm install`, then run `npm test`, `npm run typecheck` and the Lua suite, and one real turn: `PI_TUTOR=1 PI_TUTOR_PROFILE=/tmp/p.sqlite pi -p --no-session "Reply with just the word ok."`.
 
 ## Credits
 
