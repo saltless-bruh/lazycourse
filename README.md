@@ -144,11 +144,13 @@ you type to the tutor; `<Esc><Esc>` gives Neovim back, and `<C-w>h` moves to you
   `/tutor-done P1.T1 anyway` ticks it as yours. In Rust and Go your function is also called through a hidden test
   (only in the sandbox copy). A **near-miss guard** tries rounded and one-character-slip answers against the checks
   and asks for one more check when they would pass.
-- **Help climbs with your tries.** Only graded tries count: a failed check from `/tutor-done`, or a `:TutorRun` that
-  fails with anything but a syntax error. A typo run, running unchanged code again, or chatting never moves help. The
-  steps: teach (an unrelated example) → a small hint → why it is wrong → "what were you thinking?" → only the stuck
-  line. Beginners get the line on try 4, intermediate on try 6; at pro it comes only when you ask with `/tutor-fix`.
-  The widget shows `try N`.
+- **Help climbs when you ask, after you try.** Your graded tries (a failed check from `/tutor-done`, or a `:TutorRun`
+  that fails with anything but a syntax error) count for your habits and the widget's `try N`, but they never move
+  help by themselves. Help moves when you ask with `<leader>ts` or `<leader>te`: the first ask after tries is a small
+  hint, and each later ask climbs one step only if you tried something since (a new failed try, or changed code).
+  Chatting in the pane talks at the current step. The steps: teach (an unrelated example) → a small hint → why it is
+  wrong → "what were you thinking?" → only the stuck line. Beginners get the line on their 4th such ask, intermediate
+  on the 6th; at pro it comes only when you ask with `/tutor-fix`.
 - **Ask about an error.** Right-click a line with an error and pick "Ask tutor about this error", or press
   `<leader>te`: the message, the line and its code go to the tutor as your question.
 - **You start the help, never a timer.** After a long pause in a code file, rewriting the same lines around an error,

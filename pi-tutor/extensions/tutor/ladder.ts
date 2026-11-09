@@ -29,6 +29,10 @@ export interface Episode {
   spot?: string;
   /** The project's source hash at the last counted attempt: an unchanged rerun is not a new attempt. */
   lastHash?: string;
+  /** Ask-first (author 2026-11-09): asks (<leader>ts, <leader>te) that followed new effort; the step climbs on these. */
+  climbs?: number;
+  /** The tries and source hash at the learner's last ask: the next ask climbs only if either moved. */
+  askedAt?: { attempts: number; hash: string };
   /** Pro: the learner asked for the fix (/tutor-fix). */
   fixAsked?: boolean;
   /** Well-known concepts reach why/ask/fix one attempt later. */
@@ -60,10 +64,14 @@ export function openEpisode(trigger: Trigger, band: Band, now: number): Episode 
   return { id: `ep-${now}`, trigger, band, attempts: 0, opened: now, turns: 0, concept_tags: [] };
 }
 
-/** This turn's step. During an exam nothing goes past `why` (spec §11a). */
+/**
+ * This turn's step, from the learner's asks (author 2026-11-09: failed runs count for habits, not for help).
+ * During an exam nothing goes past `why` (spec §11a).
+ */
 export function stepFor(ep: Episode | null, o: { exam: boolean }): TurnStep {
-  if (!ep || ep.attempts <= 0) return "teach";
-  const s = STAGES[ep.band], d = ep.delay ?? 0, n = ep.attempts;
+  const n = ep?.climbs ?? 0;
+  if (!ep || n <= 0) return "teach";
+  const s = STAGES[ep.band], d = ep.delay ?? 0;
   let step: TurnStep = "hint";
   if (n >= s.why + d) step = "why";
   if (n >= s.ask + d) step = "ask";
@@ -72,6 +80,16 @@ export function stepFor(ep: Episode | null, o: { exam: boolean }): TurnStep {
   if (s.fix === null && n > s.ask + d) step = ep.fixAsked ? "fix" : "why";
   if (o.exam && (step === "ask" || step === "fix")) step = "why";
   return step;
+}
+
+/**
+ * The learner asked for help (<leader>ts / <leader>te). The first ask gives a hint when they tried before it, else
+ * teach; a later ask climbs one step only if they tried something since (a new counted try, or changed code).
+ */
+export function askHelp(ep: Episode, hash: string): Episode {
+  const a = ep.askedAt;
+  const climbs = !a ? (ep.attempts > 0 ? 1 : 0) : (ep.climbs ?? 0) + (ep.attempts > a.attempts || hash !== a.hash ? 1 : 0);
+  return { ...ep, climbs, askedAt: { attempts: ep.attempts, hash } };
 }
 
 /** One failed graded try on `spot`. Unchanged code on the same spot is not a new try; a new spot starts over. */

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NeovimClient } from "neovim";
 import { startHeadlessNvim, type Headless } from "./nvim-harness.js";
-import { boot, episodes, turn, judged, assistant, realExec, REASONED } from "./fake-pi.js";
+import { boot, episodes, turn, nudgeTurn, judged, assistant, realExec, REASONED } from "./fake-pi.js";
 import { spawn, spawnSync } from "node:child_process";
 import { NvimLink, type NvimLinkOptions } from "../extensions/tutor/nvim.js";
 
@@ -1305,7 +1305,8 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
     edit("x = 3\n");
     const t = await turn(b.events, b.ctx, "I changed it and it is still wrong", judged("wrong"));
     expect(attempts(b)).toBe(1);
-    expect(t.message?.content).toContain("this turn: One small hint");
+    // Author 2026-11-09: help climbs on asks (<leader>ts / <leader>te), never on chat or on runs alone.
+    expect(t.message?.content).toContain("this turn: Teach");
   }, 20000);
 });
 
@@ -1572,6 +1573,25 @@ describe("<leader>ts asks for stuck help (ask-first)", () => {
     await untilNotice();
     expect((await notices()).at(-1)).toMatch(/Not during the exam/);
     expect(asked(b)).toEqual([]);
+  }, 30000);
+  // The author 2026-11-09: failed runs count for habits, not for help; only asking climbs, and only after new effort.
+  it("quiet failed runs then an ask get a hint; asking again with no change stays; a new try climbs", async () => {
+    const b = await linked();
+    const tries = () => (episodes(b.entries).at(-1) as { attempts?: number } | undefined)?.attempts ?? 0;
+    for (let i = 1; i <= 5; i++) {
+      writeFileSync(join(h!.root, "a.py"), `x = ${i}\n`);
+      await runPayload(1, "ZeroDivisionError: division by zero");
+      await until(() => tries() === i);
+    }
+    const ask = async () => { const n = asked(b).length; await stuck(join(h!.root, "a.py"), 1); await until(() => asked(b).length === n + 1); const t = await nudgeTurn(b.events, b.ctx, asked(b).at(-1)!.text, judged("none")); return JSON.stringify(t.message?.content ?? ""); };
+    expect(await ask()).toMatch(/this turn: One small hint/);
+    expect(await ask()).toMatch(/this turn: One small hint/);
+    writeFileSync(join(h!.root, "a.py"), "x = 9\n");
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => (episodes(b.entries).at(-1) as { attempts?: number }).attempts === 6);
+    const third = await ask();
+    expect(third).toMatch(/this turn: /);
+    expect(third).not.toMatch(/this turn: (One small hint|Teach)/);
   }, 30000);
   it("pressed on an error counts toward reads-errors like <leader>te", async () => {
     const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");

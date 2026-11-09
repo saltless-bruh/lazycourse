@@ -47,7 +47,7 @@ import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from 
 import { OfferBook, offerSpot, offerText, type Offer } from "./offers.js";
 import { QUIET_KEY, quietLeft, quietLabel } from "./quiet.js";
 import { sourceHash, projectSources } from "./source-hash.js";
-import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
+import { easeDelay, attemptScore, stepFor, askHelp, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
 import { writeProjectsFile, Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, formatFeedback } from "./feedback.js";
@@ -392,11 +392,11 @@ export default function (pi: ExtensionAPI): void {
    * Live check 2026-10-21: a different error in between (a typo) must not throw away the count on the spot the
    * learner returns to. Counts per spot live until a run passes.
    */
-  const spotMemory = new Map<string, { attempts: number; lastHash?: string }>();
+  const spotMemory = new Map<string, { attempts: number; lastHash?: string; climbs?: number; askedAt?: Episode["askedAt"] }>();
   const remember = (ep: Episode) => {
     if (!ep.spot) return;
     spotMemory.delete(ep.spot);
-    spotMemory.set(ep.spot, { attempts: ep.attempts, lastHash: ep.lastHash });
+    spotMemory.set(ep.spot, { attempts: ep.attempts, lastHash: ep.lastHash, climbs: ep.climbs, askedAt: ep.askedAt });
     if (spotMemory.size > 20) spotMemory.delete(spotMemory.keys().next().value!);
   };
   function failedRun(trigger: Extract<Trigger, { kind: "run" }>, nudge: boolean, spotKey?: string) {
@@ -418,7 +418,7 @@ export default function (pi: ExtensionAPI): void {
     if (episode) closeEp("superseded");
     const fresh = openEpisode(trigger, bandFor(level()), Date.now());
     const prior = spotMemory.get(spot);
-    episode = recordAttempt(prior ? { ...fresh, spot, attempts: prior.attempts, lastHash: prior.lastHash } : fresh, { spot, hash });
+    episode = recordAttempt(prior ? { ...fresh, spot, attempts: prior.attempts, lastHash: prior.lastHash, climbs: prior.climbs, askedAt: prior.askedAt } : fresh, { spot, hash });
     remember(episode);
     pi.appendEntry("tutor_episode", episode);
     if (nudge) showOffer(offers.signal(trigger, offerSpot(trigger, spot), Date.now()));
@@ -532,7 +532,9 @@ export default function (pi: ExtensionAPI): void {
     const pend = offers.pending();
     const holds = !!pend && (pend.trigger.kind === "run" ? episode?.trigger.kind === "run"
       : offerCurrent(pend) || ("path" in pend.trigger && pend.trigger.path === p.path));
-    const trigger: Trigger = holds ? pend!.trigger
+    // A second ask keeps the open episode it is about (the failed run, or this file's spot), so its count goes on.
+    const keep = !!episode && (episode.trigger.kind === "run" || ("path" in episode.trigger && episode.trigger.path === p.path));
+    const trigger: Trigger = holds ? pend!.trigger : keep ? episode!.trigger
       : p.error ? { kind: "error", path: p.path, line: p.line, msg: p.error } : { kind: "idle", path: p.path, line: p.line };
     offers.reset(holds ? pend!.spot : offerSpot(trigger));
     if (!episode || offerSpot(episode.trigger) !== offerSpot(trigger)) {
@@ -540,6 +542,10 @@ export default function (pi: ExtensionAPI): void {
       episode = openEpisode(trigger, bandFor(level()), Date.now());
       pi.appendEntry("tutor_episode", episode);
     }
+    // Author 2026-11-09: this ask, not the failed runs before it, moves help (one step, and only after new effort).
+    episode = askHelp(episode!, sourceHash(root));
+    if (episode.spot) remember(episode);
+    pi.appendEntry("tutor_episode", episode);
     ui?.notify(`stuck: ${rel}:${p.line}`, "info");
     lastNudge = Date.now();
     sendNudge(session, `${TUTOR_PREFIX} stuck (asked): ${describeTrigger(trigger)}`);
@@ -745,6 +751,12 @@ export default function (pi: ExtensionAPI): void {
     learnerMessage(prompt);
     // A learner's chat message opens an episode; our own [tutor] nudges, custom-message runs and non-ladder roles do not.
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
+    // Author 2026-11-09: <leader>te is an ask like <leader>ts: it may move help one step (only after new effort).
+    if (role.ladder && episode && event.messageType === "user" && prompt.startsWith("[ask-error]")) {
+      episode = askHelp(episode, sourceHash(realCwd(project?.path ?? session?.cwd ?? process.cwd())));
+      if (episode.spot) remember(episode);
+      pi.appendEntry("tutor_episode", episode);
+    }
     pendingSteers = 0;
     // Spec 2026-10-21 §6: a rewrite run keeps the re-ask count of the reply it replaces; any other run starts at 0.
     const isRewrite = event.messageType === "custom" && event.message.customType === "tutor_rewrite";
@@ -754,7 +766,7 @@ export default function (pi: ExtensionAPI): void {
     // Final review I2: on a run's episode the fix answers the failed run's own nudge (or its rewrite, or a pro's
     // /tutor-fix); a chat question after it is at why, so a later unrelated question never runs with the leak check off.
     let step = role.ladder ? stepFor(episode, { exam: exam !== null }) : null;
-    const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
+    const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || prompt.startsWith(`${TUTOR_PREFIX} stuck (asked): run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
     if (isNotes) step = null;
     run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
@@ -2266,9 +2278,9 @@ export default function (pi: ExtensionAPI): void {
       // Phase 1 minor M1: at pro the fix still waits for the question step; say how many tries that is.
       const ep = episode;
       let more = 0;
-      while (more < 20 && stepFor({ ...ep, attempts: ep.attempts + more }, { exam: exam !== null }) !== "fix") more++;
+      while (more < 20 && stepFor({ ...ep, climbs: (ep.climbs ?? 0) + more }, { exam: exam !== null }) !== "fix") more++;
       if (exam) { ctx.ui.notify("during an exam the tutor never gives the fix (spec §11a); it stays noted for after", "info"); return; }
-      ctx.ui.notify(more === 0 ? "the next reply shows the fix for this spot" : `noted: the fix comes after ${more} more ${more === 1 ? "try" : "tries"} on this spot`, "info");
+      ctx.ui.notify(more === 0 ? "the next reply shows the fix for this spot" : `noted: the fix comes after ${more} more ${more === 1 ? "ask" : "asks"} (<leader>ts after trying something)`, "info");
     },
   });
 

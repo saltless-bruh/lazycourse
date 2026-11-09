@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { easeDelay, attemptScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, stepFor, recordAttempt, restoreAttempts, STAGES, type CloseReason, type Episode } from "../extensions/tutor/ladder.js";
+import { easeDelay, attemptScore, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, stepFor, recordAttempt, restoreAttempts, askHelp, STAGES, type CloseReason, type Episode } from "../extensions/tutor/ladder.js";
 import type { Judgment } from "../extensions/tutor/judgment.js";
 import type { Band } from "../extensions/tutor/policy.js";
 
@@ -13,8 +13,26 @@ describe("openEpisode", () => {
   });
 });
 
+describe("askHelp (ask-first spec 2026-11-09)", () => {
+  const base = { ...openEpisode(err, "beginner", 0), attempts: 3 };
+  it("a first ask after tries gives a hint; with no tries, teach", () => {
+    expect(askHelp(base, "h1")).toMatchObject({ climbs: 1, askedAt: { attempts: 3, hash: "h1" } });
+    expect(askHelp({ ...base, attempts: 0 }, "h1")).toMatchObject({ climbs: 0 });
+  });
+  it("an ask climbs only after new effort: a new try or changed code", () => {
+    const once = askHelp(base, "h1");
+    expect(askHelp(once, "h1").climbs).toBe(1);
+    expect(askHelp(once, "h2").climbs).toBe(2);
+    expect(askHelp({ ...once, attempts: 4 }, "h1").climbs).toBe(2);
+  });
+});
+
 describe("stepFor (spec 2026-10-21 §5)", () => {
-  const ep = (band: Band, attempts: number, extra: Partial<Episode> = {}) => ({ ...openEpisode({ kind: "chat" }, band, 0), attempts, ...extra });
+  // Ask-first spec 2026-11-09: the step climbs on the learner's asks (`climbs`), not on failed runs (`attempts`).
+  const ep = (band: Band, climbs: number, extra: Partial<Episode> = {}) => ({ ...openEpisode({ kind: "chat" }, band, 0), climbs, ...extra });
+  it("failed runs alone never move help", () => {
+    expect(stepFor({ ...openEpisode({ kind: "chat" }, "beginner", 0), attempts: 7 }, { exam: false })).toBe("teach");
+  });
   it("beginner: teach, hint, why, ask, then the fix", () => {
     expect([0, 1, 2, 3, 4, 7].map((n) => stepFor(ep("beginner", n), { exam: false }))).toEqual(["teach", "hint", "why", "ask", "fix", "fix"]);
   });
