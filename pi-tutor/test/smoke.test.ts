@@ -2269,6 +2269,21 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
     await b.commands["tutor-start"].handler("spec", b.ctx);
     await waitFor(() => existsSync(pjoin(dir, "spec", "tasks.md")));
   });
+  // Live 2026-11-09: the lesson said "try writing it" and the line said "/tutor-lesson next, or check"; the learner
+  // looked for how to make a .py file. Before the exercise exists, both the line and the tutor point at
+  // /tutor-lesson next (it writes the file); after, at the file and /tutor-lesson check.
+  it("a lesson points at /tutor-lesson next until the exercise file exists, then at check", async () => {
+    const b = await boot({ cwd: dir });
+    b.replies.push(SPEC(["basics, functions, bools", "numbers, conditionals, comparisons"]));
+    await exchange(b, note({ path: "learn" }));
+    expect(b.widgets["tutor"]?.[2]).toMatch(/^next: \/tutor-lesson next.*exercise/);
+    let t = await turn(b.events, b.ctx, "ok, explain", judged("none"));
+    expect(t.sections["tutor_lesson"]).toMatch(/\/tutor-lesson next.*writes.*file/i);
+    await b.commands["tutor-lesson"].handler("next", b.ctx);
+    expect(b.widgets["tutor"]?.[2]).toMatch(/^next: .*\/tutor-lesson check/);
+    t = await turn(b.events, b.ctx, "where do I write it?", judged("none"));
+    expect(t.sections["tutor_lesson"]).toMatch(/learn\/basics\/1-guidos-gorgeous-lasagna\/\S+\.py/);
+  });
   it("lesson exercises: never the exemplar; two fails step back; a pass rates the concept and moves on; skip marks it known", async () => {
     const b = await boot({ cwd: dir });
     b.pi.exec = realExec as never;

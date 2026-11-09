@@ -51,6 +51,46 @@ describe("StuckDetector errors", () => {
 });
 
 describe("StuckDetector idle and churn", () => {
+  // Live 2026-11-09: reading the tutor's lesson with the cursor parked on README.md opened a stuck episode every few
+  // minutes and the tutor taught again on its own. A pause counts only in a code file.
+  it.each(["/p/README.md", "/p/spec/tasks.md", "/p/notes.txt", "/p/learn/x/instructions.md", "/p/Makefile"])("a pause in %s is never stuck", (path) => {
+    const d = det(60_000, 60_000);
+    expect(d.observe({ kind: "idle", buf: 1, path, line: 9, since_ms: 600_000 }, 0)).toEqual([]);
+  });
+  it.each(["/p/src/main.py", "/p/a.lua", "/p/src/lib.rs", "/p/main.go", "/p/index.ts", "/p/app.js"])("a pause in %s can be stuck", (path) => {
+    const d = det(60_000, 60_000);
+    expect(d.observe({ kind: "idle", buf: 1, path, line: 9, since_ms: 30_000 }, 0)).toEqual([]);
+    expect(d.observe({ kind: "idle", buf: 1, path, line: 9, since_ms: 90_000 }, 0)).toHaveLength(1);
+  });
+  // Review 2026-11-09 I1: since_ms counts from the last edit anywhere, so reading a doc for minutes and then opening
+  // the exercise fired at once. The pause counts from the moment the learner is in that code file.
+  it("the pause counts from entering the code file, not from the last edit", () => {
+    const d = det(60_000, 120_000);
+    const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 1, since_ms }, 0);
+    expect(at("/p/learn/x/instructions.md", 180_000)).toEqual([]);
+    expect(at("/p/learn/x/solution.py", 210_000)).toEqual([]);
+    expect(at("/p/learn/x/solution.py", 300_000)).toEqual([]);
+    expect(at("/p/learn/x/solution.py", 330_000)).toHaveLength(1);
+  });
+  // Re-review I-a: one stretch without typing gives at most one nudge, even across a trip to the instructions.
+  it("leaving the code file and coming back without typing never nudges a second time", () => {
+    const d = det(60_000, 120_000);
+    const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 1, since_ms }, 0);
+    expect(at("/p/a.py", 30_000)).toEqual([]);
+    expect(at("/p/a.py", 150_000)).toHaveLength(1);
+    expect(at("/p/instructions.md", 180_000)).toEqual([]);
+    expect(at("/p/a.py", 210_000)).toEqual([]);
+    expect(at("/p/a.py", 600_000)).toEqual([]);
+    expect(at("/p/a.py", 30_000)).toEqual([]); // typed: a new stretch
+    expect(at("/p/a.py", 150_000)).toHaveLength(1);
+  });
+  it("moving to another code file starts its pause again", () => {
+    const d = det(60_000, 120_000);
+    const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 1, since_ms }, 0);
+    expect(at("/p/a.py", 30_000)).toEqual([]);
+    expect(at("/p/b.py", 120_000)).toEqual([]);
+    expect(at("/p/b.py", 240_000)).toHaveLength(1);
+  });
   it("opens once per idle stretch when idle passes the threshold", () => {
     const d = det(0, 60_000);
     expect(d.observe(idle(30_000), 0)).toEqual([]);

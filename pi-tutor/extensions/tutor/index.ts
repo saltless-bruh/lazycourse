@@ -310,7 +310,7 @@ export default function (pi: ExtensionAPI): void {
         dialog: (o!.stage === "read" && o!.presented === "read") || (o!.stage === "project" && o!.presented === "project"), elsewhere } : null,
       spec: specStatus, project: !!project,
       recipe: workflow ? { task: workflow.task, step: workflow.step, action: STEP_SPECS[workflow.step - 1].name.toLowerCase() } : null,
-      stuck: !!episode, passingTask, lesson: !!lesson, exam: !!exam, stepUp: !!stepUp,
+      stuck: !!episode, passingTask, lesson: lesson ? { step: lessonStep(lesson) } : null, exam: !!exam, stepUp: !!stepUp,
     };
   }
   function whereNow(): Where { return whereOf(wayInput()); }
@@ -2607,6 +2607,13 @@ export default function (pi: ExtensionAPI): void {
     if (session) ensureChecks(session); // a round that reached its milestone gets that milestone's checks
     if (l?.building) autoRecipe(session); // final review I1b: building a milestone starts its first task's recipe
   }
+  /** Where the lesson is: building a milestone, a concept with no exercise, or its exercise not yet written / written. */
+  function lessonStep(l: LessonState): "get" | "write" | "none" | "build" {
+    if (l.building) return "build";
+    const ex = project ? lessonOf(project.language, l.concept)?.exercises[l.exercise] : undefined;
+    if (!ex) return "none";
+    return existsSync(join(project!.path, exerciseDir(l, ex))) ? "write" : "get";
+  }
   /** The hidden lesson section: the rules, the vendored lesson text, the exercise, and a step back after two fails (Q17). */
   function lessonSection(l: LessonState, lang: string): string {
     if (l.building) return `[lesson] Round ${l.round + 1} is done: the learner is building Milestone ${l.round + 1} in spec/tasks.md with ${l.rounds[l.round].join(", ")}. Coach as usual; /tutor-lesson next starts the next round.`;
@@ -2614,6 +2621,9 @@ export default function (pi: ExtensionAPI): void {
     const parts = [systemText("lesson"), `[lesson] concept: ${l.concept} (round ${l.round + 1} of ${l.rounds.length}), source: ${les?.source ?? "?"}`];
     if (les) parts.push(`Lesson text:\n${les.text}`);
     if (ex) parts.push(`Exercise ${l.exercise + 1}/${les!.exercises.length} (learn/${l.concept}/${ex.id}/):\n${ex.instructions}`);
+    // Live 2026-11-09: "try writing it on your own" left the learner looking for how to make a .py file.
+    if (ex && lessonStep(l) === "get") parts.push("The exercise file does not exist yet. When you set the exercise, tell the learner to type `/tutor-lesson next` in this pane: it writes the exercise file and opens its instructions in the editor. Never ask them to create a file themselves, and set this exercise, not one of your own.");
+    else if (ex) parts.push(`The learner's exercise file is ${exerciseDir(l, ex)}/${layout(lang)?.stub ?? "the stub"} (instructions.md beside it): they write their code there and run \`/tutor-lesson check\` in this pane. Name that file when they ask where to write.`);
     if (l.stepBack) parts.push("The learner failed this exercise twice: take a smaller step (one part of the idea, another small example) and say so in one line.");
     return parts.join("\n\n");
   }

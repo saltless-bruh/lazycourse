@@ -1,6 +1,9 @@
 import type { TutorPayload } from "./nvim.js";
 import type { Trigger } from "./ladder.js";
 
+/** Source files of the course's languages: the only files where a long pause counts as stuck. */
+const CODE_FILE = /\.(?:py|lua|rs|go|ts|tsx|js|jsx|mjs|cjs)$/i;
+
 // Stuck detector (spec §5): push payloads + clock → open / cleared / run_passed.
 // `canOpen` says whether the caller would accept a new episode now; a refused
 // trigger is not consumed, so it fires once the caller is free.
@@ -77,6 +80,9 @@ export class StuckDetector {
   private churnAt = new Map<string, number>();
   private idleLast = -1;
   private idleFired = false;
+  /** The code file the current pause is in, and since_ms when the learner got there (review 2026-11-09 I1). */
+  private idlePath: string | null = null;
+  private idleBase = 0;
 
   constructor(
     private readonly limits: () => { errorMs: number; idleMs: number },
@@ -123,9 +129,19 @@ export class StuckDetector {
       }
       case "idle": {
         // A smaller since_ms than last time means the learner typed: a new stretch.
-        if (p.since_ms < this.idleLast) this.idleFired = false;
+        const typed = p.since_ms < this.idleLast, first = this.idleLast < 0;
+        if (typed) { this.idleFired = false; this.idleBase = 0; }
         this.idleLast = p.since_ms;
-        if (!this.idleFired && p.since_ms >= this.limits().idleMs && this.canOpen()) {
+        // Live 2026-11-09: a pause on README.md (reading the lesson in the pane) taught again on its own. Only a pause
+        // in a code file can be stuck.
+        if (!CODE_FILE.test(p.path)) { this.idlePath = null; break; }
+        // Review I1: since_ms counts from the last edit anywhere; the pause counts from entering this code file.
+        if (p.path !== this.idlePath) {
+          // Re-review I-a: only typing starts a new stretch's nudge; a trip to the instructions and back does not.
+          this.idlePath = p.path;
+          this.idleBase = typed || first ? 0 : p.since_ms;
+        }
+        if (!this.idleFired && p.since_ms - this.idleBase >= this.limits().idleMs && this.canOpen()) {
           this.idleFired = true;
           out.push({ type: "open", trigger: { kind: "idle", path: p.path, line: p.line } });
         }
