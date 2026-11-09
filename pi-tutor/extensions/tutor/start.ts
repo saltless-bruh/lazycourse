@@ -36,6 +36,7 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
   }
   // Wayfinding spec §9.2: the model judges whether the idea fits the level; code keeps the title and every offer tied.
   const withIdea = `${prompt}\nthe learner's idea (keep it): ${idea}\nalso answer "fits": true or false — whether this idea, as it is, suits the learner's level; when false, add "smaller": {"title","summary","concepts"}, a smaller version of the same idea`;
+  let untied = 0;
   try {
     return await completeJson(d.complete, systemText("suggest"), withIdea, (v) => {
       const [s] = checkSuggestions(v, 1);
@@ -46,8 +47,9 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
       const inner = top.projects?.[0] ?? {};
       const fits = yesNo(top.fits ?? inner.fits);
       const o = { fits, smaller: top.smaller ?? inner.smaller };
-      // Review 2026-11-09 #2: with no answer, the project must show the idea, or the model is asked again.
-      if (o.fits === undefined && !tiedToIdea(`${s.title} ${s.summary}`, idea)) throw new Error(`the project must keep the learner's idea "${idea}" (or answer "fits": false with a "smaller" version of it)`);
+      // Review 2026-11-09 #2: with no answer, a project that does not show the idea is asked again once. Re-review I1:
+      // after that the idea is kept anyway (another language, "bank" for "banking"); the title is the learner's words.
+      if (o.fits === undefined && !tiedToIdea(`${s.title} ${s.summary}`, idea) && untied++ === 0) throw new Error(`the project must keep the learner's idea "${idea}"`);
       if (o.fits !== false) {
         const title = ideaTitle(idea);
         // Final review I4: a title in a script with no Latin letters names its folder after the model's title.
@@ -60,10 +62,9 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
       return { title: sm.title.trim(), summary: sm.summary.trim(), size: "small" as const, concepts, tooBig: true as const };
     });
   } catch (e) {
-    // Review 2026-11-09 #3: only a failure about the idea itself is an IdeaError (the caller lets the idea go then);
-    // a reply that is not JSON, or a bad size, is a model slip and keeps the idea.
-    if (e instanceof Error && /smaller version must keep|"smaller" needs/.test(e.message)) throw new IdeaError(`could not make a smaller version of your idea "${idea}"; /tutor-start tries again, or ask for something else`);
-    if (e instanceof Error && /project must keep the learner's idea/.test(e.message)) throw new IdeaError(`could not make a project from your idea "${idea}"; /tutor-start tries again, or ask for something else`);
+    // Review 2026-11-09 #3: only a smaller version that drops the idea is an IdeaError (the caller lets the idea go
+    // then); a reply that is not JSON, a bad size or a missing "smaller" (re-review M1) is a model slip and keeps it.
+    if (e instanceof Error && /smaller version must keep/.test(e.message)) throw new IdeaError(`could not make a smaller version of your idea "${idea}"; /tutor-start tries again, or ask for something else`);
     throw e;
   }
 }

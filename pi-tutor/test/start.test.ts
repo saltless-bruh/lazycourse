@@ -198,11 +198,21 @@ describe("the fits answer, however the model writes it", () => {
     expect(await ask({ projects: [proj] })).toMatchObject({ title: ideaTitle(idea), summary: proj.summary });
   });
   // Review 2026-11-09 #2: with no fits answer, a project that ignores the idea is asked again, never shown as the idea.
-  it("no fits answer and a project unrelated to the idea: asked again, then refused as an idea problem", async () => {
+  it("no fits answer and a project unrelated to the idea: asked again once, then the idea is kept anyway", async () => {
+    // Re-review 2026-11-09 I1: an idea in another language, or worded differently, shares no word with a project
+    // that keeps it; one retry, then the learner's own words are the title.
     const todo = { title: "Todo CLI", summary: "Track your to-dos.", size: "small", concepts: [] };
-    const e = await ask({ projects: [todo] }).catch((x) => x);
-    expect(e).toBeInstanceOf(IdeaError);
-    expect(e.message).toMatch(/could not make a project from your idea/);
+    profile = Profile.open(":memory:");
+    const prompts: string[] = [];
+    const s = await suggestOne({ profile, complete: async (_s, u) => { prompts.push(u); return JSON.stringify({ projects: [todo] }); } }, { language: "python", level: 38, about: {}, exclude: [], idea });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toMatch(/must keep the learner's idea/);
+    expect(prompts[1]).not.toMatch(/"fits": false/);
+    expect(s).toMatchObject({ title: ideaTitle(idea) });
+  });
+  it("fits false with no usable smaller version, twice, is a model slip and keeps the idea (re-review M1)", async () => {
+    const e = await ask({ projects: [proj], fits: false }).catch((x) => x);
+    expect(e).not.toBeInstanceOf(IdeaError);
   });
   it.each(["False", "no", " FALSE ", 0])("fits %j counts as false", async (fits) => {
     const smaller = { title: "Tiny LLM Agent", summary: "One agent step with an LLM.", concepts: [] };

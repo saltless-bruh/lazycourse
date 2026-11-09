@@ -1673,9 +1673,10 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen.at(-1)).toMatch(/idea \(keep it\): a number guessing game/);
   });
-  it("a model that twice ignores the idea lets it go, so the next try suggests for the level", async () => {
-    const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo] }), JSON.stringify({ projects: [todo] }), JSON.stringify({ projects: [todo] })]);
-    expect(b.notes.some((n) => /could not make a project from your idea.*suggests a project for your level/.test(n))).toBe(true);
+  it("a smaller version that twice drops the idea lets the idea go, so the next try suggests for the level", async () => {
+    const off = { title: "Todo List CLI", summary: "Track todos.", concepts: [] };
+    const { b, seen } = await ideaFlow("a 3D game engine", [JSON.stringify({ projects: [todo], fits: false, smaller: off }), JSON.stringify({ projects: [todo], fits: false, smaller: off }), JSON.stringify({ projects: [todo] })]);
+    expect(b.notes.some((n) => /could not make a smaller version of your idea.*suggests a project for your level/.test(n))).toBe(true);
     expect((await saved()).ideaDropped).toBe(true);
     await b.commands["tutor-start"].handler("", b.ctx);
     await new Promise((r) => setTimeout(r, 50));
