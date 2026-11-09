@@ -61,7 +61,7 @@ export function nextStep(i: WayInput): string {
     "plan-failed": () => "/tutor-start spec to retry the plan",
     "project": () => "/tutor-plan <task> from spec/tasks.md",
     "recipe": () => `step ${i.recipe!.step} ${i.recipe!.action}, or say "skip"`,
-    "stuck": () => ":TutorRun test, or ask: <leader>te",
+    "stuck": () => ":TutorRun test, or ask: <leader>ts",
     "checks-pass": () => `:TutorDone ${i.passingTask}`,
     // Live 2026-11-09: "/tutor-lesson next, or check" before any exercise file; the learner looked for how to make one.
     "lesson": () => ({ get: "/tutor-lesson next writes the exercise", write: "/tutor-lesson check after the exercise",
