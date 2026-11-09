@@ -411,12 +411,12 @@ export default function (pi: ExtensionAPI): void {
     if (trigger.timedOut) { signal = "tests timed out"; paint(); if (nudge) offerFor(trigger, offerSpot(trigger)); return; }
     const spot = spotKey ?? spotOf(trigger.trace), hash = sourceHash(root);
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
-      const before = episode.attempts;
       episode = recordAttempt({ ...episode, trigger }, { spot, hash });
       remember(episode);
       pi.appendEntry("tutor_episode", episode);
-      // Ask-first spec 2026-11-09: the try counts silently; the learner gets an offer, not a reply.
-      if (episode.attempts > before && nudge) offerFor(trigger, offerSpot(trigger, spot));
+      // Ask-first spec 2026-11-09: the try counts silently (an unchanged rerun is no new try); every failed run
+      // still gets its own offer, not a reply (minor M7).
+      if (nudge) offerFor(trigger, offerSpot(trigger, spot));
       return;
     }
     if (episode) closeEp("superseded");
@@ -698,7 +698,10 @@ export default function (pi: ExtensionAPI): void {
     if (!tick) {
       tick = setInterval(() => {
         const ev = detector.tick(Date.now());
-        if (ev.length) { onStuck(ev); paint(); }
+        // Ask-first minor M3: the quiet label counts down, and goes when quiet ends, with no other event to repaint.
+        const q = quietNow(), quietNowLabel = q === null ? undefined : quietLabel(q);
+        if (ev.length) onStuck(ev);
+        if (ev.length || quietNowLabel !== state.quiet) paint();
         if (!offersOff()) showOffer(offers.due(Date.now(), offerCurrent));
       }, TICK_MS);
       tick.unref?.();

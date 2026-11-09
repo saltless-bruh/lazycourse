@@ -27,6 +27,15 @@ describe("renderWidget", () => {
     expect(renderWidget({ state: "idle", connected: false, last: "wrong" })[1]).toBe("outside nvim · idle · judged wrong");
     expect(renderWidget({ state: "stuck: learner question", connected: false, lost: true })[1]).toBe("nvim closed · stuck: learner question");
   });
+  it("off Neovim with quiet on, the judgment still shows whole (ask-first minor M4)", () => {
+    for (const [lost, prefix] of [[true, "nvim closed · "], [false, "outside nvim · "]] as const) {
+      const l = renderWidget({ state: "stuck: learner question", connected: false, lost, quiet: "notices off 10m", last: "partial" })[1];
+      expect(l.startsWith(prefix)).toBe(true);
+      expect(l.endsWith(" · judged partial")).toBe(true);
+      expect(l).toMatch(/notices off|quiet/);
+      expect(visibleWidth(l)).toBeLessThanOrEqual(44);
+    }
+  });
   it("clips the state, never the judgment, so '· judged X' survives at 44 columns (M6c I2)", () => {
     for (const [lost, prefix] of [[true, "nvim closed · "], [false, "outside nvim · "]] as const) {
       const l = renderWidget({ state: "stuck: learner question", connected: false, lost, last: "partial" })[1];

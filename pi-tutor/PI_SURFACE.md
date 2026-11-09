@@ -278,6 +278,13 @@ Re-verify every line when bumping versions.
   first and reruns via `vim.schedule` (a lazy keymap).
 - Push autocmds live in `extensions/tutor/push.lua.ts` and are installed with `nvim_exec_lua`;
   `vim.g.tutor_chan` holds the extension's channel for `:TutorRun`.
+- Ask-first stuck help (spec 2026-11-09): `NvimLink.offer(text)` runs `vim.notify(text, vim.log.levels.INFO,
+  { title = "tutor", timeout = 8000 })` inside `vim.schedule` (live 2026-11-10: the 3 s default faded too fast) (LazyVim's notifier shows it in a corner; no window, focus or mode change;
+  probed headless on Neovim 0.12). nvim-tutor's `<leader>ts` sends the `{ kind = "stuck", path, line, error? }` payload
+  over `vim.rpcnotify(chan, "tutor", …)` like the other payloads.
+- `:TutorQuiet` with no argument opens `vim.ui.select(items, { prompt = "Stuck notices" }, on_choice)` (a function on
+  Neovim 0.12.6; LazyVim shows its picker); `on_choice(item, idx)` gets nil on cancel, and the choice is typed as
+  `/tutor-quiet <arg>` into the pane. `<leader>ts` checks `term.textlocked()` first and reruns via `vim.schedule`.
 
 ## Node
 - `node:sqlite` `DatabaseSync` (profile). No ExperimentalWarning on Node 26.11.1 (2026-10-12); on Node 22.x it
@@ -295,7 +302,3 @@ Re-verify every line when bumping versions.
 ## Install location on this machine
 - Pi installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is
   root-owned; `~/.local/bin` precedes `/usr/bin` on PATH, shadowing the old 0.73 copy.
-- Ask-first stuck help (spec 2026-11-09): `NvimLink.offer(text)` runs `vim.notify(text, vim.log.levels.INFO,
-  { title = "tutor", timeout = 8000 })` inside `vim.schedule` (live 2026-11-10: the 3 s default faded too fast) (LazyVim's notifier shows it in a corner; no window, focus or mode change;
-  probed headless on Neovim 0.12). nvim-tutor's `<leader>ts` sends the `{ kind = "stuck", path, line, error? }` payload
-  over `vim.rpcnotify(chan, "tutor", …)` like the other payloads.

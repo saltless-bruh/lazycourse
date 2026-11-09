@@ -55,7 +55,12 @@ export function renderWidget(s: TutorState): string[] {
   // Off Neovim the state and judgment still show; the prefix says why (M1b #2, M2 #10, M3 #23).
   // The state is clipped to the room the prefix and the judgment leave, so "· judged X" always shows (M6c I2).
   const prefix = s.connected ? "" : `${s.lost ? "nvim closed" : "outside nvim"} · `;
-  const suffix = `${s.quiet ? ` · ${s.quiet}` : ""}${s.last ? ` · judged ${s.last}` : ""}`;
+  const judged = s.last ? ` · judged ${s.last}` : "";
+  const left = (q: string) => MAX - visibleWidth(prefix) - visibleWidth(q) - visibleWidth(judged);
+  // Ask-first minor M4: the quiet label gives way before the judgment does — short form, then none.
+  let quiet = s.quiet ? ` · ${s.quiet}` : "";
+  if (quiet && left(quiet) < 8) quiet = left(" · quiet") >= 4 ? " · quiet" : "";
+  const suffix = `${quiet}${judged}`;
   const room = Math.max(1, MAX - visibleWidth(prefix) - visibleWidth(suffix));
   const lines = [clip(line1), clip(`${prefix}${clip(s.state, room)}${suffix}`)];
   return s.next ? [...lines, clip(s.next)] : lines;

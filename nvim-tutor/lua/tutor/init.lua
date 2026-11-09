@@ -222,6 +222,8 @@ end
 --- Ask-first spec 2026-11-09: <leader>ts, "I'm stuck". Sends the cursor's spot (and its error) to the tutor; the
 --- tutor answers in its pane, which is shown if hidden, while the cursor stays here in NORMAL mode.
 function M.ask_stuck()
+  -- Ask-first minor M1: under textlock (E565) the pane cannot open and focus cannot come back; ask from the event loop.
+  if require("tutor.term").textlocked() then vim.schedule(M.ask_stuck); return end
   local file = vim.api.nvim_buf_get_name(0)
   local root = vim.fs.normalize(vim.fn.resolve(opts.cwd)) .. "/"
   local real = file ~= "" and vim.fs.normalize(vim.fn.resolve(file)) or ""
