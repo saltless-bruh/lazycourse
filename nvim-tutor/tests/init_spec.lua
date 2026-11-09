@@ -262,6 +262,55 @@ describe("tutor.init", function()
     assert.is_true(has("[ask-error] main.py:2: name 'y' is not defined | code: print(y)"))
   end)
 
+  -- Ask-first spec 2026-11-09: <leader>ts asks for stuck help; the pane answers, the cursor stays in the code.
+  it("ask_stuck sends the cursor's spot (and its error) and keeps the cursor in the editor", function()
+    local tutor = require("tutor")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "x = 1", "print(y)", "z = 3" }, dir .. "/main.py")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false })
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("silent! only")
+    vim.cmd.edit(dir .. "/main.py")
+    local ns = vim.api.nvim_create_namespace("tutor-test-ts")
+    vim.diagnostic.set(ns, 0, { { lnum = 1, col = 0, message = "name 'y' is not defined", severity = vim.diagnostic.severity.ERROR } })
+    local win = vim.api.nvim_get_current_win()
+    assert.is_false(tutor.state.term:is_visible())
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    tutor.ask_stuck()
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    tutor.ask_stuck()
+    tutor._notify_override = nil
+    assert.equals(vim.fn.resolve(dir .. "/main.py"), vim.fn.resolve(sent[1].path))
+    assert.same({ "stuck", 3 }, { sent[1].kind, sent[1].line })
+    assert.is_nil(sent[1].error)
+    assert.equals("name 'y' is not defined", sent[#sent].error)
+    assert.equals(2, sent[#sent].line)
+    assert.is_true(tutor.state.term:is_visible())
+    assert.equals(win, vim.api.nvim_get_current_win())
+    assert.equals("n", vim.api.nvim_get_mode().mode)
+    assert.is_not_nil(vim.fn.maparg("<leader>ts", "n", false, true).callback)
+    assert.equals(2, vim.fn.exists(":TutorStuck"))
+  end)
+
+  it("ask_stuck outside the project sends nothing and says to open a project file", function()
+    local tutor = require("tutor")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false })
+    local sent, notes, orig = {}, {}, vim.notify
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.notify = function(m) table.insert(notes, m) end
+    vim.cmd("silent! only")
+    vim.cmd("enew")
+    tutor.ask_stuck()
+    vim.notify = orig
+    tutor._notify_override = nil
+    assert.same({}, sent)
+    assert.truthy(table.concat(notes, "\n"):find("<leader>ts", 1, true))
+  end)
+
   it("the right-click entry is enabled only on a line with a diagnostic; <leader>te asks too", function()
     local tutor = require("tutor")
     local dir = vim.fn.tempname()

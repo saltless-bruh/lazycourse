@@ -1504,3 +1504,86 @@ describe("a :Tutor command typed into the pane runs in Neovim (2026-11-09)", () 
     expect(await nvim!.lua("return vim.g.bad")).toBeNull();
   }, 20000);
 });
+
+// Ask-first spec 2026-11-09: <leader>ts is the learner asking; the tutor answers then, and only then.
+describe("<leader>ts asks for stuck help (ask-first)", () => {
+  const stuck = (path: string, line: number, error?: string) =>
+    nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "stuck", path, line, ...(error ? { error } : {}) }]);
+  const asked = (b: { nudges: { text: string }[] }) => b.nudges.filter((n) => /stuck \(asked\)/.test(n.text));
+
+  it("opens an episode at the spot, answers with one nudge and says what was asked", async () => {
+    const b = await linked();
+    await stuck(join(h!.root, "a.py"), 1);
+    await until(() => asked(b).length === 1);
+    expect(asked(b)[0].text).toMatch(/a\.py:1/);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "idle", line: 1 } });
+    expect(b.notes.some((n) => /^stuck: a\.py:1$/.test(n))).toBe(true);
+  }, 20000);
+  it("while Pi is mid-reply the request waits and is answered after (Review Focus 1)", async () => {
+    const b = await linked(true);
+    await stuck(join(h!.root, "a.py"), 1);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(asked(b)).toEqual([]);
+    b.busy.value = false;
+    await until(() => asked(b).length === 1);
+  }, 20000);
+  it("with an error on the line it asks about that error", async () => {
+    const b = await linked();
+    await setError("boom");
+    await stuck(join(h!.root, "a.py"), 1, "boom");
+    await until(() => asked(b).length === 1);
+    expect(asked(b)[0].text).toMatch(/boom/);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "error", msg: "boom" } });
+  }, 20000);
+  it("after a pause offer it uses that offer's spot, and the spot can be offered again", async () => {
+    const b = await linked();
+    await recordNotices();
+    const idle = (ms: number) => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "idle", buf: 1, path: join(h!.root, "a.py"), line: 5, since_ms: ms }]);
+    await idle(1_000); await idle(10_000_000);
+    await untilNotice();
+    await stuck(join(h!.root, "a.py"), 1);
+    await until(() => asked(b).length === 1);
+    expect(asked(b)[0].text).toMatch(/a\.py:5/);
+    await idle(1_000); await idle(10_000_000);
+    await until(() => offerTexts(b).length === 2);
+  }, 20000);
+  it("in architect mode the architect answers", async () => {
+    const b = await linked();
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    await stuck(join(h!.root, "a.py"), 1);
+    await until(() => asked(b).length === 1);
+  }, 20000);
+  it("a path outside the project is ignored (Review Focus 2)", async () => {
+    const b = await linked();
+    await stuck("/etc/passwd", 1);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(asked(b)).toEqual([]);
+    expect(episodes(b.entries)).toEqual([]);
+  }, 20000);
+  it("during an exam: no help, and the notice says so", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    await recordNotices();
+    const { PY_EXAM } = await import("./exam-fixtures.js");
+    await b.commands["tutor-plan"].handler("off", b.ctx); // doneProject starts a recipe; an exam needs none
+    b.replies.push(JSON.stringify(PY_EXAM));
+    await b.commands["tutor-exam"].handler("small", b.ctx);
+    expect(b.entries.some((e) => e.type === "tutor_exam")).toBe(true);
+    await stuck(join(root, "src", "main.py"), 1);
+    await untilNotice();
+    expect((await notices()).at(-1)).toMatch(/Not during the exam/);
+    expect(asked(b)).toEqual([]);
+  }, 30000);
+  it("pressed on an error counts toward reads-errors like <leader>te", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    await nvim!.command(`edit ${join(root, "src", "main.py")}`);
+    await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 1, col = 0, severity = 1, message = "boom" }})`);
+    await new Promise((r) => setTimeout(r, 300));
+    await stuck(join(root, "src", "main.py"), 2, "boom");
+    await until(() => asked(b).length === 1);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    try {
+      expect(p.habitEvents().filter((e) => e.habit === "reads-errors").map((e) => [e.ok, e.evidence])).toEqual([[false, "stuck:src/main.py:2"]]);
+    } finally { p.close(); }
+  }, 30000);
+});

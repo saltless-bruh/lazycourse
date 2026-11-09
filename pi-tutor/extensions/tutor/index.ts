@@ -1,6 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -508,6 +508,43 @@ export default function (pi: ExtensionAPI): void {
     paint();
   }
 
+  /**
+   * Ask-first spec 2026-11-09: <leader>ts. The learner asks for help at their spot (or at the offer just shown, while
+   * it still holds); the tutor answers now, never before. Not during an exam or a step-up.
+   */
+  function askStuck(p: Extract<TutorPayload, { kind: "stuck" }>) {
+    const base = project?.path ?? session?.cwd;
+    if (!base || !session) return;
+    const root = realCwd(base);
+    let real: string;
+    try { real = realpathSync(p.path); } catch { return; }
+    if (!real.startsWith(root + "/")) return;
+    const rel = relative(root, real);
+    if (exam || stepUp) {
+      const t = `Not during the ${exam ? "exam" : "step-up test"}: <leader>ts works again after it`;
+      if (link) link.offer(t).catch(() => {}); else ui?.notify(t, "info");
+      return;
+    }
+    if (p.error) {
+      const since = detector.errorSince(p.path) ?? detector.errorSince(real);
+      recordHabit("reads-errors", readsErrorEvent({ shownMs: since === null ? null : Date.now() - since }, false), `stuck:${rel}:${p.line}`);
+    }
+    const pend = offers.pending();
+    const holds = !!pend && (pend.trigger.kind === "run" ? episode?.trigger.kind === "run"
+      : offerCurrent(pend) || ("path" in pend.trigger && pend.trigger.path === p.path));
+    const trigger: Trigger = holds ? pend!.trigger
+      : p.error ? { kind: "error", path: p.path, line: p.line, msg: p.error } : { kind: "idle", path: p.path, line: p.line };
+    offers.reset(holds ? pend!.spot : offerSpot(trigger));
+    if (!episode || offerSpot(episode.trigger) !== offerSpot(trigger)) {
+      if (episode) closeEp("superseded");
+      episode = openEpisode(trigger, bandFor(level()), Date.now());
+      pi.appendEntry("tutor_episode", episode);
+    }
+    ui?.notify(`stuck: ${rel}:${p.line}`, "info");
+    lastNudge = Date.now();
+    sendNudge(session, `${TUTOR_PREFIX} stuck (asked): ${describeTrigger(trigger)}`);
+  }
+
   function onPayload(p: TutorPayload) {
     switch (p.kind) {
       case "diagnostics":
@@ -516,6 +553,7 @@ export default function (pi: ExtensionAPI): void {
       case "idle": signal = `idle ${Math.round(p.since_ms / 1000)}s`; break;
       case "churn": signal = `churning lines ${p.region[0]}-${p.region[1]}`; break;
       case "tour": { onTour(p); return; }
+      case "stuck": { askStuck(p); paint(); return; }
       case "run_output": {
         signal = p.code === 0 ? "run passed" : p.timed_out ? "tests timed out" : `run failed (exit ${p.code})`;
         // Final review I5: a :TutorRun run is a run too, for small runs.
