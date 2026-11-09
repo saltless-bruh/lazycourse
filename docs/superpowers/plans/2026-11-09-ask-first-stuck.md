@@ -192,6 +192,30 @@ Pi `"stuck"` payload:
 - [ ] **Step 4: Run** both suites and `npm run typecheck` — expect PASS.
 - [ ] **Step 5: Commit** `feat: <leader>ts asks for stuck help — the pane answers, the cursor stays in the code`.
 
+### Task 5b: Help climbs on asks, not on runs
+
+**Files:**
+- Modify: `pi-tutor/extensions/tutor/ladder.ts` (`Episode.climbs?`, `Episode.askedAt?`, `askHelp`, `stepFor`,
+  `restoreAttempts`), `pi-tutor/extensions/tutor/index.ts` (`askStuck`, the `[ask-error]` path, `spotMemory`,
+  `/tutor-fix` message, `answersRun`)
+- Test: `pi-tutor/test/ladder.test.ts`, `pi-tutor/test/episode.test.ts`
+
+**Interfaces:**
+- Produces: `Episode.climbs?: number` (asks that followed new effort; absent = 0), `Episode.askedAt?: { attempts:
+  number; hash: string }`; `export function askHelp(ep: Episode, hash: string): Episode` — first ask: `climbs =
+  attempts > 0 ? 1 : 0`; later asks: `+1` only if `attempts > askedAt.attempts || hash !== askedAt.hash`; always sets
+  `askedAt`. `stepFor` reads `climbs` where it read `attempts` (same STAGES, delay, pro and exam rules).
+- Unchanged on `attempts`: `recordAttempt`, `attemptScore`, `mirror` (`rungs_used`), widget `try N`, feedback rung.
+
+- [ ] **Step 1: Failing tests.** ladder: `stepFor` with `attempts: 7, climbs: 0` → `teach`; the existing stage rows
+  rewritten on `climbs`; `askHelp`: first ask with attempts 3 → climbs 1; same hash and attempts → unchanged climbs;
+  new hash → +1; more attempts → +1. episode: five failed runs on one spot, then a `stuck` payload → the turn's
+  `this turn:` line is the hint instruction; pressing again with no change → still hint; edit + failed run + ask →
+  why (beginner). `[ask-error]` counts as an ask on an open episode.
+- [ ] **Step 2: Run** — FAIL. **Step 3: Implement** (an ask nudge prompt `[tutor] stuck (asked): run failed…` counts
+  as answering the run for the fix step). **Step 4:** both suites + typecheck PASS. **Step 5: Commit**
+  `feat: help climbs on the learner's asks, not on failed runs — runs still count for habits`.
+
 ### Task 6: Quiet mode — `/tutor-quiet` and `:TutorQuiet`
 
 **Files:**
