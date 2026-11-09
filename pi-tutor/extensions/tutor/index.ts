@@ -26,7 +26,7 @@ import { luaRuntime } from "./luarc.js";
 import { goVersionOf, manifestFor } from "./manifest.js";
 import { liveChecks, parseChecks, renderChecksMd, tickedIds, openTaskIds, shortNumber, type TickHow, type Check } from "./checks.js";
 import { fallbackChecks, pickFallback } from "./improve-fallback.js";
-import { describe as describeCmd, commandNote } from "./commands.js";
+import { describe as describeCmd, commandNote, editorCommandOf } from "./commands.js";
 import { refreshPlanBuffers } from "./plan-reload.js";
 import { whereOf, nextStep, sessionCard, type Where, type WayInput } from "./wayfinding.js";
 import { taskTerms } from "./similarity.js";
@@ -931,7 +931,17 @@ export default function (pi: ExtensionAPI): void {
     return [new Set(openTaskIds(tasksMd)), fns];
   }
 
-  pi.on("input", (event) => {
+  pi.on("input", async (event, ctx) => {
+    // 2026-11-09: `:TutorTour` typed into the pane went to the model as chat. A listed Neovim command runs in Neovim.
+    const cmd = editorCommandOf(event.text);
+    if (cmd) {
+      const typed = `:${cmd.name}${cmd.args.length ? ` ${cmd.args.join(" ")}` : ""}`;
+      if (link) {
+        try { await link.runEditorCommand(cmd.name, cmd.args); ctx.ui.notify(`ran ${typed} in Neovim (Neovim commands start with ":" and go in the editor; here you talk to the tutor)`, "info"); }
+        catch { ctx.ui.notify(`${typed} is a Neovim command: press <Esc><Esc>, then <C-w>h, and type it in the editor`, "warning"); }
+      } else ctx.ui.notify(`${typed} is a Neovim command: type it in the editor, not here`, "info");
+      return { action: "handled" as const };
+    }
     if (event.streamingBehavior) pendingSteers++;
     return undefined;
   });

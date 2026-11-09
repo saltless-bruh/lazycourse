@@ -60,3 +60,14 @@ export function commandNote(w: Where): string {
   return ["The tutor's own commands, the ones to point the learner to now (never to an outside terminal). "
     + "`:Name` is typed in the editor, `/name` in the tutor pane:", ...lines].join("\n");
 }
+
+/**
+ * 2026-11-09: a `:Tutor…` command typed into the tutor pane (the learner thought they were in the editor) is a listed
+ * Neovim command, never a chat message. Only names in the list count; the rest of the line becomes its arguments.
+ */
+export function editorCommandOf(text: string): { name: string; args: string[] } | null {
+  const m = /^:(Tutor\w*)(?:\s+(.*))?$/.exec(text.trim());
+  if (!m) return null;
+  if (!loadCommands().some((c) => c.where === "editor" && !c.planned && c.name === `:${m[1]}`)) return null;
+  return { name: m[1], args: m[2] ? m[2].trim().split(/\s+/) : [] };
+}

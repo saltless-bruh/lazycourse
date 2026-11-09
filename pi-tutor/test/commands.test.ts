@@ -49,3 +49,16 @@ describe("the README", () => {
     expect(missing).toEqual([]);
   });
 });
+
+import { editorCommandOf } from "../extensions/tutor/commands.js";
+describe("editorCommandOf (2026-11-09: :TutorTour typed into the pane reached the model)", () => {
+  it.each([
+    [":TutorTour", { name: "TutorTour", args: [] }],
+    ["  :TutorRun test  ", { name: "TutorRun", args: ["test"] }],
+    [":TutorDone P1.T2 anyway", { name: "TutorDone", args: ["P1.T2", "anyway"] }],
+    [":TutorBogus", null],
+    [":w", null],
+    ["what does :TutorRun do?", null],
+    ["/tutor-start", null],
+  ])("%j", (text, want) => expect(editorCommandOf(text)).toEqual(want));
+});

@@ -219,6 +219,13 @@ function M.start(o)
   st.status = "running"
   write_files(restart)
   save(st)
+  -- 2026-11-09 live: a swap file left by a killed Neovim stopped the tour at "Found a swap file". The tour's files are
+  -- generated practice text, so they always open for editing without asking.
+  vim.api.nvim_create_autocmd("SwapExists", {
+    group = vim.api.nvim_create_augroup("tutor-tour-swap", { clear = true }),
+    pattern = M.dir() .. "/*",
+    callback = function() vim.v.swapchoice = "e" end,
+  })
   local tutor = require("tutor")
   if not (tutor.state.term and tutor.switch(M.dir(), "tour.txt")) then pcall(vim.cmd.edit, vim.fn.fnameescape(file("tour.txt"))) end
   -- Final review M2: never fall back to the current buffer — it is the learner's own (restart would wipe its edits).

@@ -707,6 +707,20 @@ describe("tutor start-up", function()
     end
   end)
 
+  -- 2026-11-09: :TutorTour typed right after start-up went into the pane (the cursor was there, in typing mode) and
+  -- reached the model as a chat message. Auto-open shows the pane but leaves the learner in the editor.
+  it("auto-open leaves the cursor in the editor, in normal mode", function()
+    local pf = tmp .. "/projects.json"; vim.fn.writefile({ vim.json.encode({ project }) }, pf)
+    local t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse })
+    local editor = vim.api.nvim_get_current_win()
+    t.on_start({ argv = {}, cwd = project, ui = true })
+    vim.wait(50)
+    assert.is_true(t.state.term:is_visible())
+    assert.equals(editor, vim.api.nvim_get_current_win())
+    assert.equals("n", vim.api.nvim_get_mode().mode)
+    t.state.term:hide()
+  end)
+
   it("in a project folder the tutor opens; elsewhere it does not", function()
     local pf = tmp .. "/projects.json"; vim.fn.writefile({ vim.json.encode({ project }) }, pf)
     local t = fresh({ projects_file = pf, profile_file = pf, lazycourse = lazycourse })

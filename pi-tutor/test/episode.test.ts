@@ -1448,3 +1448,17 @@ describe(":TutorTour through a real Neovim", () => {
     await link!.close();
   }, 20000);
 });
+
+describe("a :Tutor command typed into the pane runs in Neovim (2026-11-09)", () => {
+  it("it runs there, as a structured command (no | chaining), and never reaches the model", async () => {
+    const b = await linked();
+    await nvim!.lua(`vim.api.nvim_create_user_command("TutorTour", function(a) vim.g.tour_args = a.args end, { nargs = "?" })`);
+    const r = await b.events["input"]({ type: "input", text: ":TutorTour restart | let g:bad = 1", source: "interactive" }, b.ctx);
+    expect(r).toEqual({ action: "handled" });
+    await until(() => true);
+    await new Promise((res) => setTimeout(res, 200));
+    expect(await nvim!.lua("return vim.g.tour_args")).toBe("restart | let g:bad = 1");
+    expect(await nvim!.lua("return vim.g.bad")).toBeNull();
+    expect(b.notes.at(-1)).toMatch(/ran :TutorTour restart .* in Neovim/);
+  }, 20000);
+});

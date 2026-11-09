@@ -2940,3 +2940,17 @@ describe("empty replies", () => {
     expect(rewrites(b)).toHaveLength(0);
   });
 });
+
+describe("Neovim commands typed into the pane (2026-11-09)", () => {
+  it("without Neovim, a :Tutor command is not sent to the model; the learner is told where to type it", async () => {
+    const b = await boot();
+    const r = await b.events["input"]({ type: "input", text: ":TutorRun test", source: "interactive" }, b.ctx);
+    expect(r).toEqual({ action: "handled" });
+    expect(b.notes.at(-1)).toMatch(/:TutorRun test.*editor/);
+  });
+  it("ordinary text and unknown commands go on as before", async () => {
+    const b = await boot();
+    expect(await b.events["input"]({ type: "input", text: "hello", source: "interactive" }, b.ctx)).toBeUndefined();
+    expect(await b.events["input"]({ type: "input", text: ":TutorBogus", source: "interactive" }, b.ctx)).toBeUndefined();
+  });
+});

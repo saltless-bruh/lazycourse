@@ -310,7 +310,12 @@ function M.on_start(s)
   if root then
     opts.cwd = root -- the tutor's project root, and :TutorRun's folder
     M.state.term.opts.cwd = opts.cwd
+    local editor = vim.api.nvim_get_current_win()
     M.state.term:show()
+    -- 2026-11-09: the learner starts in the editor, in normal mode, so a first `:TutorTour` reaches Neovim, not the
+    -- model; the pane is beside it and the session card there says how to move over.
+    if vim.api.nvim_win_is_valid(editor) then vim.api.nvim_set_current_win(editor) end
+    vim.cmd.stopinsert()
   elseif vim.fn.filereadable(opts.profile_file) == 0 then
     vim.notify("[tutor] New to lazycourse? :TutorTour teaches Neovim and the tutor", vim.log.levels.INFO, { timeout = 15000 })
   end

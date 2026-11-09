@@ -167,6 +167,10 @@ Re-verify every line when bumping versions.
   Tour autocmds (Lua side): TermEnter/TermLeave in the tutor pane, WinEnter, TermClose and WinClosed of the run
   split (`vim.b.tutor_run`/`vim.w.tutor_run`), BufWritePost, CmdlineLeave (`getcmdtype() == "/"`), BufEnter in
   ~/lazycourse/.tour, `vim.diagnostic.set` on hello.lua for the ask-error step. Probed headless on Neovim 0.12.6.
+- `pi.on("input", …)` returning `{ action: "handled" }` (types.d.ts `InputEventResult`, Pi 1.5.0), 2026-11-09: a listed
+  `:Tutor…` command typed into the pane never reaches the model; Pi asks Neovim to run it with
+  `vim.api.nvim_cmd({ cmd = name, args = … }, {})` inside `vim.schedule` (arguments as data, so `|` cannot chain another
+  Ex command; one-argument commands get the rest of the line as one argument).
 - `pi.registerMessageRenderer(customType, (message, options, theme) => Component | undefined)` (types.d.ts:1250,
   `MessageRenderer` at :1169; Pi 1.3.0): the `tutor_card` session card renders as `new Text(content, 1, 0)` from
   `@earendil-works/pi-tui` (`components/text.d.ts`: `constructor(text?, paddingX?, paddingY?, customBgFn?)`), so it

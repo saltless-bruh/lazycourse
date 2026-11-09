@@ -247,4 +247,13 @@ describe("tutor.tour", function()
     assert.same({}, has_group and hooks or {})
     vim.api.nvim_buf_delete(mine, { force = true })
   end)
+
+  -- 2026-11-09 live: a swap file left by a killed Neovim stopped :TutorTour at the "Found a swap file" prompt. The
+  -- tour's files are generated practice text: they open without asking.
+  it("a leftover swap file for the tour's files never asks", function()
+    require("tutor.tour").start()
+    vim.v.swapchoice = ""
+    vim.api.nvim_exec_autocmds("SwapExists", { pattern = require("tutor.tour").dir() .. "/tour.txt" })
+    assert.equals("e", vim.v.swapchoice)
+  end)
 end)
