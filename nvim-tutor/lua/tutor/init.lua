@@ -237,7 +237,9 @@ function M.ask_stuck()
     if vim.api.nvim_win_is_valid(editor) then vim.api.nvim_set_current_win(editor) end
     vim.cmd.stopinsert()
   end
-  M.notify_tutor({ kind = "stuck", path = real, line = row, error = d[1] and (d[1].message:gsub("%s*\n%s*", " ")) or nil })
+  if not M.notify_tutor({ kind = "stuck", path = real, line = row, error = d[1] and (d[1].message:gsub("%s*\n%s*", " ")) or nil }) then
+    vim.notify("[tutor] the tutor is not running; :TutorRestart, then <leader>ts", vim.log.levels.WARN)
+  end
 end
 
 --- Re-root the tutor at `dir`: cd there, open `file` in the editor window, restart Pi with cwd = dir.

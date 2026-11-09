@@ -312,6 +312,25 @@ describe("tutor.init", function()
     assert.is_true(has("/tutor-quiet 1h"))
   end)
 
+  it("ask_stuck with the tutor not connected says so (final review I2)", function()
+    local tutor = require("tutor")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "x = 1" }, dir .. "/main.py")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false })
+    tutor._notify_override = nil
+    local chan = vim.g.tutor_chan
+    vim.g.tutor_chan = nil
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    vim.cmd("silent! only")
+    vim.cmd.edit(dir .. "/main.py")
+    tutor.ask_stuck()
+    vim.notify = orig
+    vim.g.tutor_chan = chan
+    assert.truthy(table.concat(notes, "\n"):find("not running", 1, true), table.concat(notes, "\n"))
+  end)
+
   it("ask_stuck outside the project sends nothing and says to open a project file", function()
     local tutor = require("tutor")
     local dir = vim.fn.tempname()

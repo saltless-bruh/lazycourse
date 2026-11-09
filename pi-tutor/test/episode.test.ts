@@ -1662,3 +1662,87 @@ describe("/tutor-quiet (ask-first)", () => {
     expect(b.notes.at(-1)).toMatch(/notices off for 1 hour/);
   }, 20000);
 });
+
+// Final review of ask-first (2026-11-10): fixes, each pinned by a test that failed first.
+describe("ask-first final review fixes", () => {
+  const stuckAt = (path: string, line: number, error?: string) =>
+    nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "stuck", path, line, ...(error ? { error } : {}) }]);
+  const askedN = (b: { nudges: { text: string }[] }) => b.nudges.filter((n) => /stuck \(asked\)/.test(n.text)).length;
+
+  it("I1: asks pressed during a reply wait for it to end, however long, and several presses make one ask", async () => {
+    const b = await linked(true);
+    await stuckAt(join(h!.root, "a.py"), 1);
+    await stuckAt(join(h!.root, "a.py"), 1);
+    await new Promise((r) => setTimeout(r, 300));
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      await vi.advanceTimersByTimeAsync(60_000); // well past the old 30 s cap, after which a nudge was steered in
+      expect(askedN(b)).toBe(0);
+      b.busy.value = false;
+      await vi.advanceTimersByTimeAsync(200);
+    } finally { vi.useRealTimers(); }
+    await until(() => askedN(b) === 1);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(askedN(b)).toBe(1);
+  }, 30000);
+  it("I2: an unsaved new file can still be asked about", async () => {
+    const b = await linked();
+    await stuckAt(join(h!.root, "new_file.py"), 3);
+    await until(() => askedN(b) === 1);
+  }, 20000);
+  it("I3: an old pause offer elsewhere in the file does not take over; a failing run's episode is kept", async () => {
+    const b = await linked();
+    await recordNotices();
+    const idle = (ms: number) => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "idle", buf: 1, path: join(h!.root, "a.py"), line: 5, since_ms: ms }]);
+    await idle(1_000); await idle(10_000_000);
+    await untilNotice();
+    await stuckAt(join(h!.root, "a.py"), 120);
+    await until(() => askedN(b) === 1);
+    expect(b.nudges.filter((n) => /stuck \(asked\)/.test(n.text))[0].text).toMatch(/a\.py:120/);
+    // A run episode is kept even when a pause offer is the latest.
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => (episodes(b.entries).at(-1) as { trigger: { kind: string } }).trigger.kind === "run");
+    await idle(1_000); await idle(20_000_000);
+    await new Promise((r) => setTimeout(r, 300));
+    await stuckAt(join(h!.root, "a.py"), 5);
+    await until(() => askedN(b) === 2);
+    expect(b.nudges.filter((n) => /stuck \(asked\)/.test(n.text))[1].text).toMatch(/run failed/);
+  }, 30000);
+  it("I4: <leader>te about another file starts fresh, never at the other file's step", async () => {
+    const b = await linked();
+    const t = (p: string) => turn(b.events, b.ctx, p, judged("none"));
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(h!.root, "a.py"), `x = ${i}\n`);
+      await stuckAt(join(h!.root, "a.py"), 1);
+      await until(() => askedN(b) === i + 1);
+    }
+    expect((episodes(b.entries).at(-1) as { climbs?: number }).climbs).toBeGreaterThanOrEqual(4);
+    const r = await t("[ask-error] b.py:2: boom | code: y = 1 / 0");
+    expect(JSON.stringify(r.message?.content ?? "")).toMatch(/this turn: Teach/);
+  }, 30000);
+  it("M2: a spot first seen while quiet still gets its offer once quiet ends", async () => {
+    const b = await linked();
+    await recordNotices();
+    await b.commands["tutor-quiet"].handler("1m", b.ctx);
+    const idle = (ms: number) => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "idle", buf: 1, path: join(h!.root, "a.py"), line: 5, since_ms: ms }]);
+    await idle(1_000); await idle(10_000_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await notices()).toEqual([]);
+    await b.commands["tutor-quiet"].handler("on", b.ctx);
+    await idle(1_000); await idle(10_000_000);
+    await untilNotice();
+  }, 20000);
+  it("M5: pressing <leader>ts again on the same error records reads-errors once", async () => {
+    const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
+    await nvim!.command(`edit ${join(root, "src", "main.py")}`);
+    await nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 1, col = 0, severity = 1, message = "boom" }})`);
+    await new Promise((r) => setTimeout(r, 300));
+    await stuckAt(join(root, "src", "main.py"), 2, "boom");
+    await until(() => askedN(b) === 1);
+    await stuckAt(join(root, "src", "main.py"), 2, "boom");
+    await until(() => askedN(b) === 2);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    try { expect(p.habitEvents().filter((e) => e.habit === "reads-errors")).toHaveLength(1); } finally { p.close(); }
+  }, 30000);
+});

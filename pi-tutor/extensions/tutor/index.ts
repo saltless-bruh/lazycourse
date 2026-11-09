@@ -1,6 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -257,8 +257,12 @@ export default function (pi: ExtensionAPI): void {
   let quietRaw: string | undefined;
   function quietNow(): number | "always" | null { return quietLeft(quietRaw, Date.now()); }
   /** Ask-first: show an offer as a corner notice in Neovim (a pane notice without it). Never a reply. */
+  /** No offers now: quiet mode, an exam or a step-up. Then nothing is recorded either (final review M2). */
+  const offersOff = () => !!exam || !!stepUp || quietNow() !== null;
+  /** Record and show an offer for `t` at `spot`, unless offers are off. */
+  function offerFor(t: Trigger, spot: string) { if (!offersOff()) showOffer(offers.signal(t, spot, Date.now())); }
   function showOffer(o: Offer | null) {
-    if (!o || exam || stepUp || quietNow() !== null) return;
+    if (!o || offersOff()) return;
     const text = offerText(o.trigger, project?.path ?? session?.cwd ?? process.cwd());
     pi.appendEntry("tutor_offer", { spot: o.spot, count: o.count, text });
     if (link) link.offer(text).catch(() => {});
@@ -404,7 +408,7 @@ export default function (pi: ExtensionAPI): void {
     if (isSyntaxError(trigger.trace)) { signal = "run failed: a syntax error (fix the line it names)"; paint(); return; }
     // Author 2026-11-08: a test run stopped at its time limit is no graded try (a slow machine must not spend tries);
     // the tutor still hears it timed out and helps, without help climbing.
-    if (trigger.timedOut) { signal = "tests timed out"; paint(); if (nudge) showOffer(offers.signal(trigger, offerSpot(trigger), Date.now())); return; }
+    if (trigger.timedOut) { signal = "tests timed out"; paint(); if (nudge) offerFor(trigger, offerSpot(trigger)); return; }
     const spot = spotKey ?? spotOf(trigger.trace), hash = sourceHash(root);
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
       const before = episode.attempts;
@@ -412,7 +416,7 @@ export default function (pi: ExtensionAPI): void {
       remember(episode);
       pi.appendEntry("tutor_episode", episode);
       // Ask-first spec 2026-11-09: the try counts silently; the learner gets an offer, not a reply.
-      if (episode.attempts > before && nudge) showOffer(offers.signal(trigger, offerSpot(trigger, spot), Date.now()));
+      if (episode.attempts > before && nudge) offerFor(trigger, offerSpot(trigger, spot));
       return;
     }
     if (episode) closeEp("superseded");
@@ -421,7 +425,7 @@ export default function (pi: ExtensionAPI): void {
     episode = recordAttempt(prior ? { ...fresh, spot, attempts: prior.attempts, lastHash: prior.lastHash, climbs: prior.climbs, askedAt: prior.askedAt } : fresh, { spot, hash });
     remember(episode);
     pi.appendEntry("tutor_episode", episode);
-    if (nudge) showOffer(offers.signal(trigger, offerSpot(trigger, spot), Date.now()));
+    if (nudge) offerFor(trigger, offerSpot(trigger, spot));
   }
 
   /**
@@ -488,7 +492,7 @@ export default function (pi: ExtensionAPI): void {
       // Habits Task 6a (author 2026-10-27): a pause while working through a recipe is thinking, not being stuck.
       if (e.type === "open" && e.trigger.kind === "idle" && workflow) continue;
       // Ask-first spec 2026-11-09: a pause or churn only offers help; the learner asks with <leader>ts.
-      if (e.type === "open" && (e.trigger.kind === "idle" || e.trigger.kind === "churn")) showOffer(offers.signal(e.trigger, offerSpot(e.trigger), Date.now()));
+      if (e.type === "open" && (e.trigger.kind === "idle" || e.trigger.kind === "churn")) offerFor(e.trigger, offerSpot(e.trigger));
       // A failed run goes through failedRun, which counts the try and offers (never replies); nothing else talks first.
       else if (e.type === "open") openEp(e.trigger, e.trigger.kind === "run");
       else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); }
@@ -512,12 +516,34 @@ export default function (pi: ExtensionAPI): void {
    * Ask-first spec 2026-11-09: <leader>ts. The learner asks for help at their spot (or at the offer just shown, while
    * it still holds); the tutor answers now, never before. Not during an exam or a step-up.
    */
+  // Final review I1 (2026-11-10): an ask pressed during a reply waits for it to end, however long (a nudge sent while
+  // Pi streams is steered into the running reply, skipping the step the ask earned); several presses make one ask.
+  let askQueued: Extract<TutorPayload, { kind: "stuck" }> | null = null;
+  let askWaiting = false;
   function askStuck(p: Extract<TutorPayload, { kind: "stuck" }>) {
+    askQueued = p;
+    if (askWaiting) return;
+    askWaiting = true;
+    const poll = () => {
+      if (closing) { askWaiting = false; askQueued = null; return; }
+      if (!session || !session.isIdle()) { setTimeout(poll, 50).unref?.(); return; }
+      askWaiting = false;
+      const q = askQueued; askQueued = null;
+      if (q) { runAsk(q); paint(); }
+    };
+    poll();
+  }
+  /** Asked readers of an error (path|message): one reads-errors event each, however often the learner presses (M5). */
+  const askedErrors = new Set<string>();
+  function runAsk(p: Extract<TutorPayload, { kind: "stuck" }>) {
     const base = project?.path ?? session?.cwd;
     if (!base || !session) return;
     const root = realCwd(base);
+    // Final review I2: a new file not saved yet has no realpath; its folder does.
     let real: string;
-    try { real = realpathSync(p.path); } catch { return; }
+    try { real = realpathSync(p.path); } catch {
+      try { real = join(realpathSync(dirname(p.path)), basename(p.path)); } catch { ui?.notify("save the file, then <leader>ts", "info"); return; }
+    }
     if (!real.startsWith(root + "/")) return;
     const rel = relative(root, real);
     if (exam || stepUp) {
@@ -525,18 +551,22 @@ export default function (pi: ExtensionAPI): void {
       if (link) link.offer(t).catch(() => {}); else ui?.notify(t, "info");
       return;
     }
-    if (p.error) {
+    if (p.error && !askedErrors.has(`${real}|${p.error}`)) {
+      askedErrors.add(`${real}|${p.error}`);
       const since = detector.errorSince(p.path) ?? detector.errorSince(real);
       recordHabit("reads-errors", readsErrorEvent({ shownMs: since === null ? null : Date.now() - since }, false), `stuck:${rel}:${p.line}`);
     }
+    // Final review I3: a failing run's episode is kept first; a pending offer counts only when it is about this spot
+    // (the cursor's 20-line region for a pause or churn) and still current; else this file's open episode; else here.
+    const here: Trigger = p.error ? { kind: "error", path: p.path, line: p.line, msg: p.error } : { kind: "idle", path: p.path, line: p.line };
     const pend = offers.pending();
-    const holds = !!pend && (pend.trigger.kind === "run" ? episode?.trigger.kind === "run"
-      : offerCurrent(pend) || ("path" in pend.trigger && pend.trigger.path === p.path));
-    // A second ask keeps the open episode it is about (the failed run, or this file's spot), so its count goes on.
-    const keep = !!episode && (episode.trigger.kind === "run" || ("path" in episode.trigger && episode.trigger.path === p.path));
-    const trigger: Trigger = holds ? pend!.trigger : keep ? episode!.trigger
-      : p.error ? { kind: "error", path: p.path, line: p.line, msg: p.error } : { kind: "idle", path: p.path, line: p.line };
-    offers.reset(holds ? pend!.spot : offerSpot(trigger));
+    const runEp = episode?.trigger.kind === "run";
+    const holds = !!pend && pend.trigger.kind !== "run" && "path" in pend.trigger && pend.trigger.path === p.path
+      && offerCurrent(pend) && (pend.trigger.kind === "idle" ? offerSpot(pend.trigger) === offerSpot({ kind: "idle", path: p.path, line: p.line })
+        : p.line >= (pend.trigger as { region: [number, number] }).region[0] && p.line <= (pend.trigger as { region: [number, number] }).region[1]);
+    const sameFile = !!episode && "path" in episode.trigger && episode.trigger.path === p.path;
+    const trigger: Trigger = runEp ? episode!.trigger : holds ? pend!.trigger : sameFile ? episode!.trigger : here;
+    if (pend && (holds || (runEp && pend.trigger.kind === "run"))) offers.reset(pend.spot); else offers.reset(offerSpot(trigger));
     if (!episode || offerSpot(episode.trigger) !== offerSpot(trigger)) {
       if (episode) closeEp("superseded");
       episode = openEpisode(trigger, bandFor(level()), Date.now());
@@ -548,7 +578,7 @@ export default function (pi: ExtensionAPI): void {
     pi.appendEntry("tutor_episode", episode);
     ui?.notify(`stuck: ${rel}:${p.line}`, "info");
     lastNudge = Date.now();
-    sendNudge(session, `${TUTOR_PREFIX} stuck (asked): ${describeTrigger(trigger)}`);
+    pi.sendMessage({ customType: "tutor_nudge", content: `${TUTOR_PREFIX} stuck (asked): ${describeTrigger(trigger)}`, display: false }, { triggerTurn: true });
   }
 
   function onPayload(p: TutorPayload) {
@@ -669,7 +699,7 @@ export default function (pi: ExtensionAPI): void {
       tick = setInterval(() => {
         const ev = detector.tick(Date.now());
         if (ev.length) { onStuck(ev); paint(); }
-        showOffer(offers.due(Date.now(), offerCurrent));
+        if (!offersOff()) showOffer(offers.due(Date.now(), offerCurrent));
       }, TICK_MS);
       tick.unref?.();
     }
@@ -753,7 +783,13 @@ export default function (pi: ExtensionAPI): void {
     if (role.ladder && !episode && event.messageType === "user" && !prompt.startsWith(TUTOR_PREFIX)) { openEp({ kind: "chat" }, false); paint(); }
     // Author 2026-11-09: <leader>te is an ask like <leader>ts: it may move help one step (only after new effort).
     if (role.ladder && episode && event.messageType === "user" && prompt.startsWith("[ask-error]")) {
-      episode = askHelp(episode, sourceHash(realCwd(project?.path ?? session?.cwd ?? process.cwd())));
+      // Final review I4: an ask about another file starts fresh, never at the other file's step.
+      const base = realCwd(project?.path ?? session?.cwd ?? process.cwd());
+      const at = /^\[ask-error\] (.+?):\d+:/.exec(prompt)?.[1];
+      const epPath = "path" in episode.trigger ? episode.trigger.path : null;
+      const sameFile = (q: string) => { try { return realpathSync(q) === realpathSync(join(base, at!)); } catch { return q === join(base, at!); } };
+      if (at && ((epPath && !sameFile(epPath)) || (!epPath && episode.trigger.kind !== "chat"))) { closeEp("superseded"); openEp({ kind: "chat" }, false); }
+      episode = askHelp(episode!, sourceHash(base));
       if (episode.spot) remember(episode);
       pi.appendEntry("tutor_episode", episode);
     }
