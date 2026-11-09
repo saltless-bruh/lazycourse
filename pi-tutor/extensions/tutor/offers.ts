@@ -26,7 +26,8 @@ export function offerText(t: Trigger, root: string): string {
   switch (t.kind) {
     case "idle": return `Still on line ${t.line} of ${rel(t.path)}? <leader>ts if you're stuck`;
     case "churn": return `Lines ${t.region[0]}-${t.region[1]} of ${rel(t.path)} still have an error after a few rewrites. <leader>ts for help`;
-    case "run": return `${t.cmd.join(" ")} failed: read the output; <leader>ts for help`;
+    case "run": return t.timedOut ? `${t.cmd.join(" ")} was stopped at its time limit (an endless loop?); <leader>ts for help`
+      : `${t.cmd.join(" ")} failed: read the output; <leader>ts for help`;
     case "error": return `Line ${t.line} of ${rel(t.path)} has an error. <leader>ts for help`;
     default: return "<leader>ts for help";
   }

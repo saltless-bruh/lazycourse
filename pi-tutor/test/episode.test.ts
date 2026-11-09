@@ -41,6 +41,12 @@ async function linked(busy = false, branch: (root: string) => unknown[] = () => 
   await nvim.command(`edit ${join(h.root, "a.py")}`);
   return b;
 }
+/** Ask-first: the offers the extension showed (one `tutor_offer` entry each). */
+const offerTexts = (b: { entries: { type: string; data: unknown }[] }) => b.entries.filter((e) => e.type === "tutor_offer").map((e) => (e.data as { text: string }).text);
+/** Ask-first: record what the tutor shows with vim.notify in the test Neovim. */
+const recordNotices = () => nvim!.lua(`vim.g.tnotes = {}; vim.notify = function(m, l, o) if o and o.title == "tutor" then local t = vim.g.tnotes; table.insert(t, m); vim.g.tnotes = t end end`);
+const untilNotice = async (ms = 5000) => { const t0 = Date.now(); while (!(await notices()).length) { if (Date.now() - t0 > ms) throw new Error("no notice"); await new Promise((r) => setTimeout(r, 50)); } };
+const notices = async () => ((await nvim!.lua("return vim.g.tnotes")) as string[] | null) ?? [];
 const setError = (msg: string) => nvim!.lua(`local ns = vim.api.nvim_create_namespace("t"); vim.diagnostic.set(ns, 0, {{ lnum = 0, col = 0, severity = 1, message = ... }})`, [msg]);
 
 describe("language card through a real Neovim (Review Focus #4)", () => {
@@ -70,19 +76,44 @@ describe("language card through a real Neovim (Review Focus #4)", () => {
 });
 
 describe("stuck episodes through a real Neovim", () => {
-  it("an idle stretch during a recipe opens no episode; without a recipe it does (habits Task 6a)", async () => {
+  // Ask-first spec 2026-11-09: a pause only offers help in a corner notice; it starts no reply and no episode.
+  it("an idle stretch during a recipe offers nothing; without a recipe it offers help and starts no reply", async () => {
     const b = await linked();
+    await recordNotices();
     mkdirSync(join(h!.root, "spec"), { recursive: true });
     writeFileSync(join(h!.root, "spec", "tasks.md"), "- [ ] P1.T1 split the bill\n");
     await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
     const idle = (ms: number) => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "idle", buf: 1, path: join(h!.root, "a.py"), line: 1, since_ms: ms }]);
     await idle(10_000_000);
     await new Promise((r) => setTimeout(r, 300));
-    expect(episodes(b.entries)).toEqual([]);
+    expect(await notices()).toEqual([]);
     await b.commands["tutor-plan"].handler("off", b.ctx);
+    const nudgesBefore = b.nudges.length;
     await idle(1_000);
     await idle(10_000_000);
-    await until(() => episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "idle"));
+    await untilNotice();
+    expect((await notices())[0]).toMatch(/line 1 of a\.py.*<leader>ts/);
+    expect(b.nudges.length).toBe(nudgesBefore);
+    expect(episodes(b.entries).filter((e) => (e.trigger as { kind: string }).kind === "idle")).toEqual([]);
+  }, 20000);
+  it("a failed run counts its try silently and offers help; the tutor does not reply", async () => {
+    const b = await linked();
+    await recordNotices();
+    await runPayload(1, "Traceback\nKeyError: 'x'");
+    await untilNotice();
+    expect((await notices())[0]).toMatch(/python3 a\.py failed: read the output; <leader>ts/);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "run" }, attempts: 1 });
+    expect(b.nudges).toEqual([]);
+  }, 20000);
+  it("rewriting around an error offers help and starts no reply", async () => {
+    const b = await linked();
+    await recordNotices();
+    await setError("boom");
+    const churn = () => nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "churn", buf: 1, path: join(h!.root, "a.py"), region: [1, 20], edits: 10 }]);
+    await churn(); await churn();
+    await untilNotice();
+    expect((await notices())[0]).toMatch(/a\.py.*<leader>ts/);
+    expect(b.nudges).toEqual([]);
   }, 20000);
 
   it("an error that sits opens no episode and sends no nudge; the learner asks (spec 2026-10-26 §5.2)", async () => {
@@ -1064,7 +1095,9 @@ describe.skipIf(!bwrapReady)("/tutor-done (spec 2026-10-21 §7)", () => {
     await b.commands["tutor-done"].handler("P2.T2", b.ctx);
     expect(tasks()).toContain("- [ ] P2.T2");
     expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1, spot: "check:P2.T2:split_amount(48, 3)" });
-    expect(b.nudges.at(-1)?.text).toMatch(/run failed \(check P2\.T2\): split_amount\(48, 3\) gave 144, expected 16\.0/);
+    // Ask-first spec 2026-11-09: the failed check offers help; the tutor does not reply.
+    expect(b.nudges.filter((n) => /stuck signal/.test(n.text))).toEqual([]); // the recipe's own start nudge stays
+    expect(offerTexts(b).at(-1)).toMatch(/\/tutor-done P2\.T2 failed: read the output; <leader>ts/);
     await b.commands["tutor-done"].handler("", b.ctx); // the first open task; nothing changed
     expect(episodes(b.entries).at(-1)).toMatchObject({ attempts: 1 });
     writeFileSync(join(root, "src", "main.py"), "def split_amount(total, people):\n    return total / people\n");
@@ -1174,12 +1207,13 @@ describe("runtime-error episodes (spec 2026-10-13 §7 #4)", () => {
     expect(b.nudges).toEqual([]);
     expect(episodes(b.entries).some((e) => (e.trigger as { kind: string }).kind === "run")).toBe(false);
   }, 20000);
-  it("a test run stopped at its time limit is no graded try, but the tutor hears it timed out (author 2026-11-08)", async () => {
+  it("a test run stopped at its time limit is no graded try, and the offer says it timed out (author 2026-11-08; ask-first)", async () => {
     const b = await linked();
     await nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "run_output", cmd: ["pytest"], code: 143, stdout: "", stderr: "[tutor] the tests were stopped after 60 s", timed_out: true }]);
     await until(() => /tests timed out/.test(b.widgets["tutor"]?.[1] ?? ""));
-    await until(() => b.nudges.length > 0);
-    expect(b.nudges[0].text).toMatch(/tests timed out \(likely an endless loop\): pytest/);
+    await until(() => offerTexts(b).length > 0);
+    expect(offerTexts(b)[0]).toMatch(/pytest was stopped at its time limit.*<leader>ts/);
+    expect(b.nudges).toEqual([]);
     expect(episodes(b.entries).filter((e) => (e.trigger as { kind: string }).kind === "run").every((e) => (e.attempts as number) === 0)).toBe(true);
   }, 20000);
   it("an error marked in the editor no longer makes a runtime error a typo run (author 2026-10-21)", async () => {
@@ -1220,21 +1254,23 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
   it("failed runs on one spot climb; an unchanged rerun and a typo run do not", async () => {
     const b = await linked();
     await runPayload(1, "ZeroDivisionError: division by zero");
-    await until(() => attempts(b) === 1 && b.nudges.length === 1);
+    // Ask-first spec 2026-11-09: each counted try offers help; none starts a reply.
+    await until(() => attempts(b) === 1 && offerTexts(b).length === 1);
     edit("x = 1\n");
     await runPayload(1, "ZeroDivisionError: division by zero");
-    await until(() => attempts(b) === 2 && b.nudges.length === 2);
+    await until(() => attempts(b) === 2 && offerTexts(b).length === 2);
     await runPayload(1, "ZeroDivisionError: division by zero"); // nothing changed
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2);
-    expect(b.nudges).toHaveLength(2);
+    expect(offerTexts(b)).toHaveLength(2);
     edit("x = (\n");
     const runs = b.entries.filter((e) => e.type === "tutor_signal").length;
     await runPayload(1, "SyntaxError: invalid syntax");
     await until(() => b.entries.filter((e) => e.type === "tutor_signal").length > runs);
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2); // a typo run: the run's own output is a syntax error
-    expect(b.nudges).toHaveLength(2);
+    expect(offerTexts(b)).toHaveLength(2);
+    expect(b.nudges).toEqual([]);
   }, 30000);
   it("a run that fails on a new spot starts over on a new episode", async () => {
     const b = await linked();

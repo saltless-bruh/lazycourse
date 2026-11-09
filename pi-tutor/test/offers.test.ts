@@ -66,6 +66,10 @@ describe("offerSpot and offerText", () => {
     expect(t).toMatch(/read the output/);
     expect(t).toContain("<leader>ts");
   });
+  it("a timed-out run says it was stopped at its time limit", () => {
+    const t = offerText({ kind: "run", cmd: ["pytest"], code: 143, trace: "", timedOut: true }, "/r");
+    expect(t).toMatch(/pytest was stopped at its time limit.*<leader>ts/);
+  });
   it("a churn offer names the lines", () => {
     const t = offerText({ kind: "churn", path: "/r/a.py", region: [21, 40] }, "/r");
     for (const w of ["a.py", "21", "<leader>ts"]) expect(t).toContain(w);

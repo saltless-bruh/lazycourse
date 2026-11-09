@@ -44,6 +44,8 @@ import { commentPrefix } from "./scaffold.js";
 import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
+import { OfferBook, offerSpot, offerText, type Offer } from "./offers.js";
+import { QUIET_KEY, quietLeft, quietLabel } from "./quiet.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -247,7 +249,24 @@ export default function (pi: ExtensionAPI): void {
   const level = () => state.level ?? DEFAULT_LEVEL;
   // An editor trigger may open an episode when none is open, or replace one that yields (ladder.yieldsTo).
   // Spec 2026-10-26 §5.2: an error that sits never nudges; the learner asks with the right-click entry.
-  const detector = new StuckDetector(() => thresholds(level()), () => yieldsTo(episode), { errorNudges: false });
+  // Ask-first spec 2026-11-09: signals only offer help, so an open episode never blocks one (offers back off on their own).
+  const detector = new StuckDetector(() => thresholds(level()), () => true, { errorNudges: false });
+  const offers = new OfferBook(() => thresholds(level()).idleMs);
+  /** Quiet mode left (ms or "always"), or null when offers are on. */
+  // Read from the profile at session start and kept here: paint runs often and must never wait on a locked profile.
+  let quietRaw: string | undefined;
+  function quietNow(): number | "always" | null { return quietLeft(quietRaw, Date.now()); }
+  /** Ask-first: show an offer as a corner notice in Neovim (a pane notice without it). Never a reply. */
+  function showOffer(o: Offer | null) {
+    if (!o || exam || stepUp || quietNow() !== null) return;
+    const text = offerText(o.trigger, project?.path ?? session?.cwd ?? process.cwd());
+    pi.appendEntry("tutor_offer", { spot: o.spot, count: o.count, text });
+    if (link) link.offer(text).catch(() => {});
+    else ui?.notify(text, "info");
+  }
+  /** Whether an offer's spot is still going: the pause it named, or an error on the file it named. */
+  const offerCurrent = (o: Offer) => o.trigger.kind === "idle" ? detector.pausedIn()?.path === o.trigger.path
+    : o.trigger.kind === "churn" ? detector.errorKeys().some((k) => k.startsWith(`${(o.trigger as { path: string }).path}|`)) : false;
   // Spec 2026-10-13 §7.1: the model's two memory tools, scoped to this session's project.
   /** The language to use outside a recorded project: the buffer's filetype, if it is a pack language (M5 #38). */
   const editorLanguage = () => languageOfFiletype(state.language);
@@ -324,6 +343,7 @@ export default function (pi: ExtensionAPI): void {
     state.role = r.name === DEFAULT_ROLE ? undefined : r.name;
     if (!r.ladder) state.attempt = undefined;
     state.task = workflow ? workflowLabel(workflow) : undefined;
+    { const q = quietNow(); state.quiet = q === null ? undefined : quietLabel(q); }
     state.lesson = lesson ? lessonLabel(lesson) : undefined;
     const way = wayInput();
     state.next = nextStep(way);
@@ -384,14 +404,15 @@ export default function (pi: ExtensionAPI): void {
     if (isSyntaxError(trigger.trace)) { signal = "run failed: a syntax error (fix the line it names)"; paint(); return; }
     // Author 2026-11-08: a test run stopped at its time limit is no graded try (a slow machine must not spend tries);
     // the tutor still hears it timed out and helps, without help climbing.
-    if (trigger.timedOut) { signal = "tests timed out"; paint(); nudgeFor(trigger, nudge, true); return; }
+    if (trigger.timedOut) { signal = "tests timed out"; paint(); if (nudge) showOffer(offers.signal(trigger, offerSpot(trigger), Date.now())); return; }
     const spot = spotKey ?? spotOf(trigger.trace), hash = sourceHash(root);
     if (episode?.trigger.kind === "run" && episode.spot === spot) {
       const before = episode.attempts;
       episode = recordAttempt({ ...episode, trigger }, { spot, hash });
       remember(episode);
       pi.appendEntry("tutor_episode", episode);
-      if (episode.attempts > before) nudgeFor(trigger, nudge, true);
+      // Ask-first spec 2026-11-09: the try counts silently; the learner gets an offer, not a reply.
+      if (episode.attempts > before && nudge) showOffer(offers.signal(trigger, offerSpot(trigger, spot), Date.now()));
       return;
     }
     if (episode) closeEp("superseded");
@@ -400,7 +421,7 @@ export default function (pi: ExtensionAPI): void {
     episode = recordAttempt(prior ? { ...fresh, spot, attempts: prior.attempts, lastHash: prior.lastHash } : fresh, { spot, hash });
     remember(episode);
     pi.appendEntry("tutor_episode", episode);
-    nudgeFor(trigger, nudge, true);
+    if (nudge) showOffer(offers.signal(trigger, offerSpot(trigger, spot), Date.now()));
   }
 
   /**
@@ -466,7 +487,10 @@ export default function (pi: ExtensionAPI): void {
     for (const e of events) {
       // Habits Task 6a (author 2026-10-27): a pause while working through a recipe is thinking, not being stuck.
       if (e.type === "open" && e.trigger.kind === "idle" && workflow) continue;
-      if (e.type === "open") openEp(e.trigger, true);
+      // Ask-first spec 2026-11-09: a pause or churn only offers help; the learner asks with <leader>ts.
+      if (e.type === "open" && (e.trigger.kind === "idle" || e.trigger.kind === "churn")) showOffer(offers.signal(e.trigger, offerSpot(e.trigger), Date.now()));
+      // A failed run goes through failedRun, which counts the try and offers (never replies); nothing else talks first.
+      else if (e.type === "open") openEp(e.trigger, e.trigger.kind === "run");
       else if (e.type === "run_passed") { closeEp("run_passed"); spotMemory.clear(); }
       else if (episode?.trigger.kind === "error" && episode.trigger.path === e.path && episode.trigger.msg === e.msg) closeEp("cleared");
     }
@@ -516,6 +540,7 @@ export default function (pi: ExtensionAPI): void {
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
     }
+    if (profile) { const p = profile; profileWrite(() => { quietRaw = p.setting(QUIET_KEY) ?? undefined; }); }
     // Wayfinding spec §8.4: Neovim reads the project folders at start-up to open the tutor by itself there.
     if (profile) { const p = profile; profileWrite(() => writeProjectsFile(p)); }
     const proj = profile?.projectAt(realCwd(ctx.cwd));
@@ -600,6 +625,7 @@ export default function (pi: ExtensionAPI): void {
       tick = setInterval(() => {
         const ev = detector.tick(Date.now());
         if (ev.length) { onStuck(ev); paint(); }
+        showOffer(offers.due(Date.now(), offerCurrent));
       }, TICK_MS);
       tick.unref?.();
     }
