@@ -246,6 +246,7 @@ function M.start(o)
     return
   end
   M.active = true
+  warned = nil -- the text is whole again; a step broken again is reported again (review 2026-11-09 #7)
   vim.api.nvim_buf_call(buf, function() vim.cmd("silent edit!") end) -- the fresh text, also over unsaved edits
   vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
   attach(buf)

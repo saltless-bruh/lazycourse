@@ -44,10 +44,11 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
       type Small = { title?: unknown; summary?: unknown; concepts?: unknown };
       const top = v as { fits?: unknown; smaller?: Small; projects?: { fits?: unknown; smaller?: Small }[] };
       const inner = top.projects?.[0] ?? {};
-      const raw = top.fits ?? inner.fits;
-      const fits = raw === false || raw === "false" ? false : true;
+      const fits = yesNo(top.fits ?? inner.fits);
       const o = { fits, smaller: top.smaller ?? inner.smaller };
-      if (o.fits) {
+      // Review 2026-11-09 #2: with no answer, the project must show the idea, or the model is asked again.
+      if (o.fits === undefined && !tiedToIdea(`${s.title} ${s.summary}`, idea)) throw new Error(`the project must keep the learner's idea "${idea}" (or answer "fits": false with a "smaller" version of it)`);
+      if (o.fits !== false) {
         const title = ideaTitle(idea);
         // Final review I4: a title in a script with no Latin letters names its folder after the model's title.
         return slugify(title) === "project" ? { ...s, title, slug: s.title } : { ...s, title };
@@ -59,9 +60,24 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
       return { title: sm.title.trim(), summary: sm.summary.trim(), size: "small" as const, concepts, tooBig: true as const };
     });
   } catch (e) {
-    if (e instanceof Error && /must keep the learner's idea/.test(e.message)) throw new Error(`could not make a smaller version of your idea "${idea}"; /tutor-start tries again, or ask for something else`);
+    // Review 2026-11-09 #3: only a failure about the idea itself is an IdeaError (the caller lets the idea go then);
+    // a reply that is not JSON, or a bad size, is a model slip and keeps the idea.
+    if (e instanceof Error && /smaller version must keep|"smaller" needs/.test(e.message)) throw new IdeaError(`could not make a smaller version of your idea "${idea}"; /tutor-start tries again, or ask for something else`);
+    if (e instanceof Error && /project must keep the learner's idea/.test(e.message)) throw new IdeaError(`could not make a project from your idea "${idea}"; /tutor-start tries again, or ask for something else`);
     throw e;
   }
+}
+
+/** A suggestion the model could not tie to the learner's idea (as opposed to a malformed reply). */
+export class IdeaError extends Error {}
+
+/** true/false however the model writes it ("False", "no", 0); undefined when it gave no answer. */
+function yesNo(v: unknown): boolean | undefined {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v !== "string") return undefined;
+  const t = v.trim().toLowerCase();
+  return ["true", "yes"].includes(t) ? true : ["false", "no"].includes(t) ? false : undefined;
 }
 
 // Final review I4: "I'd like to", "i wanna" (no "to") as well as "I want to".
@@ -84,7 +100,7 @@ export function ideaTitle(idea: string): string {
   return out || idea.trim().slice(0, 40);
 }
 
-const STOP = new Set(["the", "and", "for", "one", "two", "its", "can", "you", "but", "not", "all", "use", "any", "own", "new", "get", "way", "has", "was", "are", "how", "who", "why", "out", "too", "very", "want", "would", "like", "make", "build", "write", "create", "that", "this", "with", "simple", "small", "some", "thing", "program", "project", "really", "just", "from", "into", "about", "something"]);
+const STOP = new Set(["the", "and", "for", "one", "two", "its", "can", "you", "but", "not", "all", "use", "any", "own", "new", "get", "way", "has", "was", "are", "how", "who", "why", "out", "too", "very", "app", "web", "want", "would", "like", "make", "build", "write", "create", "that", "this", "with", "simple", "small", "some", "thing", "program", "project", "really", "just", "from", "into", "about", "something"]);
 
 /** Whether `text` keeps the idea: it shares a content word (4+ letters, not a filler) with it, any case (§9.2). */
 export function tiedToIdea(text: string, idea: string): boolean {

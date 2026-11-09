@@ -1664,9 +1664,18 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
   });
   // 2026-11-09 live: any reply the idea path rejects twice let /tutor-start fail the same way forever.
-  it("an idea whose suggestion is rejected twice for any reason is let go, so the next try works", async () => {
-    const { b, seen } = await ideaFlow("a number guessing game", ["not json", "still not json", JSON.stringify({ projects: [todo] })]);
-    expect(b.notes.some((n) => /rejected twice/.test(n))).toBe(true);
+  // Review 2026-11-09 #3: only a failure about the idea itself lets the idea go; a formatting slip keeps it.
+  it("two replies that are not JSON keep the idea, and the next try uses it again", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", ["not json", "still not json", JSON.stringify({ projects: [todo], fits: true })]);
+    expect(b.notes.some((n) => /rejected twice.*tries again/.test(n))).toBe(true);
+    expect((await saved()).ideaDropped).toBeFalsy();
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seen.at(-1)).toMatch(/idea \(keep it\): a number guessing game/);
+  });
+  it("a model that twice ignores the idea lets it go, so the next try suggests for the level", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo] }), JSON.stringify({ projects: [todo] }), JSON.stringify({ projects: [todo] })]);
+    expect(b.notes.some((n) => /could not make a project from your idea.*suggests a project for your level/.test(n))).toBe(true);
     expect((await saved()).ideaDropped).toBe(true);
     await b.commands["tutor-start"].handler("", b.ctx);
     await new Promise((r) => setTimeout(r, 50));

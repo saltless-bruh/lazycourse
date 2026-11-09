@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { Where } from "./wayfinding.js";
+import { VALUE_LANGUAGES } from "./checks.js";
 
 // Wayfinding spec 2026-11-08 §6: one list (pi-tutor/commands.json) describes every learner-facing command and key.
 // Pi's descriptions, the model's command note, the next-step line, the card and Neovim's help tab all read it.
@@ -61,13 +62,28 @@ export function commandNote(w: Where): string {
     + "`:Name` is typed in the editor, `/name` in the tutor pane:", ...lines].join("\n");
 }
 
+/** Whether `args` are words a command with this `args` spec takes: its listed words, a task id, a level, a language. */
+function takes(spec: string | undefined, args: string[]): boolean {
+  if (!spec) return args.length === 0;
+  // Placeholder names are not words to type; free text (a topic, a question) is never guessed at, so such a line goes
+  // to the tutor instead.
+  const words = new Set(spec.split(/[\s|[\]<>]+/).filter((w) => /^[a-z][a-z-]*$/.test(w)));
+  const task = words.delete("task") && words.delete("id"), level = spec.includes("<0-100>"), lang = words.delete("language");
+  words.delete("topic"); words.delete("question");
+  return args.every((a) => words.has(a) || (task && /^P\d+\.T\d+$/i.test(a))
+    || (level && /^\d{1,3}$/.test(a) && Number(a) <= 100) || (lang && VALUE_LANGUAGES.has(a.toLowerCase())));
+}
+
 /**
  * 2026-11-09: a `:Tutor…` command typed into the tutor pane (the learner thought they were in the editor) is a listed
- * Neovim command, never a chat message. Only names in the list count; the rest of the line becomes its arguments.
+ * Neovim command, never a chat message. Only names in the list count, and only with words that command takes
+ * (review 2026-11-09 #1: `:TutorExam what is this for?` is a question for the tutor, not an exam on that topic).
  */
 export function editorCommandOf(text: string): { name: string; args: string[] } | null {
   const m = /^:(Tutor\w*)(?:\s+(.*))?$/.exec(text.trim());
   if (!m) return null;
-  if (!loadCommands().some((c) => c.where === "editor" && !c.planned && c.name === `:${m[1]}`)) return null;
-  return { name: m[1], args: m[2] ? m[2].trim().split(/\s+/) : [] };
+  const c = loadCommands().find((c) => c.where === "editor" && !c.planned && c.name === `:${m[1]}`);
+  if (!c) return null;
+  const args = m[2] ? m[2].trim().split(/\s+/) : [];
+  return takes(c.args, args) ? { name: m[1], args } : null;
 }

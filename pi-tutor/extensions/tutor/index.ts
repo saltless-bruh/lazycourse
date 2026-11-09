@@ -49,7 +49,7 @@ import { easeDelay, attemptScore, stepFor, restoreAttempts, recordAttempt, yield
 import { guardToolCall, skillDirs } from "./guard.js";
 import { writeProjectsFile, Profile, type FeedbackKind, type ProjectRow } from "./profile.js";
 import { FEEDBACK_KINDS, activeFeedback, formatFeedback } from "./feedback.js";
-import { suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, LANGUAGES } from "./start.js";
+import { IdeaError, suggestOne, createProject, defaultProjectDir, expandHome, isLanguage, LANGUAGES } from "./start.js";
 import { newOnboarding, checkInOnboarding, parseIntake, applyTurn, missing, needsFallback, levelFrom, onboardPrompt, selfScoreNeeded, type Onboarding, type Fields } from "./onboard.js";
 import { EXPERIENCE } from "./interview.js";
 import { levelTasks, writeExercise, loadLessons, planRounds, startLessons, nextConcept, nextRound, type Lesson, type LessonState } from "./lessons.js";
@@ -932,8 +932,9 @@ export default function (pi: ExtensionAPI): void {
   }
 
   pi.on("input", async (event, ctx) => {
-    // 2026-11-09: `:TutorTour` typed into the pane went to the model as chat. A listed Neovim command runs in Neovim.
-    const cmd = editorCommandOf(event.text);
+    // 2026-11-09: `:TutorTour` typed into the pane went to the model as chat. A listed Neovim command runs in Neovim,
+    // only when the learner typed it (review #1: text an extension or rpc sends is never run as an editor command).
+    const cmd = event.source === "interactive" ? editorCommandOf(event.text) : null;
     if (cmd) {
       const typed = `:${cmd.name}${cmd.args.length ? ` ${cmd.args.join(" ")}` : ""}`;
       if (link) {
@@ -2471,9 +2472,9 @@ export default function (pi: ExtensionAPI): void {
         if (s.tooBig) kick(ctx, `say their idea "${idea}" is too big for level ${lvl} as it is, and offer this smaller version of it: "${s.title}" — ${s.summary}; they can ask for something else`);
         else kick(ctx, `suggest this one project and say why it suits them: "${s.title}" — ${s.summary}; they can ask for something else`);
       } catch (e) {
-        // Final review I3: an idea no smaller version could keep is let go, so the next try can suggest something else.
-        // 2026-11-09 live: any reply the idea path rejects twice is let go too, or every /tutor-start fails the same way.
-        const unscalable = !o.ideaDropped && !!o.fields.idea && e instanceof Error && /could not make a smaller version|rejected twice/.test(e.message);
+        // Final review I3: an idea the model could not keep (no smaller version, or a project that ignores it) is let go,
+        // so the next try suggests something else; a malformed reply keeps the idea (review 2026-11-09 #3).
+        const unscalable = !o.ideaDropped && !!o.fields.idea && e instanceof IdeaError;
         saveOnboarding(unscalable ? { ...o, ideaDropped: true } : o);
         ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off"
           : unscalable ? `${e.message.split(";")[0]}; /tutor-start suggests a project for your level instead`

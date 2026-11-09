@@ -176,6 +176,27 @@ describe("tutor.init", function()
     assert.are_not.equal(old, tutor.state.term:job_id())
   end)
 
+  -- Review 2026-11-09 #4: the tour's warning says to type :TutorTour while tour.txt has unsaved edits; :edit of the
+  -- file the window already shows failed with E37 and the learner saw "could not open tour.txt".
+  it("switch to the file the editor already shows, with unsaved edits, is no error", function()
+    local tutor = require("tutor")
+    vim.cmd("silent! only")
+    local dir = project()
+    vim.cmd.edit(vim.fn.fnameescape(dir .. "/spec/tasks.md"))
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "edited" })
+    local hidden = vim.o.hidden
+    vim.o.hidden = false
+    vim.cmd("Tutor")
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    local ok, res = pcall(tutor.switch, dir, "spec/tasks.md")
+    vim.notify, vim.o.hidden = orig, hidden
+    assert.is_true(ok, tostring(res))
+    assert.is_nil(table.concat(notes, "\n"):find("could not open", 1, true), table.concat(notes, "\n"))
+    assert.is_true(shows(dir .. "/spec/tasks.md"))
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do vim.bo[b].modified = false end
+  end)
+
   it("wrappers type slash commands into the terminal", function()
     local tutor = require("tutor")
     vim.cmd("Tutor")

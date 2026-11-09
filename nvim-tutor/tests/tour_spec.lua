@@ -283,4 +283,24 @@ describe("tutor.tour", function()
     vim.notify = orig
     assert.truthy(table.concat(notes, "\n"):find(":TutorTour", 1, true), table.concat(notes, "\n"))
   end)
+
+  -- Review 2026-11-09 #7: after :TutorTour puts the text back, breaking the same step again is reported again.
+  it("the missing-heading warning comes back after :TutorTour restored the text", function()
+    local tour = require("tutor.tour")
+    tour.start()
+    local notes, orig = {}, vim.notify
+    vim.notify = function(m) table.insert(notes, m) end
+    local function break_heading()
+      local h = find("## 1/")
+      vim.api.nvim_buf_set_lines(0, h - 1, h, false, {})
+      vim.api.nvim_exec_autocmds("TextChanged", { buffer = 0 })
+    end
+    break_heading()
+    tour.start()
+    break_heading()
+    vim.notify = orig
+    local n = 0
+    for _, m in ipairs(notes) do if m:find("can't be checked", 1, true) then n = n + 1 end end
+    assert.equals(2, n, table.concat(notes, "\n"))
+  end)
 end)

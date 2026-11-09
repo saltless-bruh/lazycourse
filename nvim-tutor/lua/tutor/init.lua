@@ -241,7 +241,10 @@ function M.switch(dir, file)
   -- The open may fail (E37 unsaved buffer with 'nohidden'); Pi must follow the :cd regardless.
   local ok, err = pcall(function()
     if target then
-      vim.api.nvim_win_call(target, function() vim.cmd.edit(path) end)
+      -- Review 2026-11-09 #4: the window already showing the file (with unsaved edits) keeps it; :edit would be E37.
+      local want = vim.fn.resolve(vim.fn.fnamemodify(dir .. "/" .. file, ":p"))
+      local shown = vim.fn.resolve(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(target)), ":p"))
+      if shown ~= want then vim.api.nvim_win_call(target, function() vim.cmd.edit(path) end) end
     else
       vim.cmd("topleft vsplit " .. path)
     end

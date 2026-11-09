@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readFileSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { suggestOne, createProject, defaultProjectDir, isLanguage, LANGUAGES, ideaTitle, tiedToIdea } from "../extensions/tutor/start.js";
+import { suggestOne, createProject, defaultProjectDir, isLanguage, LANGUAGES, ideaTitle, tiedToIdea, IdeaError } from "../extensions/tutor/start.js";
 import { Profile } from "../extensions/tutor/profile.js";
 
 let profile: Profile | undefined;
@@ -116,6 +116,8 @@ describe("the learner's idea is the project", () => {
     ["Tiny LLM Agent", "something related to llm, AI, Agents.", true],
     ["A CLI tool", "a cli for my notes", true],
     ["Todo list", "something related to llm, AI, Agents.", false],
+    ["A to-do list app", "a chess app", false],
+    ["A web form", "a web scraper", false],
   ])("tiedToIdea(%j, %j) = %s", (text, idea, tied) => expect(tiedToIdea(text, idea)).toBe(tied));
 
   const reply = (o: object) => JSON.stringify(o);
@@ -194,5 +196,22 @@ describe("the fits answer, however the model writes it", () => {
   });
   it("no fits answer at all: the project built on the idea is the idea", async () => {
     expect(await ask({ projects: [proj] })).toMatchObject({ title: ideaTitle(idea), summary: proj.summary });
+  });
+  // Review 2026-11-09 #2: with no fits answer, a project that ignores the idea is asked again, never shown as the idea.
+  it("no fits answer and a project unrelated to the idea: asked again, then refused as an idea problem", async () => {
+    const todo = { title: "Todo CLI", summary: "Track your to-dos.", size: "small", concepts: [] };
+    const e = await ask({ projects: [todo] }).catch((x) => x);
+    expect(e).toBeInstanceOf(IdeaError);
+    expect(e.message).toMatch(/could not make a project from your idea/);
+  });
+  it.each(["False", "no", " FALSE ", 0])("fits %j counts as false", async (fits) => {
+    const smaller = { title: "Tiny LLM Agent", summary: "One agent step with an LLM.", concepts: [] };
+    expect(await ask({ projects: [proj], fits, smaller })).toMatchObject({ title: "Tiny LLM Agent", tooBig: true });
+  });
+  it("a reply that is not JSON twice is a model slip, not an idea problem", async () => {
+    profile = Profile.open(":memory:");
+    const e = await suggestOne({ profile, complete: async () => "sorry, here you go" }, { language: "python", level: 38, about: {}, exclude: [], idea }).catch((x) => x);
+    expect(e).not.toBeInstanceOf(IdeaError);
+    expect(e.message).toMatch(/rejected twice/);
   });
 });
