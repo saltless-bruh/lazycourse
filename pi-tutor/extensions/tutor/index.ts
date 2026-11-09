@@ -2472,10 +2472,11 @@ export default function (pi: ExtensionAPI): void {
         else kick(ctx, `suggest this one project and say why it suits them: "${s.title}" — ${s.summary}; they can ask for something else`);
       } catch (e) {
         // Final review I3: an idea no smaller version could keep is let go, so the next try can suggest something else.
-        const unscalable = e instanceof Error && /could not make a smaller version/.test(e.message);
+        // 2026-11-09 live: any reply the idea path rejects twice is let go too, or every /tutor-start fails the same way.
+        const unscalable = !o.ideaDropped && !!o.fields.idea && e instanceof Error && /could not make a smaller version|rejected twice/.test(e.message);
         saveOnboarding(unscalable ? { ...o, ideaDropped: true } : o);
         ctx.ui.notify(e instanceof Cancelled ? "cancelled; /tutor-start picks up where we left off"
-          : unscalable ? `${e.message.split(";")[0]}; /tutor-start suggests another project for your level`
+          : unscalable ? `${e.message.split(";")[0]}; /tutor-start suggests a project for your level instead`
           : `no project suggestion: ${e instanceof Error ? e.message : String(e)}; /tutor-start tries again`, e instanceof Cancelled ? "info" : "error");
       }
       return;

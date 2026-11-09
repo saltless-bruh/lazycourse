@@ -4,7 +4,9 @@ Reply with only one JSON object, no prose, in exactly this shape:
 
 {"projects":[{"title":"…","summary":"one sentence","size":"small|medium|large","concepts":["kebab-case-tag"]}]}
 
-With the learner's idea, add "fits": true|false and, when false, "smaller": {"title":"…","summary":"one sentence","concepts":["kebab-case-tag"]}.
+With the learner's idea, the object also has "fits" (and "smaller" when it is false), beside "projects":
+
+{"projects":[{"title":"…","summary":"one sentence","size":"small|medium|large","concepts":["kebab-case-tag"]}],"fits":false,"smaller":{"title":"…","summary":"one sentence","concepts":["kebab-case-tag"]}}
 
 Rules:
 - Exactly the number of projects in "projects wanted", each a different kind of program, and none named in "do not suggest".

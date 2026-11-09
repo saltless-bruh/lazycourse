@@ -39,8 +39,14 @@ export async function suggestOne(d: { profile: Profile; complete: Complete }, i:
   try {
     return await completeJson(d.complete, systemText("suggest"), withIdea, (v) => {
       const [s] = checkSuggestions(v, 1);
-      const o = v as { fits?: unknown; smaller?: { title?: unknown; summary?: unknown; concepts?: unknown } };
-      if (typeof o.fits !== "boolean") throw new Error('"fits" must be true or false');
+      // 2026-11-09 live (gpt-6.1-sol): a reply without a top-level boolean "fits" was refused twice, on every try.
+      // "fits" and "smaller" count beside the project or inside it, true/false as text too; no answer means it fits.
+      type Small = { title?: unknown; summary?: unknown; concepts?: unknown };
+      const top = v as { fits?: unknown; smaller?: Small; projects?: { fits?: unknown; smaller?: Small }[] };
+      const inner = top.projects?.[0] ?? {};
+      const raw = top.fits ?? inner.fits;
+      const fits = raw === false || raw === "false" ? false : true;
+      const o = { fits, smaller: top.smaller ?? inner.smaller };
       if (o.fits) {
         const title = ideaTitle(idea);
         // Final review I4: a title in a script with no Latin letters names its folder after the model's title.
@@ -78,7 +84,7 @@ export function ideaTitle(idea: string): string {
   return out || idea.trim().slice(0, 40);
 }
 
-const STOP = new Set(["want", "would", "like", "make", "build", "write", "create", "that", "this", "with", "simple", "small", "some", "thing", "program", "project", "really", "just", "from", "into", "about", "something"]);
+const STOP = new Set(["the", "and", "for", "one", "two", "its", "can", "you", "but", "not", "all", "use", "any", "own", "new", "get", "way", "has", "was", "are", "how", "who", "why", "out", "too", "very", "want", "would", "like", "make", "build", "write", "create", "that", "this", "with", "simple", "small", "some", "thing", "program", "project", "really", "just", "from", "into", "about", "something"]);
 
 /** Whether `text` keeps the idea: it shares a content word (4+ letters, not a filler) with it, any case (§9.2). */
 export function tiedToIdea(text: string, idea: string): boolean {
@@ -90,7 +96,9 @@ export function tiedToIdea(text: string, idea: string): boolean {
     const want = pairs(idea);
     return [...pairs(text)].some((p) => want.has(p));
   }
-  const words = (s: string) => s.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w));
+  // 2026-11-09 live: 3-letter words carry ideas (llm, cli, api, bot) and a plural is the same thing (agents = agent).
+  const words = (s: string) => s.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 3 && !STOP.has(w)).map((w) => (w.length > 3 ? w.replace(/s$/, "") : w));
   const want = new Set(words(idea));
   if (want.size === 0) return true;
   return words(text).some((w) => want.has(w));

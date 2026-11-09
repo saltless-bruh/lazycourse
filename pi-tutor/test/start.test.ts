@@ -112,6 +112,10 @@ describe("the learner's idea is the project", () => {
     ["Todo List CLI", "a number guessing game", false],
     ["Tiny Text Adventure Engine", "a 3D game engine", true],
     ["GAME of life", "a 3D game engine", true],
+    // 2026-11-09 live: short words (LLM, CLI, API, bot) and plurals carry an idea too.
+    ["Tiny LLM Agent", "something related to llm, AI, Agents.", true],
+    ["A CLI tool", "a cli for my notes", true],
+    ["Todo list", "something related to llm, AI, Agents.", false],
   ])("tiedToIdea(%j, %j) = %s", (text, idea, tied) => expect(tiedToIdea(text, idea)).toBe(tied));
 
   const reply = (o: object) => JSON.stringify(o);
@@ -166,5 +170,29 @@ describe("project folders (final review I4)", () => {
       { language: "python", level: 5, about: {}, exclude: [], idea: "単語帳アプリ" });
     expect(s.title).toBe("単語帳アプリ");
     expect(s.slug).toBe("Vocabulary Cards");
+  });
+});
+
+// 2026-11-09 live (gpt-6.1-sol): "no project suggestion: model reply rejected twice: \"fits\" must be true or false",
+// and every /tutor-start failed the same way. The reply's shape is forgiven; a missing answer means the idea fits.
+describe("the fits answer, however the model writes it", () => {
+  const idea = "something related to llm, AI, Agents.";
+  const proj = { title: "Mini LLM Agent", summary: "A small agent that calls an LLM.", size: "small", concepts: ["functions"] };
+  const ask = async (reply: object) => {
+    profile = Profile.open(":memory:");
+    return suggestOne({ profile, complete: async () => JSON.stringify(reply) }, { language: "python", level: 38, about: {}, exclude: [], idea });
+  };
+  it("fits inside the project counts", async () => {
+    expect(await ask({ projects: [{ ...proj, fits: true }] })).toMatchObject({ title: ideaTitle(idea) });
+  });
+  it("fits as text counts", async () => {
+    expect(await ask({ projects: [proj], fits: "true" })).toMatchObject({ title: ideaTitle(idea) });
+  });
+  it("a smaller version inside the project counts", async () => {
+    const smaller = { title: "Tiny LLM Agent", summary: "One agent step with an LLM.", concepts: [] };
+    expect(await ask({ projects: [{ ...proj, fits: false, smaller }] })).toMatchObject({ title: "Tiny LLM Agent", tooBig: true });
+  });
+  it("no fits answer at all: the project built on the idea is the idea", async () => {
+    expect(await ask({ projects: [proj] })).toMatchObject({ title: ideaTitle(idea), summary: proj.summary });
   });
 });

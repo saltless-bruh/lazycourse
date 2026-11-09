@@ -1663,6 +1663,15 @@ describe("/tutor-start as a conversation (spec 2026-10-19 §5, §6)", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
   });
+  // 2026-11-09 live: any reply the idea path rejects twice let /tutor-start fail the same way forever.
+  it("an idea whose suggestion is rejected twice for any reason is let go, so the next try works", async () => {
+    const { b, seen } = await ideaFlow("a number guessing game", ["not json", "still not json", JSON.stringify({ projects: [todo] })]);
+    expect(b.notes.some((n) => /rejected twice/.test(n))).toBe(true);
+    expect((await saved()).ideaDropped).toBe(true);
+    await b.commands["tutor-start"].handler("", b.ctx);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seen.at(-1)).not.toMatch(/idea \(keep it\)/);
+  });
   it("'show me something else' frees the model from the idea", async () => {
     const { b, seen } = await ideaFlow("a number guessing game", [JSON.stringify({ projects: [todo], fits: true })]);
     b.script.push("Show me something else");
