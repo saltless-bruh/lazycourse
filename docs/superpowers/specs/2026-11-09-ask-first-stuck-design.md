@@ -2,8 +2,8 @@
 
 ## Why
 
-The tutor speaks up on its own when code thinks the learner is stuck: a long pause in a code file, an error that
-stays on a line, rewriting around an error, a failed run. In the author's live session (2026-11-09) this produced two
+The tutor speaks up on its own when code thinks the learner is stuck: a long pause in a code file, rewriting around
+an error, a failed run (a sitting error has been silent since 2026-10-26). In the author's live session (2026-11-09) this produced two
 unasked re-teaches while they were simply reading. Their words: thinking time on a hard line "is unpredictable", and
 an unasked reply about an error they can already see and are already working on is "like someone else just start
 backseat driving".
@@ -13,8 +13,10 @@ After this change the learner always starts it; code only offers, quietly, in a 
 
 ## Goals
 
-1. No editor signal ever starts a tutor reply by itself. Pause, lingering error, churn and failed run (`:TutorRun`,
-   `:TutorRun test`, a failed `/tutor-done` check) all become a small **offer**.
+1. No editor signal ever starts a tutor reply by itself. Pause, churn (rewriting around an error) and failed run
+   (`:TutorRun`, `:TutorRun test`, a failed `/tutor-done` check) all become a small **offer**. An error that sits on a
+   line stays silent, as it has been since 2026-10-26 (the "reads errors" habit: the learner asks); the author kept
+   that on 2026-11-09.
 2. The offer is a Neovim corner notification (LazyVim's notifier, via `vim.notify`): no focus change, fades on its
    own, nothing to dismiss. Ignoring it means "I need more time".
 3. `<leader>ts` ("I'm stuck") works at any time, offer or not. It starts the existing stuck help in the tutor pane.
@@ -44,9 +46,9 @@ signal (code, as today)                          offer (corner notice)          
 ───────────────────────────────────────────      ─────────────────────────────────────      ─────────────────────
 pause in a code file ≥ T (by level)        ──▶  "Still on line 42 of solution.py?        ──▶ stuck help in the pane,
                                                   <leader>ts if you're stuck"                  cursor stays in code
-error on a line ≥ its wait                  ──▶  "The error on line 12 is still there
-                                                  (NameError: …). <leader>ts for help"
-rewriting around an error (churn)           ──▶  same wording as the error offer
+rewriting around an error (churn)           ──▶  "Line 12's error is still there after a few rewrites.
+                                                  <leader>ts for help"
+(an error that sits on a line: no offer, as today since 2026-10-26)
 failed :TutorRun / test / /tutor-done check ──▶  "test_area failed — read the output;
                                                   <leader>ts for help"
 ```
@@ -56,16 +58,15 @@ Wording is the builder's within these lines: short, names the file/line or test,
 ## Decided behaviour
 
 **Signals and waits.** Detection stays as it is (`stuck.ts`, `push.lua.ts`, including the per-code-file pause clock
-merged on 2026-11-09). Waits come from `policy.ts` thresholds by level (pause T = `idleMs`, error = `errorMs`).
-*My call:* an error offer waits at least 30 s even where `errorMs` is 0 (beginner), since an offer on every error the
-moment it appears while typing would be the nagging this design removes.
+merged on 2026-11-09). Waits come from `policy.ts` thresholds by level (pause T = `idleMs`); churn fires when the detector sees it, as today,
+and its repeat waits 2 × `idleMs`. The detector keeps `errorNudges: false`: a sitting error never offers.
 
 **Failed runs.** A failed run still counts as a try on its spot exactly as today (the help level climbs, typo runs
 don't count), silently. *My call:* it still opens or advances its run episode through `failedRun` as today (so a chat
 message after a failed run gets the ladder context, and the widget shows the stuck state); only the nudge is replaced
 by an offer. A run offer is shown once per failed run, never repeated; each new failed run brings its own offer.
 
-**Episodes.** *My call:* a pause, error or churn offer does not open an episode (failed runs do, above). Offers are
+**Episodes.** *My call:* a pause or churn offer does not open an episode (failed runs do, above). Offers are
 gated only by back-off and quiet mode, never by an open episode (`canOpen`/`yieldsTo` keep governing episodes only). It records a pending offer (trigger + spot). `<leader>ts`
 opens the episode with the pending offer's trigger if that offer is still current (its error is still there / its run
 is the latest / the cursor is still in that file); otherwise with the cursor's spot (an error on the cursor line → an
@@ -73,9 +74,9 @@ error trigger; none → a pause-style trigger at file:line). Then the existing `
 is the same help as today. The `NUDGE_GAP_MS` gap does not apply to a `<leader>ts` request (the learner asked).
 Failed-run counts live where they live today, so the help level matches the tries.
 
-**Back-off.** A spot is the trigger's identity (error: path + message; pause and churn: path + 20-line region; run:
+**Back-off.** A spot is the trigger's identity (pause and churn: path + 20-line region; run:
 the existing run spot key). Per spot: first offer after its wait; if ignored, a second offer after twice that wait;
-then no more offers for that spot. *My call* on what makes a spot "new" again: a different error message, a new failed
+then no more offers for that spot. *My call* on what makes a spot "new" again: a new failed
 run on it, `<leader>ts` pressed, or the learner opens the help and closes the episode. Typing restarts the pause clock
 (as today) but does not reset the spot's offer count.
 
@@ -134,7 +135,6 @@ Exact offer wording; how the pending offer is stored; notifier options (title, t
 
 ## Calls I made (for the author to check)
 
-- Error offers wait at least 30 s.
 - Failed runs keep opening/advancing their run episode silently; run offers show once per failed run.
 - Offers are not blocked by an open episode.
 - `<leader>ts` goes over RPC as a hidden request (`:TutorStuck` twin), waits if Pi is replying, and shows a one-line
