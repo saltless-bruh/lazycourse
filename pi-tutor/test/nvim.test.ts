@@ -44,12 +44,12 @@ describe("NvimLink", () => {
   it("offer shows a tutor notice in Neovim without moving focus", async () => {
     const { link } = await setup();
     const nvim = link.raw;
-    await nvim.lua(`vim.notify = function(m, l, o) vim.g.got = { msg = m, level = l, title = o and o.title } end`);
+    await nvim.lua(`vim.notify = function(m, l, o) vim.g.got = { msg = m, level = l, title = o and o.title, timeout = o and o.timeout } end`);
     const win = await nvim.lua("return vim.api.nvim_get_current_win()");
     await link.offer("Still on line 3 of a.py? <leader>ts if you're stuck");
     await until(() => true);
     await new Promise((r) => setTimeout(r, 300));
-    expect(await nvim.lua("return vim.g.got")).toEqual({ msg: "Still on line 3 of a.py? <leader>ts if you're stuck", level: 2, title: "tutor" });
+    expect(await nvim.lua("return vim.g.got")).toEqual({ msg: "Still on line 3 of a.py? <leader>ts if you're stuck", level: 2, title: "tutor", timeout: 8000 });
     expect(await nvim.lua("return vim.api.nvim_get_current_win()")).toBe(win);
     expect(await nvim.lua("return vim.api.nvim_get_mode().mode")).toBe("n");
   }, 20000);

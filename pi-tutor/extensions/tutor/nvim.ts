@@ -269,7 +269,7 @@ export class NvimLink {
 
   /** Ask-first spec 2026-11-09: a stuck offer as a corner notice (`vim.notify`); no window, focus or mode change. */
   async offer(text: string): Promise<void> {
-    await this.timed(this.raw.lua(`local t = ... vim.schedule(function() vim.notify(t, vim.log.levels.INFO, { title = "tutor" }) end)`, [text]), 2000, "offer");
+    await this.timed(this.raw.lua(`local t = ... vim.schedule(function() vim.notify(t, vim.log.levels.INFO, { title = "tutor", timeout = 8000 }) end)`, [text]), 2000, "offer");
   }
 
   /** Ask a running tour to tell its step again: this Pi may have started after the tour's folder switch. */
