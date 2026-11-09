@@ -131,7 +131,7 @@ you type to the tutor; `<Esc><Esc>` gives Neovim back, and `<C-w>h` moves to you
 - **Running.** `:TutorRun` (`<leader>tr`) runs the README's `run:` command in a split below the editor: you see the
   output and type its input there; `q` closes the split once it has ended; `:TutorRun stop`, closing the split or
   Ctrl+C stops it and says "run stopped" (never a failed try). `:TutorRun test` runs the `test:` command hidden, with
-  no input, stopped after 60 s; a stopped test says it timed out, the tutor is told, and it is never a failed try.
+  no input, stopped after 60 s; a stopped test says it timed out, a notice offers help (`<leader>ts`), and it is never a failed try.
   When the tutor saw you finish a task, the next passing run ticks it in `spec/tasks.md` (never while the file has
   unsaved edits).
 - **Checks prove a task; the tutor never ticks one.** In the background the model writes checks in two strict forms,

@@ -1259,17 +1259,17 @@ describe("attempts from runs (spec 2026-10-21 §5)", () => {
     edit("x = 1\n");
     await runPayload(1, "ZeroDivisionError: division by zero");
     await until(() => attempts(b) === 2 && offerTexts(b).length === 2);
-    await runPayload(1, "ZeroDivisionError: division by zero"); // nothing changed
+    await runPayload(1, "ZeroDivisionError: division by zero"); // nothing changed: no try, but its own offer (minor M7)
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2);
-    expect(offerTexts(b)).toHaveLength(2);
+    expect(offerTexts(b)).toHaveLength(3);
     edit("x = (\n");
     const runs = b.entries.filter((e) => e.type === "tutor_signal").length;
     await runPayload(1, "SyntaxError: invalid syntax");
     await until(() => b.entries.filter((e) => e.type === "tutor_signal").length > runs);
     await new Promise((r) => setTimeout(r, 300));
     expect(attempts(b)).toBe(2); // a typo run: the run's own output is a syntax error
-    expect(offerTexts(b)).toHaveLength(2);
+    expect(offerTexts(b)).toHaveLength(3);
     expect(b.nudges).toEqual([]);
   }, 30000);
   it("a run that fails on a new spot starts over on a new episode", async () => {
@@ -1631,6 +1631,32 @@ describe("/tutor-quiet (ask-first)", () => {
       await failRun(b, "2");
       await untilNotice();
     } finally { vi.useRealTimers(); }
+  }, 20000);
+  it("minor M3: the widget's quiet label counts down and goes when quiet runs out, with nothing else happening", async () => {
+    const b = await linked();
+    await b.commands["tutor-quiet"].handler("5m", b.ctx);
+    expect(b.widgets["tutor"]?.[1]).toMatch(/notices off 5m/);
+    const t0 = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(t0 + 2 * 60_000 + 1000);
+      for (let i = 0; i < 70 && !/notices off 3m/.test(b.widgets["tutor"]?.[1] ?? ""); i++) await new Promise((r) => setTimeout(r, 100));
+      expect(b.widgets["tutor"]?.[1]).toMatch(/notices off 3m/);
+      vi.setSystemTime(t0 + 5 * 60_000 + 1000);
+      for (let i = 0; i < 70 && /notices off/.test(b.widgets["tutor"]?.[1] ?? ""); i++) await new Promise((r) => setTimeout(r, 100));
+      expect(b.widgets["tutor"]?.[1]).not.toMatch(/notices off/);
+    } finally { vi.useRealTimers(); }
+  }, 30000);
+  it("minor M7: a failing rerun with no change still gets its notice (each failed run offers once)", async () => {
+    const b = await linked();
+    await recordNotices();
+    await failRun(b, "1");
+    await untilNotice();
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    const t0 = Date.now();
+    while ((await notices()).length < 2 && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 50));
+    expect(await notices()).toHaveLength(2);
+    expect((episodes(b.entries).at(-1) as { attempts?: number }).attempts).toBe(1);
   }, 20000);
   it("while quiet, <leader>ts is still answered", async () => {
     const b = await linked();
