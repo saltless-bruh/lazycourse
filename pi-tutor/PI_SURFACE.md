@@ -1,7 +1,8 @@
 # Pi and Neovim surface used by pi-tutor
 
-Verified against `@earendil-works/pi-coding-agent` 1.3.0 `dist/core/extensions/types.d.ts`
-(2026-10-19; was 1.1.0 on 2026-10-12), installed binary 1.3.0 (2026-10-19), `neovim` npm client 5.5.0,
+Verified against `@earendil-works/pi-coding-agent` 1.5.0 `dist/core/extensions/types.d.ts`
+(2026-11-09; 1.3.0 → 1.5.0 adds only `keyText`/`keyHint`/`KeybindingHints` and the 1.5.0 tool-argument validator
+(pi-schema; our two tools use plain JSON-Schema TypeBox); was 1.3.0 on 2026-10-19, 1.1.0 on 2026-10-12), installed binary 1.5.0 (2026-11-09), `neovim` npm client 5.5.0,
 Neovim 0.12.6 (2026-10-12). 1.1.0 → 1.3.0 types diff: `before_agent_start` became a union (below),
 tool definitions gained optional `reachesTools`, namespaces optional `aliases` (unused here).
 Re-verify every line when bumping versions.
