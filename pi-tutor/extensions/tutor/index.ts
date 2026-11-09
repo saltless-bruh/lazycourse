@@ -45,7 +45,7 @@ import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
 import { StuckDetector, isSyntaxError, spotOf, spotLine, type StuckEvent } from "./stuck.js";
 import { OfferBook, offerSpot, offerText, type Offer } from "./offers.js";
-import { QUIET_KEY, quietLeft, quietLabel } from "./quiet.js";
+import { QUIET_KEY, QUIET_CHOICES, parseQuiet, quietLeft, quietLabel } from "./quiet.js";
 import { sourceHash, projectSources } from "./source-hash.js";
 import { easeDelay, attemptScore, stepFor, askHelp, restoreAttempts, recordAttempt, yieldsTo, openEpisode, applyJudgment, closeEpisode, describeTrigger, type TurnStep, type CloseReason, type Episode, type Trigger } from "./ladder.js";
 import { guardToolCall, skillDirs } from "./guard.js";
@@ -1765,6 +1765,28 @@ export default function (pi: ExtensionAPI): void {
   });
 
   /** Task 16: the pro notes on design and naming (no points) are on by default; `/tutor-notes off` stops them. */
+  // Ask-first spec 2026-11-09: stuck offers off for a while, or until turned on; kept in the profile across restarts.
+  const QUIET_PICK: [string, string][] = [["1 minute", "1m"], ["5 minutes", "5m"], ["10 minutes", "10m"], ["1 hour", "1h"],
+    ["until I turn them on", "off"], ["turn them back on", "on"]];
+  pi.registerCommand("tutor-quiet", {
+    description: describeCmd("/tutor-quiet"),
+    handler: async (args, ctx) => {
+      let arg = args.trim().toLowerCase();
+      if (!arg) {
+        const pick = await ctx.ui.select("Stuck notices", QUIET_PICK.map(([l]) => l));
+        arg = QUIET_PICK.find(([l]) => l === pick)?.[1] ?? "";
+        if (!arg) return;
+      }
+      const q = parseQuiet(arg, Date.now());
+      if (q === null) { ctx.ui.notify(`usage: /tutor-quiet ${QUIET_CHOICES.join(" | ")} (off = until /tutor-quiet on)`, "warning"); return; }
+      quietRaw = q === "on" ? undefined : JSON.stringify(q);
+      if (profile) { const p = profile; profileWrite(() => p.setSetting(QUIET_KEY, quietRaw ?? "")); }
+      const label = QUIET_PICK.find(([, v]) => v === arg)?.[0];
+      ctx.ui.notify(q === "on" ? "notices on" : "always" in q ? "notices off until /tutor-quiet on" : `notices off for ${label?.replace(/^(\d+) minutes?$/, "$1 min")}`, "info");
+      paint();
+    },
+  });
+
   pi.registerCommand("tutor-notes", {
     description: describeCmd("/tutor-notes"),
     handler: async (args, ctx) => {

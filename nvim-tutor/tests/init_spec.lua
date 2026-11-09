@@ -294,6 +294,24 @@ describe("tutor.init", function()
     assert.equals(2, vim.fn.exists(":TutorStuck"))
   end)
 
+  it(":TutorQuiet types /tutor-quiet with the choice; without one it asks first", function()
+    local tutor = require("tutor")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false })
+    vim.cmd("TutorQuiet 10m")
+    local buf = tutor.state.term:bufnr()
+    local has = function(t) return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), ""):find(t, 1, true) ~= nil end
+    vim.wait(1000, function() return has("/tutor-quiet 10m") end)
+    assert.is_true(has("/tutor-quiet 10m"))
+    local orig = vim.ui.select
+    vim.ui.select = function(items, _, cb) cb(items[4], 4) end
+    vim.cmd("TutorQuiet")
+    vim.ui.select = orig
+    vim.wait(1000, function() return has("/tutor-quiet 1h") end)
+    assert.is_true(has("/tutor-quiet 1h"))
+  end)
+
   it("ask_stuck outside the project sends nothing and says to open a project file", function()
     local tutor = require("tutor")
     local dir = vim.fn.tempname()

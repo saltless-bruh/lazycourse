@@ -157,7 +157,8 @@ you type to the tutor; `<Esc><Esc>` gives Neovim back, and `<C-w>h` moves to you
   or a failed run, the tutor only shows a small notice in Neovim's corner ("Still on line 42? `<leader>ts` if you're
   stuck"). Ignore it and you get more time: it comes back once after twice the wait, then stays quiet for that spot.
   `<leader>ts` (`:TutorStuck`) asks for help on your line at any time; the answer comes in the pane and your cursor
-  stays in your code. An error that just sits there never gets a notice: you ask.
+  stays in your code. An error that just sits there never gets a notice: you ask. `/tutor-quiet` (or `:TutorQuiet`) turns the notices off for 1m, 5m,
+  10m or 1h, or `off` until `/tutor-quiet on`; asking still works while they are off.
 - **Every teaching reply is checked before you see it.** While it is written you see "tutor is checking this reply…";
   code holds it to this step's rules (no code with your task's names before the fix, short enough, a question when it
   must ask, no talk about the tutor's machinery). A reply that fails is written again (at most twice), else you get a

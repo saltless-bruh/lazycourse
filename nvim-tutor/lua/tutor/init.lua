@@ -413,6 +413,15 @@ function M.setup(user_opts)
   })
   vim.keymap.set("n", "<leader>te", M.ask_error, { desc = "Ask tutor about this error" })
   cmd("TutorStuck", function() M.ask_stuck() end, {})
+  -- Ask-first spec 2026-11-09: stuck notices off for a while; without a choice, a picker.
+  local QUIET = { { "1 minute", "1m" }, { "5 minutes", "5m" }, { "10 minutes", "10m" }, { "1 hour", "1h" },
+    { "until I turn them on", "off" }, { "turn them back on", "on" } }
+  cmd("TutorQuiet", function(a)
+    if a.args ~= "" then return slash("/tutor-quiet")(a) end
+    vim.ui.select(vim.tbl_map(function(q) return q[1] end, QUIET), { prompt = "Stuck notices" }, function(_, i)
+      if i then slash("/tutor-quiet " .. QUIET[i][2])() end
+    end)
+  end, { nargs = "?", complete = function() return { "1m", "5m", "10m", "1h", "off", "on" } end })
   -- Wayfinding spec §8.4: the plugin owns its keys (they were lazy.nvim `keys` in the user's config), so the
   -- command list's drift test sees them all.
   local commands = require("tutor.commands")

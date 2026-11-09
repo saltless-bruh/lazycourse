@@ -1607,3 +1607,58 @@ describe("<leader>ts asks for stuck help (ask-first)", () => {
     } finally { p.close(); }
   }, 30000);
 });
+
+// Ask-first spec 2026-11-09: quiet mode — notices off for 1m/5m/10m/1h, or until turned on.
+describe("/tutor-quiet (ask-first)", () => {
+  const failRun = async (b: { entries: { type: string; data: unknown }[] }, n: string) => {
+    const before = (episodes(b.entries).at(-1) as { attempts?: number } | undefined)?.attempts ?? 0;
+    writeFileSync(join(h!.root, "a.py"), `x = ${n}\n`);
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => ((episodes(b.entries).at(-1) as { attempts?: number } | undefined)?.attempts ?? 0) > before);
+  };
+  it("5m silences offers and shows it in the widget; when it runs out offers come back with no restart", async () => {
+    const b = await linked();
+    await recordNotices();
+    await b.commands["tutor-quiet"].handler("5m", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/notices off for 5 min/);
+    expect(b.widgets["tutor"]?.[1]).toMatch(/notices off 5m/);
+    await failRun(b, "1");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await notices()).toEqual([]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1000);
+      await failRun(b, "2");
+      await untilNotice();
+    } finally { vi.useRealTimers(); }
+  }, 20000);
+  it("while quiet, <leader>ts is still answered", async () => {
+    const b = await linked();
+    await b.commands["tutor-quiet"].handler("off", b.ctx);
+    await nvim!.lua(`vim.rpcnotify(vim.g.tutor_chan, "tutor", ...)`, [{ kind: "stuck", path: join(h!.root, "a.py"), line: 1 }]);
+    await until(() => b.nudges.some((n) => /stuck \(asked\)/.test(n.text)));
+  }, 20000);
+  it("off lasts across a restart; on brings offers back (Review Focus 5)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pitutor-quiet-"));
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = join(dir, "p.sqlite");
+    try {
+      const one = await boot({ cwd: dir });
+      await one.commands["tutor-quiet"].handler("off", one.ctx);
+      expect(one.notes.at(-1)).toMatch(/notices off until \/tutor-quiet on/);
+      const two = await boot({ cwd: dir });
+      expect(two.widgets["tutor"]?.[1]).toMatch(/notices off/);
+      await two.commands["tutor-quiet"].handler("on", two.ctx);
+      expect(two.notes.at(-1)).toMatch(/notices on/);
+      expect(two.widgets["tutor"]?.[1]).not.toMatch(/notices off/);
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  }, 20000);
+  it("an unknown choice warns with the six; no argument asks with a picker", async () => {
+    const b = await boot();
+    await b.commands["tutor-quiet"].handler("7m", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/1m.*5m.*10m.*1h.*off.*on/);
+    b.script.push("1 hour");
+    await b.commands["tutor-quiet"].handler("", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/notices off for 1 hour/);
+  }, 20000);
+});
