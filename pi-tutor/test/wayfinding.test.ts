@@ -3,7 +3,7 @@ import { whereOf, nextStep, sessionCard, type WayInput, type Where } from "../ex
 import { describe as describeCmd } from "../extensions/tutor/commands.js";
 
 // Wayfinding spec 2026-11-08 §7: the next step is worked out by code from the extension's state.
-const none: WayInput = { firstRun: false, tour: null, onboarding: null, spec: null, project: false, recipe: null, stuck: false, passingTask: null, lesson: false, exam: false, stepUp: false };
+const none: WayInput = { firstRun: false, tour: null, onboarding: null, spec: null, project: false, recipe: null, stuck: false, passingTask: null, lesson: null, exam: false, stepUp: false };
 const ob = (o: Partial<NonNullable<WayInput["onboarding"]>>) => ({ stage: "talk" as const, paused: false, levelTaskOpen: false, dialog: false, elsewhere: null, ...o });
 
 const rows: [string, Partial<WayInput>, Where, RegExp][] = [
@@ -22,7 +22,12 @@ const rows: [string, Partial<WayInput>, Where, RegExp][] = [
   ["recipe", { project: true, recipe: { task: "P1.T1", step: 2, action: "the examples" } }, "recipe", /step 2.*skip/],
   ["stuck", { project: true, stuck: true }, "stuck", /:TutorRun test.*<leader>te/],
   ["checks pass", { project: true, passingTask: "P1.T2" }, "checks-pass", /:TutorDone P1\.T2/],
-  ["lesson", { project: true, lesson: true }, "lesson", /\/tutor-lesson/],
+  // Live 2026-11-09: "next: /tutor-lesson next, or check" while no exercise file existed; the learner did not know
+  // the tutor writes it and looked for a way to make a .py file. One step at a time, the one that comes next.
+  ["lesson, no exercise yet", { project: true, lesson: { step: "get" } }, "lesson", /\/tutor-lesson next.*exercise/],
+  ["lesson, exercise written", { project: true, lesson: { step: "write" } }, "lesson", /\/tutor-lesson check/],
+  ["lesson, concept without exercise", { project: true, lesson: { step: "none" } }, "lesson", /\/tutor-lesson skip/],
+  ["lesson, building", { project: true, lesson: { step: "build" } }, "lesson", /\/tutor-lesson next/],
   ["exam", { project: true, exam: true, stuck: true }, "exam", /\/tutor-submit/],
   ["step-up", { project: true, stepUp: true }, "step-up", /\/tutor-step-up/],
 ];
@@ -33,6 +38,11 @@ describe("next step per state", () => {
     expect(whereOf(i)).toBe(where);
     expect(nextStep(i)).toMatch(/^next: /);
     expect(nextStep(i)).toMatch(text);
+  });
+
+  it("a lesson's line names one command, never two", () => {
+    expect(nextStep({ ...none, project: true, lesson: { step: "get" } })).not.toMatch(/check/);
+    expect(nextStep({ ...none, project: true, lesson: { step: "write" } })).not.toMatch(/lesson next/);
   });
 
   it("fits the widget's 44 columns, so the command is never clipped", () => {

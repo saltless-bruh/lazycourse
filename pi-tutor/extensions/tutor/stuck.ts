@@ -1,6 +1,9 @@
 import type { TutorPayload } from "./nvim.js";
 import type { Trigger } from "./ladder.js";
 
+/** Source files of the course's languages: the only files where a long pause counts as stuck. */
+const CODE_FILE = /\.(?:py|lua|rs|go|ts|tsx|js|jsx|mjs|cjs)$/i;
+
 // Stuck detector (spec §5): push payloads + clock → open / cleared / run_passed.
 // `canOpen` says whether the caller would accept a new episode now; a refused
 // trigger is not consumed, so it fires once the caller is free.
@@ -125,6 +128,9 @@ export class StuckDetector {
         // A smaller since_ms than last time means the learner typed: a new stretch.
         if (p.since_ms < this.idleLast) this.idleFired = false;
         this.idleLast = p.since_ms;
+        // Live 2026-11-09: a pause on README.md (reading the lesson in the pane) taught again on its own. Only a pause
+        // in a code file can be stuck.
+        if (!CODE_FILE.test(p.path)) break;
         if (!this.idleFired && p.since_ms >= this.limits().idleMs && this.canOpen()) {
           this.idleFired = true;
           out.push({ type: "open", trigger: { kind: "idle", path: p.path, line: p.line } });

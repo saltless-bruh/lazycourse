@@ -17,7 +17,8 @@ export interface WayInput {
   stuck: boolean;
   /** The task whose checks last passed and is not ticked yet. */
   passingTask: string | null;
-  lesson: boolean;
+  /** A lesson in progress, and its next step: get the exercise file, write it, a concept with no exercise, or build. */
+  lesson: { step: "get" | "write" | "none" | "build" } | null;
   exam: boolean;
   stepUp: boolean;
 }
@@ -62,7 +63,9 @@ export function nextStep(i: WayInput): string {
     "recipe": () => `step ${i.recipe!.step} ${i.recipe!.action}, or say "skip"`,
     "stuck": () => ":TutorRun test, or ask: <leader>te",
     "checks-pass": () => `:TutorDone ${i.passingTask}`,
-    "lesson": () => "/tutor-lesson next, or check",
+    // Live 2026-11-09: "/tutor-lesson next, or check" before any exercise file; the learner looked for how to make one.
+    "lesson": () => ({ get: "/tutor-lesson next writes the exercise", write: "/tutor-lesson check after the exercise",
+      none: "ask about it, then /tutor-lesson skip", build: "/tutor-lesson next after the milestone" })[i.lesson!.step],
     "exam": () => "/tutor-exam check, then /tutor-submit",
     "step-up": () => "/tutor-step-up check when ready",
   };
