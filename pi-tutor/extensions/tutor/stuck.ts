@@ -83,6 +83,7 @@ export class StuckDetector {
   /** The code file the current pause is in, and since_ms when the learner got there (review 2026-11-09 I1). */
   private idlePath: string | null = null;
   private idleBase = 0;
+  private idleLine = 0;
 
   constructor(
     private readonly limits: () => { errorMs: number; idleMs: number },
@@ -90,6 +91,11 @@ export class StuckDetector {
     /** Spec 2026-10-26 §5.2: false = an error that sits never nudges; the learner asks (right-click). */
     private readonly opts: { errorNudges?: boolean } = {},
   ) {}
+
+  /** The code file whose pause already fired and still goes on (no typing, no doc in between), or null. */
+  pausedIn(): { path: string; line: number } | null {
+    return this.idleFired && this.idlePath ? { path: this.idlePath, line: this.idleLine } : null;
+  }
 
   /** When the file's current first error appeared, or null. */
   errorSince(path: string): number | null {
@@ -143,6 +149,7 @@ export class StuckDetector {
         }
         if (!this.idleFired && p.since_ms - this.idleBase >= this.limits().idleMs && this.canOpen()) {
           this.idleFired = true;
+          this.idleLine = p.line;
           out.push({ type: "open", trigger: { kind: "idle", path: p.path, line: p.line } });
         }
         break;
