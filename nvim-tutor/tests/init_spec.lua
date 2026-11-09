@@ -294,6 +294,30 @@ describe("tutor.init", function()
     assert.equals(2, vim.fn.exists(":TutorStuck"))
   end)
 
+  it("ask_stuck under textlock still opens the pane behind the cursor (ask-first minor M1)", function()
+    local tutor = require("tutor")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "x = 1" }, dir .. "/main.py")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false })
+    local sent = {}
+    tutor._notify_override = function(p) table.insert(sent, p) end
+    vim.cmd("silent! only")
+    vim.cmd.edit(dir .. "/main.py")
+    local win = vim.api.nvim_get_current_win()
+    assert.is_false(tutor.state.term:is_visible())
+    -- An <expr> mapping runs under textlock (E565), like a lazy-load from a keymap.
+    vim.keymap.set("n", "<F14>", function() tutor.ask_stuck(); return "" end, { expr = true })
+    vim.api.nvim_feedkeys(vim.keycode("<F14>"), "x", false)
+    vim.keymap.del("n", "<F14>")
+    vim.wait(1000, function() return #sent > 0 and tutor.state.term:is_visible() end)
+    vim.wait(200)
+    tutor._notify_override = nil
+    assert.equals(1, #sent)
+    assert.is_true(tutor.state.term:is_visible())
+    assert.equals(win, vim.api.nvim_get_current_win())
+  end)
+
   it(":TutorQuiet types /tutor-quiet with the choice; without one it asks first", function()
     local tutor = require("tutor")
     local dir = vim.fn.tempname()
