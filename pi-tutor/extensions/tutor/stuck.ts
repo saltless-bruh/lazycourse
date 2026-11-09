@@ -80,6 +80,9 @@ export class StuckDetector {
   private churnAt = new Map<string, number>();
   private idleLast = -1;
   private idleFired = false;
+  /** The code file the current pause is in, and since_ms when the learner got there (review 2026-11-09 I1). */
+  private idlePath: string | null = null;
+  private idleBase = 0;
 
   constructor(
     private readonly limits: () => { errorMs: number; idleMs: number },
@@ -126,12 +129,19 @@ export class StuckDetector {
       }
       case "idle": {
         // A smaller since_ms than last time means the learner typed: a new stretch.
-        if (p.since_ms < this.idleLast) this.idleFired = false;
+        const typed = p.since_ms < this.idleLast, first = this.idleLast < 0;
+        if (typed) { this.idleFired = false; this.idleBase = 0; }
         this.idleLast = p.since_ms;
         // Live 2026-11-09: a pause on README.md (reading the lesson in the pane) taught again on its own. Only a pause
         // in a code file can be stuck.
-        if (!CODE_FILE.test(p.path)) break;
-        if (!this.idleFired && p.since_ms >= this.limits().idleMs && this.canOpen()) {
+        if (!CODE_FILE.test(p.path)) { this.idlePath = null; break; }
+        // Review I1: since_ms counts from the last edit anywhere; the pause counts from entering this code file.
+        if (p.path !== this.idlePath) {
+          this.idlePath = p.path;
+          this.idleFired = false;
+          this.idleBase = typed || first ? 0 : p.since_ms;
+        }
+        if (!this.idleFired && p.since_ms - this.idleBase >= this.limits().idleMs && this.canOpen()) {
           this.idleFired = true;
           out.push({ type: "open", trigger: { kind: "idle", path: p.path, line: p.line } });
         }
