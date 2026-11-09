@@ -2432,7 +2432,7 @@ describe("build or learn first (spec 2026-10-19 Q10, Q14–Q17, Q22)", () => {
 });
 
 describe("/tutor-fix (spec 2026-10-21 §5: at pro the fix comes only when asked)", () => {
-  const ep = (band: string) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "chat" }, band, attempts: 4, opened: 1, turns: 0, concept_tags: [] } });
+  const ep = (band: string) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "chat" }, band, attempts: 4, climbs: 4, opened: 1, turns: 0, concept_tags: [] } });
   it("pro: marks the open episode, so the next turn is the fix", async () => {
     const b = await boot({ branch: [ep("pro")] });
     await b.commands["tutor-level"].handler("90", b.ctx);
@@ -2442,11 +2442,11 @@ describe("/tutor-fix (spec 2026-10-21 §5: at pro the fix comes only when asked)
     expect(t.message?.content).toContain("this turn: Give the fix for only the stuck part");
   });
   it("phase 1 minor M1: asked early, the note says how many more tries before the fix, not 'the next reply'", async () => {
-    const early = { ...ep("pro"), data: { ...ep("pro").data, attempts: 1 } };
+    const early = { ...ep("pro"), data: { ...ep("pro").data, attempts: 1, climbs: 1 } };
     const b = await boot({ branch: [early] });
     await b.commands["tutor-level"].handler("90", b.ctx);
     await b.commands["tutor-fix"].handler("", b.ctx);
-    expect(b.notes.at(-1)).toBe("noted: the fix comes after 3 more tries on this spot");
+    expect(b.notes.at(-1)).toBe("noted: the fix comes after 3 more asks (<leader>ts after trying something)");
     expect(episodes(b.entries).at(-1)).toMatchObject({ fixAsked: true });
     const late = await boot({ branch: [ep("pro")] });
     await late.commands["tutor-level"].handler("90", late.ctx);
@@ -2474,7 +2474,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P2.T2 add `split_amount(total, people)` = total / people\n");
     return dir;
   };
-  const ep = (attempts: number) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "run", cmd: ["python3", "src/main.py"], code: 1, trace: "ZeroDivisionError: x" }, band: "beginner", attempts, spot: "ZeroDivisionError: x", opened: 1, turns: 0, concept_tags: [] } });
+  const ep = (attempts: number) => ({ type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "run", cmd: ["python3", "src/main.py"], code: 1, trace: "ZeroDivisionError: x" }, band: "beginner", attempts, climbs: attempts, spot: "ZeroDivisionError: x", opened: 1, turns: 0, concept_tags: [] } });
   const reply = (text: string) => assistant(`${text}\n\`\`\`tutor-judgment\n{"judgment":"wrong"}\n\`\`\``);
   const textOf = (m: unknown) => ((m as { content: { type: string; text?: string }[] }).content.find((c) => c.type === "text")?.text ?? "");
   const judgments = (b: { entries: { type: string }[] }) => b.entries.filter((e) => e.type === "tutor_judgment").length;

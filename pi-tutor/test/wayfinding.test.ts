@@ -20,7 +20,7 @@ const rows: [string, Partial<WayInput>, Where, RegExp][] = [
   ["plan failed", { project: true, spec: "failed" }, "plan-failed", /\/tutor-start spec/],
   ["project", { project: true }, "project", /\/tutor-plan/],
   ["recipe", { project: true, recipe: { task: "P1.T1", step: 2, action: "the examples" } }, "recipe", /step 2.*skip/],
-  ["stuck", { project: true, stuck: true }, "stuck", /:TutorRun test.*<leader>te/],
+  ["stuck", { project: true, stuck: true }, "stuck", /:TutorRun test.*<leader>ts/],
   ["checks pass", { project: true, passingTask: "P1.T2" }, "checks-pass", /:TutorDone P1\.T2/],
   // Live 2026-11-09: "next: /tutor-lesson next, or check" while no exercise file existed; the learner did not know
   // the tutor writes it and looked for a way to make a .py file. One step at a time, the one that comes next.

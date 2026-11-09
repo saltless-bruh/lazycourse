@@ -41,7 +41,9 @@ export type TutorPayload =
   | { kind: "churn"; buf: number; path: string; region: [number, number]; edits: number }
   | { kind: "run_output"; cmd: string[]; code: number; stdout: string; stderr: string; timed_out?: boolean }
   /** Wayfinding spec §8.3: nvim-tutor's tour, checked in Neovim; `step` is the one to do now. */
-  | { kind: "tour"; step: number; total: number; title: string; status: "running" | "done" | "off" };
+  | { kind: "tour"; step: number; total: number; title: string; status: "running" | "done" | "off" }
+  /** Ask-first spec 2026-11-09: `<leader>ts`, the learner asks for stuck help at an absolute path:line. */
+  | { kind: "stuck"; path: string; line: number; error?: string };
 
 export interface EditorSnapshot {
   path: string;
@@ -263,6 +265,11 @@ export class NvimLink {
   /** Wayfinding spec §8.3: tell the tour an event only Pi sees (the learner asked the tutor something). */
   async tourEvent(name: string): Promise<void> {
     await this.timed(this.raw.lua(`local n = ... pcall(function() require("tutor.tour").event(n) end)`, [name]), 2000, "tour");
+  }
+
+  /** Ask-first spec 2026-11-09: a stuck offer as a corner notice (`vim.notify`); no window, focus or mode change. */
+  async offer(text: string): Promise<void> {
+    await this.timed(this.raw.lua(`local t = ... vim.schedule(function() vim.notify(t, vim.log.levels.INFO, { title = "tutor", timeout = 8000 }) end)`, [text]), 2000, "offer");
   }
 
   /** Ask a running tour to tell its step again: this Pi may have started after the tour's folder switch. */

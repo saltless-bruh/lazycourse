@@ -18,6 +18,8 @@ export interface TutorState {
   lost?: boolean;
   /** Latest judgment word from the model, or "missing" when a reply had no block. */
   last?: string;
+  /** Ask-first spec 2026-11-09: "notices off 4m" while quiet mode is on. */
+  quiet?: string;
   /** Wayfinding spec 2026-11-08 §7: the one next thing to do, a third line. */
   next?: string;
 }
@@ -53,7 +55,7 @@ export function renderWidget(s: TutorState): string[] {
   // Off Neovim the state and judgment still show; the prefix says why (M1b #2, M2 #10, M3 #23).
   // The state is clipped to the room the prefix and the judgment leave, so "· judged X" always shows (M6c I2).
   const prefix = s.connected ? "" : `${s.lost ? "nvim closed" : "outside nvim"} · `;
-  const suffix = s.last ? ` · judged ${s.last}` : "";
+  const suffix = `${s.quiet ? ` · ${s.quiet}` : ""}${s.last ? ` · judged ${s.last}` : ""}`;
   const room = Math.max(1, MAX - visibleWidth(prefix) - visibleWidth(suffix));
   const lines = [clip(line1), clip(`${prefix}${clip(s.state, room)}${suffix}`)];
   return s.next ? [...lines, clip(s.next)] : lines;

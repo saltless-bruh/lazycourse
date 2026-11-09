@@ -295,3 +295,7 @@ Re-verify every line when bumping versions.
 ## Install location on this machine
 - Pi installed with `npm install -g --prefix ~/.local` because `/usr/lib/node_modules` is
   root-owned; `~/.local/bin` precedes `/usr/bin` on PATH, shadowing the old 0.73 copy.
+- Ask-first stuck help (spec 2026-11-09): `NvimLink.offer(text)` runs `vim.notify(text, vim.log.levels.INFO,
+  { title = "tutor", timeout = 8000 })` inside `vim.schedule` (live 2026-11-10: the 3 s default faded too fast) (LazyVim's notifier shows it in a corner; no window, focus or mode change;
+  probed headless on Neovim 0.12). nvim-tutor's `<leader>ts` sends the `{ kind = "stuck", path, line, error? }` payload
+  over `vim.rpcnotify(chan, "tutor", …)` like the other payloads.

@@ -93,6 +93,15 @@ answers with a notice that help is not available during the exam/test. In archit
 **Habits (the author, 2026-11-09).** `<leader>ts` pressed with an error on the cursor line counts toward the "reads
 errors" habit by the same rule as `<leader>te` (`readsErrorEvent`: a pass when the error was on screen ≥ 5 s).
 
+**Help climbs on asks, not on runs (the author, 2026-11-09).** A failed run still counts as a try for habits and
+the profile (attempt score, own-fixes, the widget's `try N`), but it no longer moves the help step. The step
+(teach → hint → why → ask → fix, the same `STAGES` table per band) is driven by **asks**: `<leader>ts` and
+`<leader>te` only — a question typed in the pane is conversation at the current step. An ask climbs one step only
+when the learner tried something since their last ask (a new counted failed try, or the code changed); the first ask
+gives a hint when there were tries before it, else teach; an ask with no new effort repeats the step another way.
+So quiet failed runs followed by `<leader>ts` get a hint, never the fix at once, and pressing the key repeatedly
+cannot fast-forward to the answer. At pro, `/tutor-fix` works as today against the ask-based step.
+
 **Recipe.** As decided 2026-10-27, a pause during `/tutor-plan` is thinking: no pause offers while a recipe runs.
 Error, churn and run offers do appear during a recipe.
 

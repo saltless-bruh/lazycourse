@@ -184,7 +184,8 @@ return {
     text = {
       "The tutor's box at the top of its pane always says what to do next (\"next: …\").",
       "<leader>t? (or :TutorHelp, or /tutor-help in the pane) opens every command, explained, in its own tab;",
-      "q closes it. :TutorTour comes back to this tour any time.",
+      "q closes it. :TutorTour comes back to this tour any time. Stuck on a line? <leader>ts asks the tutor for help;",
+      "it never starts talking on its own, it only shows a small notice when you pause a long time or a run fails.",
       "",
       "Do it: press <leader>t? and then q. That ends the tour: then tell the tutor what you'd like to learn.",
     },

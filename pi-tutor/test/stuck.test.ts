@@ -84,6 +84,21 @@ describe("StuckDetector idle and churn", () => {
     expect(at("/p/a.py", 30_000)).toEqual([]); // typed: a new stretch
     expect(at("/p/a.py", 150_000)).toHaveLength(1);
   });
+  // Ask-first plan Task 1: the offer book asks whether the pause it offered on is still going.
+  it("pausedIn names the code file whose pause fired, until typing or a doc", () => {
+    const d = det(60_000, 120_000);
+    const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 7, since_ms }, 0);
+    expect(d.pausedIn()).toBeNull();
+    at("/p/a.py", 30_000);
+    expect(d.pausedIn()).toBeNull();
+    at("/p/a.py", 150_000);
+    expect(d.pausedIn()).toEqual({ path: "/p/a.py", line: 7 });
+    at("/p/a.py", 30_000); // typed
+    expect(d.pausedIn()).toBeNull();
+    at("/p/a.py", 150_000);
+    at("/p/notes.md", 180_000);
+    expect(d.pausedIn()).toBeNull();
+  });
   it("moving to another code file starts its pause again", () => {
     const d = det(60_000, 120_000);
     const at = (path: string, since_ms: number) => d.observe({ kind: "idle", buf: 1, path, line: 1, since_ms }, 0);

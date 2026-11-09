@@ -219,6 +219,29 @@ function M.ask_error()
   pcall(function() require("tutor.tour").event("asked_error") end)
 end
 
+--- Ask-first spec 2026-11-09: <leader>ts, "I'm stuck". Sends the cursor's spot (and its error) to the tutor; the
+--- tutor answers in its pane, which is shown if hidden, while the cursor stays here in NORMAL mode.
+function M.ask_stuck()
+  local file = vim.api.nvim_buf_get_name(0)
+  local root = vim.fs.normalize(vim.fn.resolve(opts.cwd)) .. "/"
+  local real = file ~= "" and vim.fs.normalize(vim.fn.resolve(file)) or ""
+  if vim.bo.buftype ~= "" or real:sub(1, #root) ~= root then
+    vim.notify("[tutor] open a file of your project, then <leader>ts", vim.log.levels.INFO)
+    return
+  end
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local d = vim.diagnostic.get(0, { lnum = row - 1, severity = vim.diagnostic.severity.ERROR })
+  local editor = vim.api.nvim_get_current_win()
+  if not M.state.term:is_visible() then
+    M.state.term:show()
+    if vim.api.nvim_win_is_valid(editor) then vim.api.nvim_set_current_win(editor) end
+    vim.cmd.stopinsert()
+  end
+  if not M.notify_tutor({ kind = "stuck", path = real, line = row, error = d[1] and (d[1].message:gsub("%s*\n%s*", " ")) or nil }) then
+    vim.notify("[tutor] the tutor is not running; :TutorRestart, then <leader>ts", vim.log.levels.WARN)
+  end
+end
+
 --- Re-root the tutor at `dir`: cd there, open `file` in the editor window, restart Pi with cwd = dir.
 ---@return boolean ok
 function M.switch(dir, file)
@@ -391,12 +414,23 @@ function M.setup(user_opts)
     end,
   })
   vim.keymap.set("n", "<leader>te", M.ask_error, { desc = "Ask tutor about this error" })
+  cmd("TutorStuck", function() M.ask_stuck() end, {})
+  -- Ask-first spec 2026-11-09: stuck notices off for a while; without a choice, a picker.
+  local QUIET = { { "1 minute", "1m" }, { "5 minutes", "5m" }, { "10 minutes", "10m" }, { "1 hour", "1h" },
+    { "until I turn them on", "off" }, { "turn them back on", "on" } }
+  cmd("TutorQuiet", function(a)
+    if a.args ~= "" then return slash("/tutor-quiet")(a) end
+    vim.ui.select(vim.tbl_map(function(q) return q[1] end, QUIET), { prompt = "Stuck notices" }, function(_, i)
+      if i then slash("/tutor-quiet " .. QUIET[i][2])() end
+    end)
+  end, { nargs = "?", complete = function() return { "1m", "5m", "10m", "1h", "off", "on" } end })
   -- Wayfinding spec §8.4: the plugin owns its keys (they were lazy.nvim `keys` in the user's config), so the
   -- command list's drift test sees them all.
   local commands = require("tutor.commands")
   vim.keymap.set("n", "<leader>tt", "<Cmd>Tutor<CR>", { desc = "tutor: " .. commands.describe("<leader>tt") })
   vim.keymap.set("n", "<leader>tr", "<Cmd>TutorRun<CR>", { desc = "tutor: " .. commands.describe("<leader>tr") })
   vim.keymap.set("n", "<leader>t?", "<Cmd>TutorHelp<CR>", { desc = "tutor: " .. commands.describe("<leader>t?") })
+  vim.keymap.set("n", "<leader>ts", function() M.ask_stuck() end, { desc = "tutor: " .. commands.describe("<leader>ts") })
   local ok, wk = pcall(require, "which-key")
   if ok and wk.add then wk.add({ { "<leader>t", group = "tutor" } }) end
   -- Live check 2026-11-09: at VimEnter the terminal UI was not attached yet (no UI, so nothing opened). UIEnter fires
