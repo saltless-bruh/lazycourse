@@ -282,6 +282,11 @@ Re-verify every line when bumping versions.
   { title = "tutor", timeout = 8000 })` inside `vim.schedule` (live 2026-11-10: the 3 s default faded too fast) (LazyVim's notifier shows it in a corner; no window, focus or mode change;
   probed headless on Neovim 0.12). nvim-tutor's `<leader>ts` sends the `{ kind = "stuck", path, line, error? }` payload
   over `vim.rpcnotify(chan, "tutor", …)` like the other payloads.
+  Deferred minors 2026-11-10: the notice also passes `id = "tutor:" .. text` in its opts (snacks.notifier and
+  noice's snacks backend replace a shown notice with the same id; plain `vim.notify` ignores it — read in the
+  installed `snacks/notifier.lua` and `noice/view/backend/snacks.lua`), and the push script has a
+  `BufEnter`/`WinEnter` autocmd that restarts the pause clock on coming back to a project file from a buffer
+  outside the root (the tutor pane).
 - `:TutorQuiet` with no argument opens `vim.ui.select(items, { prompt = "Stuck notices" }, on_choice)` (a function on
   Neovim 0.12.6; LazyVim shows its picker); `on_choice(item, idx)` gets nil on cancel, and the choice is typed as
   `/tutor-quiet <arg>` into the pane. `<leader>ts` checks `term.textlocked()` first and reruns via `vim.schedule`.

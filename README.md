@@ -263,7 +263,7 @@ At level 0–33 every task starts it by itself; at any level `/tutor-plan P1.T1`
 
 ```mermaid
 flowchart TD
-  m1["model writes checks<br/>check P1.T1: split_amount(50, 3) == 16.666666666666668<br/>run P1.T2: stdin &quot;52.8&quot; -> stdout contains &quot;17.60&quot;"] --> ref
+  m1["model writes checks<br/>check P1.T1: split_amount(50, 3) == 16.666666666666668<br/>run P1.T2: stdin #quot;52.8#quot; -> stdout contains #quot;17.60#quot;"] --> ref
   m2["separate request, never sees them:<br/>a hidden reference solution"] --> ref{reference passes?}
   ref -- yes --> trusted["trusted check"]
   ref -- no --> unv["unverified: shown,<br/>never blocks you"]

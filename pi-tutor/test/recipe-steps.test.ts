@@ -39,6 +39,17 @@ describe("recognize: code decides when a recipe step's artifact is there (spec 2
   });
 });
 
+describe("Find: a question about the task has not found it (deferred minor)", () => {
+  const py = { language: "python", task: "P1.T1" };
+  it("a question naming the task is no Find; a statement with a question after it still is", () => {
+    expect(recognize(1, "what does P1.T1 mean?", py)).toBe(false);
+    expect(recognize(1, "where is P1.T1 in the map?", py)).toBe(false);
+    expect(recognize(1, "P1.T1 is the split box in the design map", py)).toBe(true);
+    expect(recognize(1, "P1.T1 is the split box. Is that right?", py)).toBe(true);
+    expect(recognize(1, "I'm doing P1.T1, it makes the secret number", py)).toBe(true);
+  });
+});
+
 describe("examplesToChecks: the learner's Examples rows become value checks", () => {
   it("parses f(args) → value rows, with or without an edge: label, and skips the rest", () => {
     const c = examplesToChecks("split_amount(50, 3) → 16.666666666666668\nedge: split_amount(0, 3) -> 0.0\nit should round", "P1.T1", "python", 1);

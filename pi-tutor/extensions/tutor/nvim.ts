@@ -267,9 +267,13 @@ export class NvimLink {
     await this.timed(this.raw.lua(`local n = ... pcall(function() require("tutor.tour").event(n) end)`, [name]), 2000, "tour");
   }
 
-  /** Ask-first spec 2026-11-09: a stuck offer as a corner notice (`vim.notify`); no window, focus or mode change. */
+  /**
+   * Ask-first spec 2026-11-09: a stuck offer as a corner notice (`vim.notify`); no window, focus or mode change.
+   * Deferred minor: `id` is the offer's text, so a notifier that knows ids (snacks, noice) shows the same offer once,
+   * renewed, instead of a stack of identical notices; plain `vim.notify` ignores it.
+   */
   async offer(text: string): Promise<void> {
-    await this.timed(this.raw.lua(`local t = ... vim.schedule(function() vim.notify(t, vim.log.levels.INFO, { title = "tutor", timeout = 8000 }) end)`, [text]), 2000, "offer");
+    await this.timed(this.raw.lua(`local t = ... vim.schedule(function() vim.notify(t, vim.log.levels.INFO, { title = "tutor", timeout = 8000, id = "tutor:" .. t }) end)`, [text]), 2000, "offer");
   }
 
   /** Ask a running tour to tell its step again: this Pi may have started after the tour's folder switch. */

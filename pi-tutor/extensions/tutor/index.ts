@@ -930,7 +930,10 @@ export default function (pi: ExtensionAPI): void {
     profileWrite(() => {
       saved = readChecksState(now.setting(key));
       const m = saved.milestones[k] ?? { checks: [], reference: "", ran: false };
-      saved.milestones[k] = { ...m, checks: [...m.checks, ...checked] };
+      // Deferred minor: an example said again (or twice in one message) is the same check, kept once.
+      const same = (c: Check) => JSON.stringify([c.task, c.kind, c.expr, c.expected, c.stdin, c.contains]);
+      const had = new Set(m.checks.map(same));
+      saved.milestones[k] = { ...m, checks: [...m.checks, ...checked.filter((c) => !had.has(same(c)) && had.add(same(c)) !== undefined)] };
       now.setSetting(key, JSON.stringify(saved));
     });
     writeChecksMd(root, saved, k);

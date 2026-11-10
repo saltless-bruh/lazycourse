@@ -42,7 +42,11 @@ export function recognize(step: number, learnerText: string, o: { language: stri
   const plain = !learnerText.includes("```") && !learnerText.includes("?");
   const calm = plain && !COMPLAINT.test(learnerText); // Shape, Steps and Map; Examples may say "error" as an outcome
   switch (step) {
-    case 1: return new RegExp(`(^|[^\\w.])${o.task.replace(/\./g, "\\.")}(?![\\w.]*\\d)`).test(learnerText);
+    case 1: {
+      // Deferred minor: "what does P1.T1 mean?" asks about the task; only a sentence that is no question finds it.
+      const named = new RegExp(`(^|[^\\w.])${o.task.replace(/\./g, "\\.")}(?![\\w.]*\\d)`);
+      return learnerText.split(/(?<=[.!?])\s+|\n/).some((x) => named.test(x) && !/\?\s*$/.test(x));
+    }
     case 2: {
       if ((SHAPE[o.language]?.test(learnerText) ?? false) || ls.some((l) => TYPED_SHAPES.some((re) => re.test(l)))) return true;
       const m = calm ? PLAIN_SHAPE.exec(learnerText) : null;

@@ -210,9 +210,16 @@ function M.ask_error()
   local d = vim.diagnostic.get(0, { lnum = row - 1 })
   if #d == 0 then vim.notify("[tutor] no error on this line", vim.log.levels.INFO); return end
   table.sort(d, function(a, b) return a.severity < b.severity end)
+  -- Deferred minor (root rule): nothing of a file outside the project is sent, not its name, line or error.
+  -- Paths are compared resolved, so a project opened through a symlink still gives the path inside it.
   local file = vim.api.nvim_buf_get_name(0)
-  local root = vim.fs.normalize(opts.cwd) .. "/"
-  local rel = file:sub(1, #root) == root and file:sub(#root + 1) or vim.fn.fnamemodify(file, ":t")
+  local root = vim.fs.normalize(vim.fn.resolve(opts.cwd)) .. "/"
+  local real = file ~= "" and vim.fs.normalize(vim.fn.resolve(file)) or ""
+  if vim.bo.buftype ~= "" or real:sub(1, #root) ~= root then
+    vim.notify("[tutor] open a file of your project, then ask about its error", vim.log.levels.INFO)
+    return
+  end
+  local rel = real:sub(#root + 1)
   local code = vim.trim(vim.api.nvim_get_current_line())
   local msg = d[1].message:gsub("%s*\n%s*", " ")
   slash(string.format("[ask-error] %s:%d: %s | code: %s", rel, row, msg, code))()

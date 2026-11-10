@@ -51,6 +51,15 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { group = g, call
 end })
 vim.api.nvim_create_autocmd("DiagnosticChanged", { group = g, callback = function() churn = {} end })
 
+-- Deferred minor: time away from the project's files (the tutor pane, a help tab) is no pause in the code; the
+-- pause is counted from coming back.
+local was_in = in_root(vim.api.nvim_get_current_buf())
+vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, { group = g, callback = function()
+  local now_in = in_root(vim.api.nvim_get_current_buf())
+  if now_in and not was_in then last_change = vim.uv.now() end
+  was_in = now_in
+end })
+
 local timer = vim.uv.new_timer()
 _G.__pi_tutor_timer = timer
 timer:start(opts.idle_ms, opts.idle_ms, vim.schedule_wrap(function()
