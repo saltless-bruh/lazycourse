@@ -37,12 +37,20 @@ const CONSTRUCT = /[()`/*+%<>=[\]]|\b(?:slash|star|plus|minus|times|percent|modu
 // The left side names an action of the learner's steps (1-4 words), never "this", "that", "it", "there".
 const MAP_PAIR = /^\s*(?!(?:this|that|it|there|these|those)\b)[A-Za-z][\w'-]*(?:\s+[\w'-]+){0,3}?\s+(?:is|are|uses?|means?|becomes?)\s+(?!(?:in|at|on|with|wrong|broken)\b)(.+)$/i;
 
+/** A sentence that opens by asking ("ok, what is …", "can you explain …"), after a filler word or two. */
+const ASKS = /^\s*(?:(?:ok(?:ay)?|so|well|um+|hey|and|but|please|sorry)[,\s]+)*(?:what|where|which|how|why|who|when|can|could|explain|tell)\b/i;
+
 export function recognize(step: number, learnerText: string, o: { language: string; task: string }): boolean {
   const ls = lines(learnerText);
   const plain = !learnerText.includes("```") && !learnerText.includes("?");
   const calm = plain && !COMPLAINT.test(learnerText); // Shape, Steps and Map; Examples may say "error" as an outcome
   switch (step) {
-    case 1: return new RegExp(`(^|[^\\w.])${o.task.replace(/\./g, "\\.")}(?![\\w.]*\\d)`).test(learnerText);
+    case 1: {
+      // Deferred minor: "what does P1.T1 mean?" asks what the task is, so it has not found it. Review I1: an unsure
+      // answer ("P1.T1 - is it the split box?", "I'm on P1.T1, right?") has; only a sentence that opens by asking does not.
+      const named = new RegExp(`(^|[^\\w.])${o.task.replace(/\./g, "\\.")}(?![\\w.]*\\d)`);
+      return learnerText.split(/(?<=[.!?])\s+|\n/).some((x) => named.test(x) && !(/\?\s*$/.test(x) && ASKS.test(x)));
+    }
     case 2: {
       if ((SHAPE[o.language]?.test(learnerText) ?? false) || ls.some((l) => TYPED_SHAPES.some((re) => re.test(l)))) return true;
       const m = calm ? PLAIN_SHAPE.exec(learnerText) : null;
@@ -107,4 +115,19 @@ export function examplesToChecks(text: string, task: string, language: string, m
     const m = CALL_ROW.exec(l);
     return m ? [{ task, kind: "value" as const, expr: m[1].trim(), expected: m[2].trim(), milestone, status: "unverified" as const }] : [];
   });
+}
+
+/**
+ * The learner's example checks joined to the saved ones: an example said again (or twice in one message) is kept
+ * once; a copy that proved itself on the reference takes the place of an unverified one (review minor 7).
+ */
+export function mergeExampleChecks(existing: Check[], added: Check[]): Check[] {
+  const key = (c: Check) => JSON.stringify([c.task, c.kind, c.expr, c.expected, c.stdin, c.contains]);
+  const out = [...existing], at = new Map(out.map((c, i) => [key(c), i]));
+  for (const c of added) {
+    const i = at.get(key(c));
+    if (i === undefined) { at.set(key(c), out.length); out.push(c); }
+    else if (out[i].status !== "trusted" && c.status === "trusted") out[i] = c;
+  }
+  return out;
 }

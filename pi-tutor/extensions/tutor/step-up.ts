@@ -131,6 +131,55 @@ export function stepUpResult(parts: { solve: Score; fix: Score; plan: Score; tes
 }
 interface Score { passed: number; total: number }
 
+/** An error's text without its place in the file (path:line, Python's `File "…", line N`): what went wrong, not where. */
+export function noWhere(error: string): string {
+  // Review minor 2: of many lines, the compiler's own "error…" line, else the last (a traceback ends with what went
+  // wrong); arrows, gutters and source lines (`--> file:12`, `12 | code`) are the place, and may be the planted bug.
+  const lines = error.split(/\r?\n/).filter((l) => l.trim());
+  const kept = lines.length > 1 ? lines.filter((l) => !/^\s*(?:-->|\d*\s*\||=\s)/.test(l)) : lines;
+  const text = kept.length > 1 ? kept.find((l) => /^\s*error(?:\[\w+\])?:/.test(l) && !/aborting/.test(l)) ?? kept[kept.length - 1] : kept[0] ?? "";
+  return text
+    .replace(/File "[^"]*", line \d+,?\s*/g, "")
+    .replace(/(^|[\s(])[\w./-]+\.[A-Za-z]\w*:\d+(?::\d+)?:?\s*/g, "$1") // review minor 10: `3.14:2` is a value
+    .replace(/\s*\b(?:on |at )?line \d+\b/gi, "")
+    .replace(/\s*\(\s*(?:[\w./-]+\.[A-Za-z]\w*)?\s*,?\s*\)/g, "") // what is left of "(fix.py, line 2)"
+    .trim();
+}
+
+export type TestsMiss = "none" | "fail-on-solution" | "cannot-fail" | "no-sandbox" | "not-run";
+const TESTS_MISS: Record<TestsMiss, string> = {
+  none: "no tests were found in your test file",
+  "fail-on-solution": "your tests fail on a working solution, so they check something the task does not ask",
+  "cannot-fail": "your tests pass even on a broken version, so they cannot catch a bug",
+  "no-sandbox": "the tests could not be run: the sandbox is off",
+  "not-run": "your tests could not be run against the hidden solution (this step-up was saved without it)",
+};
+/** Review minor 3: one short line per note, whatever the program printed or returned. */
+const NOTE_MAX = 160;
+const oneLine = (t: string) => { const s = t.replace(/\s*\n\s*/g, " ").trim(); return s.length > NOTE_MAX ? `${s.slice(0, NOTE_MAX - 1)}…` : s; };
+
+/**
+ * Author 2026-11-10 (option A): what a failed step-up missed, one line each, from the failed checks' own output —
+ * never from the model. At most two checks per part; the talk gives a count only (naming the pieces would give
+ * the hidden solution away).
+ */
+export function stepUpNotes(i: {
+  missed: Partial<Record<"solve" | "fix" | "plan", string[]>>;
+  talk: { matched: number; total: number };
+  tests?: TestsMiss | null;
+  improve?: string | null;
+}): string[] {
+  const out: string[] = [];
+  for (const part of ["solve", "fix", "plan"] as const) {
+    const lines = i.missed[part] ?? [];
+    lines.slice(0, 2).forEach((l, n) => out.push(`${part}: ${oneLine(l)}${n === 1 && lines.length > 2 ? ` (and ${lines.length - 2} more)` : ""}`));
+  }
+  if (!talkPassed(i.talk)) out.push(i.talk.total ? `plan talk: ${i.talk.matched} of ${i.talk.total} pieces of your plan matched the hidden solution` : "plan talk: no plan with a pieces: line was given");
+  if (i.tests) out.push(`tests: ${TESTS_MISS[i.tests]}`);
+  if (i.improve) out.push(`improve: ${i.improve}`);
+  return out;
+}
+
 /** The "fix an error" program: the first one-character slip of the reference that its checks catch. */
 export async function brokenProgram(reference: string, failsChecks: (source: string) => Promise<boolean>): Promise<string | null> {
   for (const m of fixMutants(reference)) if (await failsChecks(m)) return m;

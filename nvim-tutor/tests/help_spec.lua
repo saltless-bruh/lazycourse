@@ -24,6 +24,30 @@ describe("tutor.help", function()
     assert.equals(before, #vim.api.nvim_list_tabpages())
   end)
 
+  it("q closes the help when it is the only tab left, with no error (deferred minor: E784)", function()
+    local buf = require("tutor.help").open()
+    vim.cmd("tabonly")
+    assert.equals(1, #vim.api.nvim_list_tabpages())
+    vim.v.errmsg = ""
+    local ok = pcall(vim.api.nvim_feedkeys, "q", "x", false)
+    assert.is_true(ok)
+    assert.equals("", vim.v.errmsg)
+    assert.is_false(vim.api.nvim_buf_is_valid(buf))
+    assert.equals(1, #vim.api.nvim_list_tabpages())
+  end)
+
+  it("q in the last tab goes back to the file that was open before the help (review minor 9)", function()
+    local f = vim.fn.tempname() .. ".py"
+    vim.fn.writefile({ "x = 1" }, f)
+    vim.cmd.edit(f)
+    local file_buf = vim.api.nvim_get_current_buf()
+    local buf = require("tutor.help").open()
+    vim.cmd("tabonly")
+    vim.api.nvim_feedkeys("q", "x", false)
+    assert.is_false(vim.api.nvim_buf_is_valid(buf))
+    assert.equals(file_buf, vim.api.nvim_get_current_buf())
+  end)
+
   it("with tutor_now it starts with the next step and what fits now", function()
     vim.g.tutor_now = { where = "stuck", next = "next: :TutorRun test, or ask: <leader>te" }
     local buf = require("tutor.help").open()

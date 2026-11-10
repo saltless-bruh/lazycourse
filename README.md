@@ -263,7 +263,7 @@ At level 0–33 every task starts it by itself; at any level `/tutor-plan P1.T1`
 
 ```mermaid
 flowchart TD
-  m1["model writes checks<br/>check P1.T1: split_amount(50, 3) == 16.666666666666668<br/>run P1.T2: stdin &quot;52.8&quot; -> stdout contains &quot;17.60&quot;"] --> ref
+  m1["model writes checks<br/>check P1.T1: split_amount(50, 3) == 16.666666666666668<br/>run P1.T2: stdin #quot;52.8#quot; -> stdout contains #quot;17.60#quot;"] --> ref
   m2["separate request, never sees them:<br/>a hidden reference solution"] --> ref{reference passes?}
   ref -- yes --> trusted["trusted check"]
   ref -- no --> unv["unverified: shown,<br/>never blocks you"]
@@ -390,7 +390,16 @@ Offered at most once a day once your band's habits are solid. `/tutor-step-up` s
 | 2 · coding test (`stepup/`) | solve with a module you haven't used, fix one planted bug, build your own plan; intermediate adds your own tests (must catch a broken hidden solution) and clumsy code to improve |
 
 `/tutor-step-up check` shows each part's checks, `/tutor-step-up submit` decides. A pass tells you to type the next
-band's level yourself; the tutor never moves you.
+band's level yourself; the tutor never moves you. A fail names the habits to practise and what was missed:
+
+```
+What was missed:
+- solve: weekday('2026-11-02') gave 'Sunday', expected 'Monday'
+- fix: tip(40) gave 266.67, expected 6.0
+- plan talk: 1 of 3 pieces of your plan matched the hidden solution
+```
+
+These lines are the failed checks' own output, never the model's words, and never say where in the file.
 
 ### From 34 and 67
 

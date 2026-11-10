@@ -262,6 +262,31 @@ describe("tutor.init", function()
     assert.is_true(has("[ask-error] main.py:2: name 'y' is not defined | code: print(y)"))
   end)
 
+  it("ask_error in a file outside the project sends nothing and says why (deferred minor: root rule)", function()
+    local tutor = require("tutor")
+    local dir, other = vim.fn.tempname(), vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.mkdir(other, "p")
+    vim.fn.writefile({ "print(secret)" }, other .. "/notes.py")
+    tutor.setup({ pi_cmd = { "cat" }, cwd = dir, check_version = false })
+    vim.cmd("Tutor")
+    vim.cmd("wincmd t")
+    vim.cmd.edit(other .. "/notes.py")
+    local ns = vim.api.nvim_create_namespace("tutor-test")
+    vim.diagnostic.set(ns, 0, { { lnum = 0, col = 0, message = "name 'secret' is not defined", severity = vim.diagnostic.severity.ERROR } })
+    local said = {}
+    local notify = vim.notify
+    vim.notify = function(m) said[#said + 1] = m end
+    tutor.ask_error()
+    vim.wait(300)
+    vim.notify = notify
+    local buf = tutor.state.term:bufnr()
+    local joined = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "")
+    assert.is_nil(joined:find("[ask-error]", 1, true))
+    assert.is_nil(joined:find("secret", 1, true))
+    assert.truthy(table.concat(said, "\n"):find("open a file of your project", 1, true))
+  end)
+
   -- Ask-first spec 2026-11-09: <leader>ts asks for stuck help; the pane answers, the cursor stays in the code.
   it("ask_stuck sends the cursor's spot (and its error) and keeps the cursor in the editor", function()
     local tutor = require("tutor")
@@ -389,6 +414,14 @@ describe("tutor.init", function()
     vim.cmd("doautocmd MenuPopup")
     assert.is_false(vim.fn.menu_info(entry, "n").enabled)
     assert.is_true(vim.fn.maparg("<leader>te", "n") ~= "")
+    -- Review minor 8: a file outside the project has the entry off, as <leader>te would refuse it.
+    local other = vim.fn.tempname()
+    vim.fn.mkdir(other, "p")
+    vim.fn.writefile({ "print(z)" }, other .. "/notes.py")
+    vim.cmd.edit(other .. "/notes.py")
+    vim.diagnostic.set(ns, 0, { { lnum = 0, col = 0, message = "boom", severity = vim.diagnostic.severity.ERROR } })
+    vim.cmd("doautocmd MenuPopup")
+    assert.is_false(vim.fn.menu_info(entry, "n").enabled)
   end)
 
   it(":TutorStepUp types /tutor-step-up (habits Task 10)", function()

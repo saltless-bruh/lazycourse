@@ -107,7 +107,7 @@ describe("Node floor (M6c M7)", () => {
     const floor = (s: string) => /(\d+)\.(\d+)/.exec(s)!.slice(1).map(Number);
     const ours = floor(json("../package.json").engines.node);
     expect(ours).toEqual(floor(json("../node_modules/@earendil-works/pi-coding-agent/package.json").engines.node));
-    expect(ours).toEqual(floor(/Node ≥ ([\d.]+)/.exec(readFileSync(new URL("../../README.md", import.meta.url), "utf8"))![1]));
+    expect(ours).toEqual(floor(/Node(?: \| | )≥ ([\d.]+)/.exec(readFileSync(new URL("../../README.md", import.meta.url), "utf8"))![1]));
   });
 });
 

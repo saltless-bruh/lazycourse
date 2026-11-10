@@ -133,7 +133,8 @@ offer as a pane notice (`ctx.ui.notify`) instead of a reply.
 ## Known gaps left as is (from the 2026-11-09 review)
 
 With offers instead of replies these matter much less; the builder may fix them if cheap:
-- Time in the tutor pane counts toward the pause in the code file left behind.
+- ~~Time in the tutor pane counts toward the pause in the code file left behind.~~ Fixed 2026-11-10: the pause is
+  counted from coming back to a project file.
 - A pause can count up to ~60 s early after typing in a doc just before opening a code file.
 - Typing followed by switching to the pane within ~30 s can be missed, so a later pause in that file may not offer.
 

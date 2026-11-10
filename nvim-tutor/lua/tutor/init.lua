@@ -205,14 +205,27 @@ local ASK_ENTRY = [[PopUp.Ask\ tutor\ about\ this\ error]]
 
 --- Spec 2026-10-26 §5.2: the error under the cursor, its line and code, typed into Pi as a question.
 --- One line (Pi submits on Enter): `[ask-error] <relpath>:<line>: <message> | code: <line text>`.
+--- The current buffer's path inside the project, or nil for a file outside it or a scratch buffer.
+--- Paths are compared resolved, so a project opened through a symlink still gives the path inside it.
+local function project_rel()
+  local file = vim.api.nvim_buf_get_name(0)
+  local root = vim.fs.normalize(vim.fn.resolve(opts.cwd)) .. "/"
+  local real = file ~= "" and vim.fs.normalize(vim.fn.resolve(file)) or ""
+  if vim.bo.buftype ~= "" or real:sub(1, #root) ~= root then return nil end
+  return real:sub(#root + 1)
+end
+
 function M.ask_error()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local d = vim.diagnostic.get(0, { lnum = row - 1 })
   if #d == 0 then vim.notify("[tutor] no error on this line", vim.log.levels.INFO); return end
   table.sort(d, function(a, b) return a.severity < b.severity end)
-  local file = vim.api.nvim_buf_get_name(0)
-  local root = vim.fs.normalize(opts.cwd) .. "/"
-  local rel = file:sub(1, #root) == root and file:sub(#root + 1) or vim.fn.fnamemodify(file, ":t")
+  -- Deferred minor (root rule): nothing of a file outside the project is sent, not its name, line or error.
+  local rel = project_rel()
+  if not rel then
+    vim.notify("[tutor] open a file of your project, then ask about its error", vim.log.levels.INFO)
+    return
+  end
   local code = vim.trim(vim.api.nvim_get_current_line())
   local msg = d[1].message:gsub("%s*\n%s*", " ")
   slash(string.format("[ask-error] %s:%d: %s | code: %s", rel, row, msg, code))()
@@ -411,7 +424,8 @@ function M.setup(user_opts)
   vim.api.nvim_create_autocmd("MenuPopup", {
     group = vim.api.nvim_create_augroup("tutor-ask-error", { clear = true }),
     callback = function()
-      local has = #vim.diagnostic.get(0, { lnum = vim.api.nvim_win_get_cursor(0)[1] - 1 }) > 0
+      -- Review minor 8: off in a file outside the project, where the ask would be refused.
+      local has = project_rel() ~= nil and #vim.diagnostic.get(0, { lnum = vim.api.nvim_win_get_cursor(0)[1] - 1 }) > 0
       vim.cmd("amenu " .. (has and "enable " or "disable ") .. ASK_ENTRY)
     end,
   })
