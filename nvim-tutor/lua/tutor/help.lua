@@ -78,7 +78,10 @@ function M.open()
   pcall(vim.api.nvim_buf_set_name, buf, "tutor-help")
   -- Deferred minor: the last tab cannot be closed (E784), so there the help gives its window to an empty buffer.
   vim.keymap.set("n", "q", function()
-    if #vim.api.nvim_list_tabpages() > 1 then vim.cmd("tabclose") else vim.cmd("enew") end
+    if #vim.api.nvim_list_tabpages() > 1 then vim.cmd("tabclose"); return end
+    -- Review minor 9: back to the file that was open before the help, else an empty buffer.
+    local alt = vim.fn.bufnr("#")
+    if alt > 0 and alt ~= buf and vim.api.nvim_buf_is_valid(alt) then vim.cmd("buffer " .. alt) else vim.cmd("enew") end
   end, { buffer = buf, nowait = true, desc = "close the tutor help" })
   tab_buf = buf
   pcall(function() require("tutor.tour").event("help_opened") end)

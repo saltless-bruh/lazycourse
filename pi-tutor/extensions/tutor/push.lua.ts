@@ -11,7 +11,8 @@ local function path_of(buf) return vim.api.nvim_buf_get_name(buf) end
 local root_prefix = opts.root .. "/"
 local function in_root(buf)
   local p = path_of(buf)
-  if p == "" then return false end
+  -- Review minor 6: a scratch buffer (the help tab is named "<cwd>/tutor-help") is no project file.
+  if p == "" or vim.bo[buf].buftype ~= "" then return false end
   -- Resolved path only: an in-root symlink to a file outside is outside (M6c pane #1).
   return vim.startswith(vim.fn.resolve(p), root_prefix)
 end
@@ -53,11 +54,15 @@ vim.api.nvim_create_autocmd("DiagnosticChanged", { group = g, callback = functio
 
 -- Deferred minor: time away from the project's files (the tutor pane, a help tab) is no pause in the code; the
 -- pause is counted from coming back.
+-- Review minor 5: looked at from the event loop, where the current window is the cursor's own again; a file the
+-- tutor opens with nvim_win_call fires BufEnter for the editor window while the cursor stays in the pane.
 local was_in = in_root(vim.api.nvim_get_current_buf())
 vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, { group = g, callback = function()
-  local now_in = in_root(vim.api.nvim_get_current_buf())
-  if now_in and not was_in then last_change = vim.uv.now() end
-  was_in = now_in
+  vim.schedule(function()
+    local now_in = in_root(vim.api.nvim_get_current_buf())
+    if now_in and not was_in then last_change = vim.uv.now() end
+    was_in = now_in
+  end)
 end })
 
 local timer = vim.uv.new_timer()

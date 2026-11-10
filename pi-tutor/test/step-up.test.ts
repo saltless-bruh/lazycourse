@@ -182,4 +182,22 @@ describe("stepUpNotes: what a failed step-up missed", () => {
     expect(noWhere("ZeroDivisionError: division by zero")).toBe("ZeroDivisionError: division by zero");
     expect(noWhere("tip(40) took 3:05 minutes")).toBe("tip(40) took 3:05 minutes");
   });
+  it("review minor 2, 10: a place in brackets, compiler arrows and a traceback's source lines are left out; a value is not cut", async () => {
+    const { noWhere } = await import("../extensions/tutor/step-up.js");
+    expect(noWhere("your project does not compile (src/main.rs:12: mismatched types)")).toBe("your project does not compile (mismatched types)");
+    expect(noWhere("your file stopped while loading: unexpected token (src/main.rs:7)")).toBe("your file stopped while loading: unexpected token");
+    expect(noWhere("error[E0308]: mismatched types\n --> src/main.rs:12:5\n   |\n12 |     total * 100\n   |     ^^^^^ expected f64")).toBe("error[E0308]: mismatched types");
+    expect(noWhere('Traceback (most recent call last):\n  File "stepup/fix.py", line 2, in tip\n    return total * 100 / 15\nZeroDivisionError: division by zero')).toBe("ZeroDivisionError: division by zero");
+    expect(noWhere("invalid syntax (fix.py, line 2)")).toBe("invalid syntax");
+    expect(noWhere("./fix.go:12:3: undefined: totl")).toBe("undefined: totl");
+    expect(noWhere("x = 3.14:2 ratio")).toBe("x = 3.14:2 ratio");
+  });
+  it("review minor 3, 4: a long or many-line note is one short line; tests that could not be run say so", async () => {
+    const { stepUpNotes } = await import("../extensions/tutor/step-up.js");
+    const long = stepUpNotes({ missed: { solve: [`big() gave [${"1, ".repeat(400)}1], expected []`, "a\nb\n  c"] }, talk: { matched: 3, total: 3 } });
+    expect(long[0].length).toBeLessThanOrEqual(170);
+    expect(long[0]).toMatch(/^solve: big\(\) gave \[1, 1, .*…$/);
+    expect(long[1]).toBe("solve: a b c");
+    expect(stepUpNotes({ missed: {}, talk: { matched: 3, total: 3 }, tests: "not-run" })).toEqual(["tests: your tests could not be run against the hidden solution (this step-up was saved without it)"]);
+  });
 });

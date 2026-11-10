@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { recognize, examplesToChecks, recipeIntent, isAttempt } from "../extensions/tutor/recipe-steps.js";
+import { recognize, examplesToChecks, mergeExampleChecks, recipeIntent, isAttempt } from "../extensions/tutor/recipe-steps.js";
 
 const py = { language: "python", task: "P1.T1" };
 describe("recognize: code decides when a recipe step's artifact is there (spec 2026-10-26 §5.1)", () => {
@@ -47,6 +47,17 @@ describe("Find: a question about the task has not found it (deferred minor)", ()
     expect(recognize(1, "P1.T1 is the split box in the design map", py)).toBe(true);
     expect(recognize(1, "P1.T1 is the split box. Is that right?", py)).toBe(true);
     expect(recognize(1, "I'm doing P1.T1, it makes the secret number", py)).toBe(true);
+  });
+  it("an unsure answer still finds it: only asking what the task is does not (review I1, final review I4)", () => {
+    for (const t of ["I found P1.T1, what do I do now?", "P1.T1 - is it the split box?", "ok P1.T1 is the split box?", "It's P1.T1 (the split box)?", "P1.T1?", "Is it P1.T1? It is the split box", "I'm on P1.T1, right?"])
+      expect([t, recognize(1, t, py)]).toEqual([t, true]);
+    for (const t of ["what does P1.T1 mean?", "where is P1.T1 in the map?", "ok, what is P1.T1?", "How do I start P1.T1?", "can you explain P1.T1?", "which one is P1.T1?"])
+      expect([t, recognize(1, t, py)]).toEqual([t, false]);
+  });
+  it("mergeExampleChecks: an example said again is kept once; a trusted copy takes an unverified one's place (review minor 7)", () => {
+    const c = (expr: string, status: "trusted" | "unverified") => ({ task: "P1.T1", kind: "value" as const, expr, expected: "1", milestone: 1, status });
+    expect(mergeExampleChecks([c("f(1)", "unverified")], [c("f(1)", "unverified"), c("f(2)", "trusted"), c("f(2)", "trusted")])).toEqual([c("f(1)", "unverified"), c("f(2)", "trusted")]);
+    expect(mergeExampleChecks([c("f(1)", "unverified"), c("f(3)", "trusted")], [c("f(1)", "trusted"), c("f(3)", "unverified")])).toEqual([c("f(1)", "trusted"), c("f(3)", "trusted")]);
   });
 });
 

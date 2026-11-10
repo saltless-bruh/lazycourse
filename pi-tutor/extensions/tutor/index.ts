@@ -35,7 +35,7 @@ import { projectRun, runChecks, type CheckResult } from "./check-run.js";
 import { canFail, findOwnTests, hasTests, ownTestBodies, ownTestName, runOwnTests, testsInFile } from "./own-tests.js";
 import { coveredCalls, doneWhenCalls, levelSuggestion, proScore, scoreLine, type ProFacts } from "./pro-score.js";
 import { crossCheckOnReference, currentMilestone, extractCode, milestoneCount, milestoneText, readChecksState, writeMilestoneChecks, type ChecksState } from "./check-job.js";
-import { recognize, examplesToChecks, recipeIntent, isAttempt } from "./recipe-steps.js";
+import { recognize, examplesToChecks, mergeExampleChecks, recipeIntent, isAttempt } from "./recipe-steps.js";
 import { questionTask, directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
@@ -931,9 +931,7 @@ export default function (pi: ExtensionAPI): void {
       saved = readChecksState(now.setting(key));
       const m = saved.milestones[k] ?? { checks: [], reference: "", ran: false };
       // Deferred minor: an example said again (or twice in one message) is the same check, kept once.
-      const same = (c: Check) => JSON.stringify([c.task, c.kind, c.expr, c.expected, c.stdin, c.contains]);
-      const had = new Set(m.checks.map(same));
-      saved.milestones[k] = { ...m, checks: [...m.checks, ...checked.filter((c) => !had.has(same(c)) && had.add(same(c)) !== undefined)] };
+      saved.milestones[k] = { ...m, checks: mergeExampleChecks(m.checks, checked) };
       now.setSetting(key, JSON.stringify(saved));
     });
     writeChecksMd(root, saved, k);
@@ -2221,7 +2219,7 @@ export default function (pi: ExtensionAPI): void {
     const host = sandboxHost();
     const tests = testsInFile(root, `stepup/test_solve${ext}`);
     let testsOk = false;
-    let testsMiss: TestsMiss | null = !host ? "no-sandbox" : !tests.length ? "none" : null;
+    let testsMiss: TestsMiss | null = !host ? "no-sandbox" : !tests.length ? "none" : "not-run"; // review minor 4: never 0/1 with no reason
     if (host && tests.length && s.solveRef) {
       const overlay = { [`stepup/solve${ext}`]: s.solveRef };
       const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, sandbox: host, entry: `stepup/solve${ext}`, overlay });

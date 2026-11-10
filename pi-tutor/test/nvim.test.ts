@@ -84,6 +84,32 @@ describe("NvimLink", () => {
     expect(i.since_ms).toBeLessThanOrEqual(Date.now() - back + 200); // counted from coming back, not from the last edit
   }, 20000);
 
+  it("a file the tutor opens in the editor while the cursor stays in the pane is still time away (review minor 5)", async () => {
+    const { payloads, link, h } = await setup({ idleMs: 500 });
+    const nvim = link.raw;
+    writeFileSync(join(h.root, "b.py"), "print(1)\n");
+    writeFileSync(join(h.root, "c.py"), "print(2)\n");
+    await nvim.command(`edit ${join(h.root, "b.py")}`);
+    const editor = await nvim.lua("return vim.api.nvim_get_current_win()");
+    await nvim.command("vnew"); // the cursor is now in a window that shows no project file, as the tutor pane
+    await nvim.lua(`local w, f = ... vim.api.nvim_win_call(w, function() vim.cmd.edit(f) end)`, [editor, join(h.root, "c.py")]);
+    await new Promise((r) => setTimeout(r, 1600));
+    expect(payloads.filter((p) => p.kind === "idle")).toHaveLength(0);
+    await nvim.lua("vim.api.nvim_set_current_win(...)", [editor]);
+    const back = Date.now();
+    await until(() => payloads.some((p) => p.kind === "idle"), 4000);
+    const i = payloads.find((p) => p.kind === "idle") as Extract<TutorPayload, { kind: "idle" }>;
+    expect(i.since_ms).toBeLessThanOrEqual(Date.now() - back + 200);
+  }, 20000);
+
+  it("a scratch buffer named inside the project (the help tab) is no project file: no pause is reported there (review minor 6)", async () => {
+    const { payloads, link, h } = await setup({ idleMs: 300 });
+    await link.raw.command("enew");
+    await link.raw.lua(`vim.bo.buftype = "nofile"; vim.api.nvim_buf_set_name(0, ...)`, [join(h.root, "tutor-help")]);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(payloads.filter((p) => p.kind === "idle")).toHaveLength(0);
+  }, 20000);
+
   it("ignores buffers outside the project root for push and pull", async () => {
     const { payloads, link, h } = await setup();
     const nvim = link.raw;
