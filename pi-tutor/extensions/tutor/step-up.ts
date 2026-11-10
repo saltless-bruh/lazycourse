@@ -131,6 +131,45 @@ export function stepUpResult(parts: { solve: Score; fix: Score; plan: Score; tes
 }
 interface Score { passed: number; total: number }
 
+/** An error's text without its place in the file (path:line, Python's `File "…", line N`): what went wrong, not where. */
+export function noWhere(error: string): string {
+  return error
+    .replace(/File "[^"]*", line \d+,?\s*/g, "")
+    .replace(/(^|\s)[\w./-]+\.\w+:\d+(?::\d+)?:?\s*/g, "$1")
+    .replace(/\s*\b(?:on |at )?line \d+\b/gi, "")
+    .trim();
+}
+
+export type TestsMiss = "none" | "fail-on-solution" | "cannot-fail" | "no-sandbox";
+const TESTS_MISS: Record<TestsMiss, string> = {
+  none: "no tests were found in your test file",
+  "fail-on-solution": "your tests fail on a working solution, so they check something the task does not ask",
+  "cannot-fail": "your tests pass even on a broken version, so they cannot catch a bug",
+  "no-sandbox": "the tests could not be run: the sandbox is off",
+};
+
+/**
+ * Author 2026-11-10 (option A): what a failed step-up missed, one line each, from the failed checks' own output —
+ * never from the model. At most two checks per part; the talk gives a count only (naming the pieces would give
+ * the hidden solution away).
+ */
+export function stepUpNotes(i: {
+  missed: Partial<Record<"solve" | "fix" | "plan", string[]>>;
+  talk: { matched: number; total: number };
+  tests?: TestsMiss | null;
+  improve?: string | null;
+}): string[] {
+  const out: string[] = [];
+  for (const part of ["solve", "fix", "plan"] as const) {
+    const lines = i.missed[part] ?? [];
+    lines.slice(0, 2).forEach((l, n) => out.push(`${part}: ${l}${n === 1 && lines.length > 2 ? ` (and ${lines.length - 2} more)` : ""}`));
+  }
+  if (!talkPassed(i.talk)) out.push(i.talk.total ? `plan talk: ${i.talk.matched} of ${i.talk.total} pieces of your plan matched the hidden solution` : "plan talk: no plan with a pieces: line was given");
+  if (i.tests) out.push(`tests: ${TESTS_MISS[i.tests]}`);
+  if (i.improve) out.push(`improve: ${i.improve}`);
+  return out;
+}
+
 /** The "fix an error" program: the first one-character slip of the reference that its checks catch. */
 export async function brokenProgram(reference: string, failsChecks: (source: string) => Promise<boolean>): Promise<string | null> {
   for (const m of fixMutants(reference)) if (await failsChecks(m)) return m;

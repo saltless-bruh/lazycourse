@@ -151,3 +151,35 @@ describe("piecesMatch when the solution calls nothing (phase 7 live run, Rust)",
     expect(piecesMatch(["for", "split", "max"], calls, "python")).toEqual({ matched: 2, total: 2 });
   });
 });
+
+// Author 2026-11-10 (option A): a failed step-up says what was missed, from the failed checks' own output, never
+// from the model, and never where in the file.
+describe("stepUpNotes: what a failed step-up missed", () => {
+  it("names up to two failed checks per part, the plan's count, and why the tests or the improvement fell short", async () => {
+    const { stepUpNotes } = await import("../extensions/tutor/step-up.js");
+    expect(stepUpNotes({
+      missed: { solve: ["weekday('2026-11-02') gave 'Sunday', expected 'Monday'"], fix: ["tip(40) gave 266.67, expected 6.0", "tip(100) gave 666.67, expected 15.0", "tip(0) failed: boom"] },
+      talk: { matched: 1, total: 3 }, tests: "cannot-fail", improve: "nothing measured got better",
+    })).toEqual([
+      "solve: weekday('2026-11-02') gave 'Sunday', expected 'Monday'",
+      "fix: tip(40) gave 266.67, expected 6.0",
+      "fix: tip(100) gave 666.67, expected 15.0 (and 1 more)",
+      "plan talk: 1 of 3 pieces of your plan matched the hidden solution",
+      "tests: your tests pass even on a broken version, so they cannot catch a bug",
+      "improve: nothing measured got better",
+    ]);
+  });
+  it("says nothing about a part that passed, and a passed talk is left out", async () => {
+    const { stepUpNotes } = await import("../extensions/tutor/step-up.js");
+    expect(stepUpNotes({ missed: {}, talk: { matched: 3, total: 3 } })).toEqual([]);
+    expect(stepUpNotes({ missed: { plan: [] }, talk: { matched: 0, total: 0 } })).toEqual(["plan talk: no plan with a pieces: line was given"]);
+  });
+  it("an error's place in the file is left out: the fix part must not point at the planted bug", async () => {
+    const { noWhere } = await import("../extensions/tutor/step-up.js");
+    expect(noWhere('File "stepup/fix.py", line 2, in tip: ZeroDivisionError: division by zero')).toBe('in tip: ZeroDivisionError: division by zero');
+    expect(noWhere("stepup/fix.lua:4: attempt to call a nil value")).toBe("attempt to call a nil value");
+    expect(noWhere("src/main.rs:12:5: mismatched types")).toBe("mismatched types");
+    expect(noWhere("ZeroDivisionError: division by zero")).toBe("ZeroDivisionError: division by zero");
+    expect(noWhere("tip(40) took 3:05 minutes")).toBe("tip(40) took 3:05 minutes");
+  });
+});

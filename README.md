@@ -390,7 +390,16 @@ Offered at most once a day once your band's habits are solid. `/tutor-step-up` s
 | 2 · coding test (`stepup/`) | solve with a module you haven't used, fix one planted bug, build your own plan; intermediate adds your own tests (must catch a broken hidden solution) and clumsy code to improve |
 
 `/tutor-step-up check` shows each part's checks, `/tutor-step-up submit` decides. A pass tells you to type the next
-band's level yourself; the tutor never moves you.
+band's level yourself; the tutor never moves you. A fail names the habits to practise and what was missed:
+
+```
+What was missed:
+- solve: weekday('2026-11-02') gave 'Sunday', expected 'Monday'
+- fix: tip(40) gave 266.67, expected 6.0
+- plan talk: 1 of 3 pieces of your plan matched the hidden solution
+```
+
+These lines are the failed checks' own output, never the model's words, and never say where in the file.
 
 ### From 34 and 67
 

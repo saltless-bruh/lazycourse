@@ -150,7 +150,9 @@ goal, author).
 - Grading **(designer's call)**: mark 2 = code compares the `pieces:` line with the pieces in the
   hidden reference (cookbook aliases count as close); marks 1 and 3 = part 3 passes at least 3 of 4 checks.
   Each coding part passes at 3 of 4 checks. The step-up passes when the talking marks and all three parts
-  pass. The model writes notes (what was missed), never a mark.
+  pass. The model writes notes (what was missed), never a mark. (Author 2026-11-10, option A: the notes are
+  made by code from the failed checks' output — up to two per part, a count for the talk, why the tests or the
+  improvement fell short — shown at a failed submit only, without any place in the file; no model call.)
 - Pass → "you passed the step-up: move to 34 (intermediate)?" — yes / not now. Fail → stays; the result
   names the habits and concepts to practise; a retake is offered after 3 more tasks.
 

@@ -39,7 +39,7 @@ import { recognize, examplesToChecks, recipeIntent, isAttempt } from "./recipe-s
 import { questionTask, directionEvent, questionEvent, readsErrorEvent, smallRunEvent, changedLines, ownFixEvent, stepsFirstEvent, ideasToCodeEvent, type TryOutcome } from "./habit-events.js";
 import type { HabitId } from "./habits.js";
 import { levelInBand, stepDownSuggested, bandProgress, habitReport, HABIT_LABEL } from "./levels.js";
-import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, brokenProgram, backupStepUp, STEP_UP_LANGUAGES, ADVANCED_STEP_UP_LANGUAGES } from "./step-up.js";
+import { stepUpOffered, missingForStepUp, parsePlan, piecesMatch, unfamiliarModule, importedModules, stepUpResult, stepUpNotes, noWhere, brokenProgram, backupStepUp, STEP_UP_LANGUAGES, ADVANCED_STEP_UP_LANGUAGES, type TestsMiss } from "./step-up.js";
 import { commentPrefix } from "./scaffold.js";
 import { solidIn } from "./habits.js";
 import { calledName } from "./check-run-compiled.js";
@@ -2190,18 +2190,30 @@ export default function (pi: ExtensionAPI): void {
   }
 
   /** Each part's trusted checks against the learner's file in stepup/. */
-  async function scoreStepUp(s: StepUpState): Promise<Record<"solve" | "fix" | "plan", { passed: number; total: number }> & { tests?: { passed: number; total: number }; improve?: { passed: number; total: number } }> {
+  /** Author 2026-11-10 (option A): a failed check in words, for the step-up's notes: what it gave, never where. */
+  const checkNote = (f: CheckResult): string => {
+    const c = f.check, err = f.error ? noWhere(f.error) : "";
+    if (c.kind === "timed") return `${c.expr} ${err || "was too slow"}`;
+    if (c.kind === "value") return `${c.expr} ${err ? `failed: ${err}` : gaveExpected(f.got ?? "", c.expected ?? "")}`;
+    return `typing ${JSON.stringify(c.stdin)} should print ${JSON.stringify(c.contains)}${err ? `; it failed: ${err}` : `; it printed: ${(f.got ?? "").slice(0, 80)}`}`;
+  };
+  type StepUpMissed = { missed: Partial<Record<"solve" | "fix" | "plan", string[]>>; testsMiss?: TestsMiss | null; improveMiss?: string | null };
+  async function scoreStepUp(s: StepUpState): Promise<Record<"solve" | "fix" | "plan", { passed: number; total: number }> & { tests?: { passed: number; total: number }; improve?: { passed: number; total: number } } & StepUpMissed> {
     const root = project!.path, ext = extname(projectRun(root, s.language).entry ?? "src/main.py") || ".py";
-    const score = async (file: string, checks: Check[]) => {
+    const missed: StepUpMissed["missed"] = {};
+    const score = async (file: "solve" | "fix" | "plan", checks: Check[]) => {
       if (!checks.length) return { passed: 0, total: 0 };
       const part = stepUpPart(s.language, file, ext); // habits Task 24b: a compiled part is checked in its own folder
       const r = await runChecks((c, a, o) => pi.exec(c, a, o), { language: s.language, root: part.dir === "stepup" ? root : join(root, part.dir), entry: part.dir === "stepup" ? part.path : part.entry, runCmd: null, checks, sandbox: sandboxHost() });
+      const bad = r.results.filter((x) => !x.pass);
+      if (bad.length) missed[file] = bad.map(checkNote);
       return { passed: r.results.filter((x) => x.pass).length, total: checks.length };
     };
     const base = {
       solve: await score("solve", trustedOnly(s.solveChecks)),
       fix: s.fixMissing ? { passed: 1, total: 1 } : await score("fix", trustedOnly(s.fixChecks)),
       plan: await score("plan", trustedOnly(s.talkChecks)),
+      missed,
     };
     if (!s.improveTask) return base;
     // Habits Task 17: the learner's tests run against the hidden solve solution (laid over in the throwaway copy):
@@ -2209,18 +2221,26 @@ export default function (pi: ExtensionAPI): void {
     const host = sandboxHost();
     const tests = testsInFile(root, `stepup/test_solve${ext}`);
     let testsOk = false;
+    let testsMiss: TestsMiss | null = !host ? "no-sandbox" : !tests.length ? "none" : null;
     if (host && tests.length && s.solveRef) {
       const overlay = { [`stepup/solve${ext}`]: s.solveRef };
       const ran = await runOwnTests((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, sandbox: host, entry: `stepup/solve${ext}`, overlay });
       testsOk = ran.pass && (await canFail((c, a, o) => pi.exec(c, a, o), { root, language: s.language, tests, entry: `stepup/solve${ext}`, sandbox: host, overlay, only: [`stepup/solve${ext}`] })) === "caught";
+      testsMiss = testsOk ? null : ran.pass ? "cannot-fail" : "fail-on-solution";
     }
     // Phase 8 A8: no new step-up sets improveMissing; one saved earlier told the learner the part counts as done.
     let improveOk = s.improveMissing === true;
+    let improveMiss: string | null = improveOk ? null : !host ? "it could not be measured: the sandbox is off" : "it could not be measured";
     if (!improveOk && s.improveBefore && host) {
       const after = await measure(root, `stepup/improve${ext}`, { checks: s.improveChecks ?? [], extra: s.improveExtra ?? [], functions: s.improveFunctions ?? [] }, s.improveSource);
-      if (after.m && !after.failed && !after.missing) { const r = improveResult({ ...s.improveBefore, ms: after.baseMs ?? s.improveBefore.ms }, after.m); improveOk = r.better.length > 0 && r.worse.length === 0; }
+      improveMiss = after.failed ? "the changed program no longer passes its checks" : after.missing ? `it could not be measured: ${after.missing}` : "it could not be measured";
+      if (after.m && !after.failed && !after.missing) {
+        const r = improveResult({ ...s.improveBefore, ms: after.baseMs ?? s.improveBefore.ms }, after.m);
+        improveOk = r.better.length > 0 && r.worse.length === 0;
+        improveMiss = improveOk ? null : r.worse.length ? `got worse: ${r.worse.join(", ")}` : "nothing measured got better";
+      }
     }
-    return { ...base, tests: { passed: testsOk ? 1 : 0, total: 1 }, improve: { passed: improveOk ? 1 : 0, total: 1 } };
+    return { ...base, tests: { passed: testsOk ? 1 : 0, total: 1 }, improve: { passed: improveOk ? 1 : 0, total: 1 }, testsMiss: testsOk ? null : testsMiss, improveMiss };
   }
   /** Option C review M1: the ready-made improve-it program used last, per language, so a retake gets the next one. */
   function lastFallback(): string | null {
@@ -2289,6 +2309,9 @@ export default function (pi: ExtensionAPI): void {
         } else {
           profileWrite(() => p.setSetting(`stepup-wait:${lang}`, "3"));
           ctx.ui.notify(`not yet (${line}): practise ${r.practise.join(", ")}; the step-up can be taken again after 3 more tasks`, "info");
+          // Author 2026-11-10 (option A): what was missed, from the failed checks' own output; shown, never sent to the model.
+          const notes = stepUpNotes({ missed: parts.missed, talk: s.talk ?? { matched: 0, total: 0 }, tests: parts.testsMiss, improve: parts.improveMiss });
+          if (notes.length) showStepUp(`What was missed:\n${notes.map((n) => `- ${n}`).join("\n")}`);
         }
         saveStepUp(null);
         return;

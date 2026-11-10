@@ -438,6 +438,42 @@ describe.skipIf(!bwrapReady)("habit events from what code sees (spec 2026-10-26 
     await b.commands["tutor-step-up"].handler("submit", b.ctx);
     expect(b.notes.at(-1)).toMatch(/you passed the step-up.*\/tutor-level 67/);
   }, 180000);
+  it("a failed step-up says what was missed, from the failed checks, and never where the planted bug is (author 2026-11-10, option A)", async () => {
+    const { b, root } = await doneProject(code("/"), two);
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const { GATE_HABITS } = await import("../extensions/tutor/levels.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    let at = 1;
+    for (const habit of GATE_HABITS.beginner) for (let i = 0; i < 5; i++) p.addHabitEvent({ habit, ok: true, language: "python", project: i % 2 ? root : "/p/x", at: at++, evidence: "seed" });
+    p.close();
+    await b.commands["tutor-plan"].handler("off", b.ctx);
+    const replies = [
+      JSON.stringify({ talk: "Write `top_word(text)` returning the most frequent word.", solve: "Write `weekday(iso)` returning the weekday name of an ISO date.", fix: "Write `tip(total)` returning 15% of the total." }),
+      "check P1.T1: top_word('a b a') == 'a'\ncheck P1.T1: top_word('x') == 'x'", "```python\ndef top_word(text):\n    words = text.split()\n    return max(words, key=words.count)\n```",
+      "check P1.T1: weekday('2026-11-02') == 'Monday'", "```python\nimport datetime\ndef weekday(iso):\n    return datetime.date.fromisoformat(iso).strftime('%A')\n```",
+      "check P1.T1: tip(40) == 6.0\ncheck P1.T1: tip(100) == 15.0", "```python\ndef tip(total):\n    return total * 0.15\n```",
+    ];
+    (b.ctx as unknown as { modelRegistry: { complete: unknown } }).modelRegistry.complete = async () => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: replies.shift() ?? "" }] });
+    await b.commands["tutor-step-up"].handler("", b.ctx);
+    await until(() => b.messages.some((m) => /talking test/.test(JSON.stringify(m.message))), 20000);
+    await turn(b.events, b.ctx, "1. read it\n2. think\n3. answer\npieces: sorted, zip", judged("none")); // a plan that misses the solution's pieces
+    await until(() => existsSync(join(root, "stepup", "fix.py")), 30000);
+    writeFileSync(join(root, "stepup", "solve.py"), "def weekday(iso):\n    return 'Sunday'\n");
+    writeFileSync(join(root, "stepup", "plan.py"), "def top_word(text):\n    return text.split()[5]\n"); // an error, not a wrong value
+    // stepup/fix.py is left as handed out: the planted bug is still in it
+    const before = b.messages.length;
+    await b.commands["tutor-step-up"].handler("check", b.ctx);
+    expect(b.messages.length).toBe(before); // a check during the test gives the counts only
+    await b.commands["tutor-step-up"].handler("submit", b.ctx);
+    expect(b.notes.at(-1)).toMatch(/not yet \(solve 0\/1 · fix 0\/2 · plan 0\/2\): practise/);
+    const shown = b.messages.slice(before).map((m) => JSON.stringify(m.message)).join("\n");
+    expect(shown).toMatch(/What was missed/);
+    expect(shown).toMatch(/solve: weekday\('2026-11-02'\) gave 'Sunday', expected 'Monday'/);
+    expect(shown).toMatch(/fix: tip\(40\) gave [\d.]+, expected 6\.0/);
+    expect(shown).toMatch(/plan: top_word\('a b a'\) failed: .*IndexError/);
+    expect(shown).toMatch(/plan talk: \d of \d pieces of your plan matched/);
+    expect(shown).not.toMatch(/line \d|\.py:\d|\.py\\?", line|0\.15|strftime/); // no place in the file, nothing of the hidden solutions
+  }, 120000);
   it("Phase 8 A8 (option C): an intermediate step-up whose problems come without an improve-it task takes a ready-made task", async () => {
     const { b, root } = await doneProject(code("/"), two);
     await b.commands["tutor-level"].handler("40", b.ctx);
