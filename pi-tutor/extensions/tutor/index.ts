@@ -208,7 +208,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -764,7 +764,13 @@ export default function (pi: ExtensionAPI): void {
       saveOnboarding(newOnboarding(null));
       onboardingHere = true;
     }
-    if (onboardingActive()) {
+    // Author 2026-11-10: a question about code asked while getting-started is still running (<leader>ts, <leader>te,
+    // the architect) is no answer to the getting-started questions: it is a tutor turn, held and checked like any
+    // other, and getting-started goes on afterwards where it was. A rewrite of such a turn stays one.
+    const asidePrompt = promptOf(event);
+    const aside = onboardingActive() && (roleNamed(activeRole).name === "architect" || asidePrompt.startsWith(`${TUTOR_PREFIX} stuck (asked)`) || asidePrompt.startsWith("[ask-error]")
+      || (event.messageType === "custom" && event.message.customType === "tutor_rewrite" && run?.aside === true));
+    if (onboardingActive() && !aside) {
       // Spec 2026-10-19 §6: the onboarding rules replace the ladder prompt (no judgment block asked for).
       event.systemPromptOptions.sections["tutor"] = systemText("onboard");
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
@@ -811,7 +817,7 @@ export default function (pi: ExtensionAPI): void {
     const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || prompt.startsWith(`${TUTOR_PREFIX} stuck (asked): run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
     if (isNotes) step = null;
-    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
+    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0, aside };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -879,7 +885,7 @@ export default function (pi: ExtensionAPI): void {
     else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder, { noCode: !role.ladder }));
+    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder, { noCode: run.step === "design" })); // one switch: the held design step
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -1080,7 +1086,9 @@ export default function (pi: ExtensionAPI): void {
   // reworded text while it streams; message_end swaps it into the finished reply before turn_end,
   // the saved session and the model's next context see it. Fences (the judgment block) are kept.
   /** A teaching turn: its reply is held off screen while it streams and checked before it is shown. */
-  const held = () => run !== null && run.step !== null && !onboardingActive();
+  /** Getting-started is running and this turn is part of it (not a code question aside from it). */
+  const inOnboarding = () => onboardingActive() && run?.aside !== true;
+  const held = () => run !== null && run.step !== null && !inOnboarding();
   /** Phase 1 minor M4: a hint or a question is plain sentences, so a bold label in it is no heading to fold to. */
   const folds = () => held() && run!.step !== "hint" && run!.step !== "ask" && run!.step !== "design";
   const guarded = () => held() && run!.step !== "fix";
@@ -1154,7 +1162,7 @@ export default function (pi: ExtensionAPI): void {
     paneWidth = c.availableWidth;
     if (held() && c.isStreaming) return HOLD_TEXT;
     // Learner-session fixes (spec §4): every assistant message, every turn type, onboarding included.
-    const shown = hideJudgment(scrubInternals(cleanReply(md), { intakeJson: onboardingActive() }));
+    const shown = hideJudgment(scrubInternals(cleanReply(md), { intakeJson: inOnboarding() }));
     return folds() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", async (event, ctx) => {
@@ -1162,7 +1170,7 @@ export default function (pi: ExtensionAPI): void {
     if (m.role !== "assistant") return;
     // Live check 2026-10-19: a run Pi continues from our kick has no before_agent_start, so the onboarding
     // state, not a flag set there, decides what an exchange is.
-    if (onboardingActive()) {
+    if (inOnboarding()) {
       // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
       const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
       // A retry's reply without a note keeps the note the blank reply carried (author 2026-11-09).
@@ -1172,7 +1180,7 @@ export default function (pi: ExtensionAPI): void {
     let content = m.content.map((c) => {
       if (c.type !== "text") return c;
       const clean = cleanReply(c.text);
-      const scrubbed = scrubInternals(clean, { intakeJson: onboardingActive() });
+      const scrubbed = scrubInternals(clean, { intakeJson: inOnboarding() });
       const text = folds() ? foldPreamble(scrubbed) : scrubbed;
       if (text === c.text) return c;
       changed = true;
@@ -1181,7 +1189,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: lastLearnerText });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
@@ -1232,7 +1240,7 @@ export default function (pi: ExtensionAPI): void {
       const line = reask ? EMPTY_TEXT : LOST_TEXT;
       if (reask) {
         emptyAsked = true; pendingEmpty = true;
-        if (onboardingActive()) { onboardWaits = true; waitNote = intake ?? null; }
+        if (inOnboarding()) { onboardWaits = true; waitNote = intake ?? null; }
         // Review I1: the judgment counts on the reply the learner reads, so this one's is dropped; the re-ask keeps
         // this turn's step (a fix stays a fix) and is told why.
         if (cur) {
@@ -1253,7 +1261,7 @@ export default function (pi: ExtensionAPI): void {
   pi.on("turn_end", async (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
-    if (onboardingActive()) return; // onboarding exchanges carry no judgment
+    if (inOnboarding()) return; // onboarding exchanges carry no judgment
     // Aborted, errored and truncated turns carry no judgment.
     if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
     const cur = run ?? (run = { prompt: "", step: roleNamed(activeRole).ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false });
@@ -1268,7 +1276,7 @@ export default function (pi: ExtensionAPI): void {
     if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId, cur.lang); }
     if (final) {
       if (!cur.judged) state.last = "missing";
-      lastIssues = checkReply(text, { band: bandFor(level()), step: cur.step, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, noInlineCode: !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
+      lastIssues = checkReply(text, { band: bandFor(level()), step: cur.step, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
       if (lastIssues.length) pi.appendEntry("tutor_check", { issues: lastIssues });
     }
     paint();
@@ -2960,7 +2968,7 @@ export default function (pi: ExtensionAPI): void {
       // in the learner's chat); before_agent_start builds its context; started once Pi is idle (2026-10-19).
       rewriteWhenIdle(ctx, `Your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
     }
-    if (!onboardingActive() || !onboarding) return;
+    if (!inOnboarding() || !onboarding) return;
     // Third review I1/M2: what the blank reply recorded stays; the retry's (or the learner's next) note adds to it.
     const note = waitNote ? { ...waitNote, ...(intake ?? {}) } : intake;
     intake = undefined; waitNote = null;

@@ -65,13 +65,12 @@ function codeAllowed(o: { band: Band; step: TurnStep | null; noCode: boolean }, 
 
 /** `cols`: the learner's real diagram width (diagramCols); prompts still ask for 40, the check allows what fits. */
 /**
- * Live check 2026-11-10 (the architect handed over `share = total / people` in backticks): what makes an inline span
- * code, for a role that never writes any. A name, a file, a path, a flag or a call (`split_amount(total, people)`)
- * points at a part; a statement, an expression or a bare operator is code.
+ * Live check 2026-11-10 (the architect handed over `share = total / people` in backticks): whether a span has the
+ * shape of a statement or an expression. Shape alone is no leak (review I3: `O(n * m)`, `key = value` and `for each`
+ * have it too): callers ask for the learner's own names in it as well (editedLine).
  */
 function inlineCode(span: string): boolean {
   const t = span.trim();
-  if (/^[-+*%=<>!&|^~]+$/.test(t) || (/^[-+*/%=<>!&|^~]{2,}$/.test(t))) return t !== "->" && t !== "=>" && t !== "--";
   if (/^(?:return|def|function|fn|local|let|const|var|import|from|if|for|while)\s+\S/.test(t)) return true;
   if (/\w\s*(?:\+=|-=|\*=|\/=|==|!=|<=|>=)\s*[\w("'[]/.test(t)) return true;
   if (/[\w)\]"']\s*[+*%]\s*[\w("'[]/.test(t)) return true;
@@ -79,7 +78,7 @@ function inlineCode(span: string): boolean {
   return !t.startsWith("-") && /(?:^|[\s(])[A-Za-z_][\w.\]["']*\s*=\s*[\w("'[-]/.test(t);
 }
 
-export function checkReply(text: string, o: { band: Band; step: TurnStep | null; judged: boolean; noCode: boolean; noInlineCode?: boolean; cols?: number }): Issue[] {
+export function checkReply(text: string, o: { band: Band; step: TurnStep | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
   const issues = new Set<Issue>();
   if (!o.judged) issues.add("missing-judgment");
   for (const m of text.matchAll(FENCES)) {
@@ -97,7 +96,6 @@ export function checkReply(text: string, o: { band: Band; step: TurnStep | null;
     if (!codeAllowed(o, body.filter((l) => l.trim()).length)) issues.add("code-above-rung");
   }
   const prose = text.replace(FENCES, "");
-  if (o.noInlineCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => inlineCode(m[1]))) issues.add("code-above-rung");
   if (INTERNALS.test(prose)) issues.add("internals");
   const proseLines = prose.split(/\r?\n/).filter((l) => l.trim()).length;
   if (proseLines > SUMMARY_AFTER && !/in short/i.test(prose)) issues.add("no-summary");
@@ -187,7 +185,7 @@ export function scrubInternals(raw: string, o: { intakeJson?: boolean } = {}): s
 export function replyReminder(step: TurnStep | null, recipe = false, role: { noCode?: boolean } = {}): string {
   // Live check 2026-11-10: the architect got the coding tutor's five parts here, read last, and a small model followed
   // them over its role: a coding-tutor reply with the fix in it. A role that never writes code gets its own line.
-  if (role.noCode) return "[tutor-reply] Answer in your role, in plain sentences: the parts, how data moves between them, and the trade-offs. No code, not even inline or as pseudocode: name the construct instead. Do not state the fix to the learner's code, in code or in words. Keep diagrams narrow, and end with the ```tutor-judgment block.";
+  if (role.noCode) return "[tutor-reply] Answer in your role, in plain sentences: the parts, how data moves between them, and the trade-offs. No code, not even inline or as pseudocode: name the construct instead. Do not state the fix to their code, in code or in words. Keep diagrams narrow, and end with the ```tutor-judgment block.";
   const hold = recipe
     ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
     : step !== null && step !== "fix" ? " Do not state the fix, in code or in words." : "";
@@ -221,6 +219,90 @@ const OP_WORDS: Record<string, RegExp> = {
   "<=": /\bless than or equal\b/i, ">=": /\bgreater than or equal\b/i,
 };
 const tokensOf = (lines: string[]) => new Set(lines.join("\n").match(/\/\/|<=|>=|==|!=|[-+*/%<>]|\.?[A-Za-z_]\w*(?=\()/g) ?? []);
+
+/** A line that defines or pulls something in: code in any fence, whatever its tag. */
+const STATEMENT = /^(?:def|fn|func|function|class)\s+\w+\s*[(:<{]|^import\s+\S|^from\s+\S+\s+import\b|^(?:if|elif|for|while)\b.*:\s*$|^(?:SELECT|CREATE TABLE|INSERT INTO|UPDATE)\b/;
+const OP_SPAN = /^(?:\/\/|<=|>=|==|!=|[-+*/%<>])$/;
+const OP_SIGNS: Record<string, string> = { "÷": "/", "×": "*" };
+const WORD_OR_NUMBER = /[A-Za-z_]\w*|\d+(?:\.\d+)?/g;
+/** Operator names for the swap check: stricter than OP_WORDS ("add an `if`" names no operator; in 68 real replies it was the one false alarm). */
+const SWAP_WORDS: [string, RegExp][] = [
+  ["//", /\b(?:floor|integer) divi(?:de|sion)\b/gi], ["/", /\bdivi(?:de|des|ded|ding|sion)\b/gi], ["*", /\bmultipl(?:y|ies|ied|ying|ication)\b/gi],
+  ["+", /\baddition\b|\bplus\b/gi], ["-", /\bsubtract(?:s|ed|ing|ion)?\b|\bminus\b/gi], ["%", /\bremainder\b|\bmodulo\b/gi],
+  ["<=", /\bless than or equal\b/gi], [">=", /\bgreater than or equal\b/gi], ["<", /\bless than\b/gi], [">", /\bgreater than\b/gi],
+];
+
+/**
+ * Live check 2026-11-10: a fix told with no hidden solution to compare against (a chat question, a `<leader>ts` on a
+ * pause, the architect). Two shapes, both judged against the learner's own lines only:
+ *  - swap: one sentence sets two different operators against each other (in backticks, as ÷ ×, or — with `words` —
+ *    by name: "division, not multiplication"; "change the `*` to `/`"), not merely listed side by side, and one of
+ *    them is in the learner's code;
+ *  - edited line: a backticked expression or statement that is not a quote of their code but shares two or more of
+ *    one of their lines' names (`total / people` beside their `share = total * people`).
+ * The filter-then-judge shape follows the tutor-leakage literature (rule filter first; a second reader, when one is
+ * set with /tutor-checker, still reads what passes).
+ */
+/**
+ * Two operators in one sentence tell a change unless they are only listed ("the addition of the tip and the division
+ * among people", "both `*` and `/`"). Live run 2026-11-10: nemotron set them against each other with no "not" at all
+ * ("…or if `/` would better reflect splitting", "dividing yields each share; multiplying inflates the total").
+ */
+const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|while|versus|vs\.?|or|would|better|whether|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
+const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b/i;
+const LISTING = /\b(?:and|both|as well as|along with)\b/i;
+
+/** Code that is not a quote of the learner's lines but carries two or more names of one of them: their line, changed. */
+function editedLine(code: string, lines: string[]): boolean {
+  const t = code.trim();
+  if (!inlineCode(t) || lines.some((l) => l.includes(t))) return false;
+  // Names and numbers count (`age >= 18` beside `age > 18`), with at least one real name among them (`n + 1` is not theirs).
+  const mine = new Set(t.match(WORD_OR_NUMBER) ?? []);
+  return lines.some((l) => {
+    const shared = (l.match(WORD_OR_NUMBER) ?? []).filter((w, i, a) => a.indexOf(w) === i && mine.has(w));
+    return shared.length >= 2 && shared.some((w) => /^[A-Za-z_]\w{2,}$/.test(w));
+  });
+}
+
+export function fixInWords(raw: string, o: { sourceLines: string[]; words: boolean; asked?: string }): "swap" | "edited-line" | null {
+  const theirs = tokensOf(o.sourceLines);
+  // Side note 2026-11-10: operators the learner named in their own message are the topic they asked about
+  // ("what is the difference between / and //?"); answering that is teaching, not telling a change.
+  const askedOps = new Set<string>();
+  if (o.asked) {
+    for (const m of o.asked.matchAll(/(?<![\w/<>=!*+%-])(\/\/|<=|>=|==|!=|[-+*/%<>])(?![\w/<>=!*+%-])/g)) askedOps.add(m[1]);
+    let rest = o.asked;
+    for (const [op, re] of SWAP_WORDS) { if (rest.search(re) >= 0) { askedOps.add(op); rest = rest.replace(re, " "); } }
+  }
+  const lines = o.sourceLines.map((l) => l.trim()).filter(Boolean);
+  const prose = hideJudgment(raw).replace(FENCES, "");
+  const opsOf = (sentence: string) => {
+    const ops = new Set<string>();
+    for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (OP_SPAN.test(m[1].trim())) ops.add(m[1].trim());
+    for (const [sign, op] of Object.entries(OP_SIGNS)) if (sentence.includes(sign)) ops.add(op);
+    if (o.words) {
+      // In order, each name taken out once found: "floor division" is one operator, not two.
+      let rest = sentence.replace(/`[^`\n]*`/g, " ");
+      for (const [op, re] of SWAP_WORDS) { if (rest.search(re) >= 0) { ops.add(op); rest = rest.replace(re, " "); } }
+    }
+    return ops;
+  };
+  const told = (ops: Set<string>) => ops.size >= 2 && ![...ops].some((op) => askedOps.has(op)) && [...ops].some((op) => theirs.has(op));
+  const sentences = prose.split(/(?<=[.!?])\s+|\n+/);
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = sentences[i], ops = opsOf(sentence);
+    if (told(ops) && (CONTRAST.test(sentence) || !LISTING.test(sentence))) return "swap";
+    // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
+    // each in two neighbouring sentences, told apart in so many words.
+    const next = sentences[i + 1];
+    if (next !== undefined && ops.size === 1) {
+      const pair = new Set([...ops, ...opsOf(next)]);
+      if (told(pair) && SET_APART.test(`${sentence} ${next}`)) return "swap";
+    }
+    for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (editedLine(m[1], lines)) return "edited-line";
+  }
+  return null;
+}
 
 /**
  * The lines of function `name` (Python by indentation; Rust/Go/JS by braces), or [] when absent.
@@ -308,6 +390,8 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 const CODE_TAGS = new Set(["python", "py", "javascript", "js", "typescript", "ts", "lua", "rust", "rs", "go", "golang"]);
 
 export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] };
+  /** The learner's own message this reply answers: what they named themselves is their topic (fixInWords). */
+  asked?: string;
   /** Learner-session fixes (spec §5): the hidden solution's code, and the task's (or project's) content words. */
   referenceCode?: string; taskTerms?: Set<string> }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
@@ -339,9 +423,17 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
   // statement, expression or bare operator in backticks, unless it quotes a line the learner already has.
+  // Review I1: any tagged fence that is not a diagram or a quote is code (sql, bash, toml…); an untagged one is a
+  // diagram unless a line defines something or is the learner's own line with a change in it. Inline spans are
+  // judged below with the same rule as the coding tutor's (fixInWords), so the two never disagree (review I2).
   if (limits.noCode) {
-    const fenced = [...text.matchAll(FENCES)].some((m) => CODE_TAGS.has(m[2].trim().toLowerCase()));
-    if (fenced || [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => inlineCode(m[1]) && !(m[1].trim().length >= 8 && seen.some((l) => l.includes(m[1].trim()))))) issues.add("role-code"); // a bare `*` is in every line: no quote
+    for (const m of text.matchAll(FENCES)) {
+      const tag = m[2].trim().toLowerCase();
+      if (tag === "tutor-judgment" || m[3].includes('"judgment"') || QUOTES.has(tag)) continue;
+      if (tag !== "" && tag !== "text") { issues.add("role-code"); break; }
+      const body = m[3].split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !DIAGRAM_ONLY.test(l));
+      if (body.some((l) => STATEMENT.test(l) || editedLine(l, seen))) { issues.add("role-code"); break; }
+    }
   }
   const plain = prose.replace(/`[^`\n]*`/g, "x");
   const sentences = plain.split(/[.!?]+(?=\s|$)/).filter((x) => /\w/.test(x)).length;
@@ -350,7 +442,12 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   if (INTERNALS.test(prose) || /\bthe learner\b/i.test(prose) || /\[attempt \d/i.test(prose) || /this stage\/\d/i.test(prose)) issues.add("machinery");
   // A reply already held for showing the code needs no second reason; prose-fix is for fixes given in words alone.
   // Final review C1: only on a graded try with a checked function, comparing that function's lines on both sides.
-  if (o.step !== "fix" && !issues.has("own-code") && o.proseScope?.referenceLines.length && proseFixLeak(raw, { ...o.proseScope, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
+  // Review I4: this comparison belongs to the coding tutor's graded check; a design answer is never held by it.
+  if (o.step !== "fix" && o.step !== "design" && !issues.has("own-code") && o.proseScope?.referenceLines.length && proseFixLeak(raw, { ...o.proseScope, words: o.step === "teach" || o.step === "hint" })) issues.add("prose-fix");
+  // Live check 2026-11-10: with no hidden solution in play (a chat question, a pause, the architect), the fix is
+  // still recognisable against the learner's own lines. Why may name the kind of change, so names count only before it.
+  if (o.step !== "fix" && !issues.has("own-code") && !issues.has("role-code") && !issues.has("prose-fix")
+    && fixInWords(raw, { sourceLines: o.sourceLines, words: o.step === "teach" || o.step === "hint" || o.step === "design", asked: o.asked })) issues.add("prose-fix");
   return [...issues];
 }
 

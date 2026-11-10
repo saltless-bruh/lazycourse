@@ -6,11 +6,11 @@ code.
 You pick a language and an idea. The tutor finds your level, turns the idea into a planned project, and coaches you
 from a pane next to your code with questions, hints and small unrelated examples.
 
-| Rule | What it means for you |
-|---|---|
-| **You write the code** | The stuck line is handed over only after real tries, and only when you ask. |
+| Rule                            | What it means for you                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **You write the code**          | The stuck line is handed over only after real tries, and only when you ask.                      |
 | **Code decides, not the model** | Whether a task is done, how much help you get and when your level moves are all decided by code. |
-| **You start the help** | Pauses, rewrites and failed runs only show a small notice. The tutor never talks first. |
+| **You start the help**          | Pauses, rewrites and failed runs only show a small notice. The tutor never talks first.          |
 
 ---
 
@@ -306,7 +306,8 @@ stateDiagram-v2
 - An error that just sits on a line never gets a notice: you ask.
 - `/tutor-quiet` (or `:TutorQuiet`) turns notices off for `1m`, `5m`, `10m`, `1h`, or `off` until `/tutor-quiet on`.
   Asking still works while they are off.
-- During an exam or step-up there is no help; `<leader>ts` says so. In architect mode the architect answers.
+- During an exam or step-up there is no help; `<leader>ts` says so. In architect mode the architect answers about
+  the design, with no code and no help step counted.
 
 ### Help climbs when you ask, after you try
 
@@ -455,7 +456,7 @@ Rust keeps one build folder per project in the tutor's cache. `/tutor-exam sandb
 | **Memory** | when you say how you learn or want to be taught, one short fact is saved (never secrets). `/tutor-memory` lists them; pick one to forget it. |
 | **Feedback** | `/tutor-feedback too-long\|too-vague\|too-much-help\|good` adjusts style and help, per language inside a project until `good`. |
 | **Learned skills** | `/tutor-learn` drafts a skill from your last finished stuck episode; edit and submit to keep it, Esc to discard. |
-| **Architect** | `/tutor-architect [question]` switches to an architecture professor (components, data flow, trade-offs, no code) until `off`. |
+| **Architect** | `/tutor-architect [question]` switches to an architecture professor (components, data flow, trade-offs, no code) until `off`. Its replies are checked before you see them: code, or your own line with the change in it, is sent back to be rewritten. |
 | **Second checker** | `/tutor-checker <provider/model>` adds a model that reads each reply after code's checks pass; it can only make replies stricter. |
 
 The box's second line says `outside nvim` when Pi runs without Neovim, and `nvim closed` when the editor exited.

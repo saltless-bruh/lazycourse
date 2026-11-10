@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { taskTerms } from "../extensions/tutor/similarity.js";
-import { cleanReply, proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
+import { fixInWords, cleanReply, proseFixLeak, functionLines, hasReasoning, guardJudgment, checkReply, formatCheck, DIAGRAM_COLS, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, foldPreamble, hideJudgment } from "../extensions/tutor/compliance.js";
 import { parseJudgment, type Judgment } from "../extensions/tutor/judgment.js";
 import type { TurnStep } from "../extensions/tutor/ladder.js";
 import { turnInstruction } from "../extensions/tutor/turns.js";
@@ -26,7 +26,10 @@ describe("prose fix leaks (spec 2026-10-26 §5.3)", () => {
     const o = { names: new Set<string>(), sourceLines: src, referenceLines: ref, proseScope: { referenceLines: ref, sourceLines: src } };
     expect(checkTurn("Use `/` instead of `*`. What do you think?", { ...o, step: "hint" })).toContain("prose-fix");
     expect(checkTurn("Use `/` instead of `*`.", { ...o, step: "fix" })).not.toContain("prose-fix");
-    expect(checkTurn("Use `/` instead of `*`. What do you think?", { ...o, proseScope: undefined, step: "hint" })).not.toContain("prose-fix");
+    // Live check 2026-11-10: with no spot to compare, the swap is still recognised against the learner's own line
+    // (fixInWords); what final review C1 ruled out — whole-program comparison flagging ordinary teaching — stays out.
+    expect(checkTurn("Use `/` instead of `*`. What do you think?", { ...o, proseScope: undefined, step: "hint" })).toContain("prose-fix");
+    expect(checkTurn("You can use print to see what a variable holds.", { ...o, proseScope: undefined, step: "hint" })).not.toContain("prose-fix");
   });
   it("final review C1: ordinary teaching about other constructs is never a prose fix", () => {
     const reference = "def split_amount(total, people):\n    return total / people\n\nt = float(input('Total: '))\nprint(split_amount(t, 3))\n".split("\n");
@@ -514,37 +517,103 @@ describe("re-run finding: the plan's named variables are the learner's names", (
   });
 });
 
-describe("checkReply: a role that never writes code shows none inline either (live check 2026-11-10)", () => {
-  const o = { band: "intermediate" as const, step: null, judged: true, noCode: true, noInlineCode: true };
-  it("a statement or a bare operator in backticks is code", () => {
-    expect(checkReply("Change `*` to `/` on line 2: `share = total / people`.", o)).toContain("code-above-rung");
-    expect(checkReply("Use `total / people` there.", o)).toContain("code-above-rung");
-    expect(checkReply("Swap the `*` for division.", o)).toContain("code-above-rung");
-    expect(checkReply("Then `return share` at the end.", o)).toContain("code-above-rung");
-    expect(checkReply("Add `x += 1` in the loop.", o)).toContain("code-above-rung");
-  });
-  it("names, files, calls and paths are how an architect points at parts: not code", () => {
-    const fine = "`split_amount` is the core; `src/main.py` holds it. `main()` calls `split_amount(total, people)` and the `/` route reads `config.yaml`. Keep `--verbose` out of it; the `tip-calc` module stays pure.";
-    expect(checkReply(fine, o)).toEqual([]);
-  });
-  it("only with the role's switch: the coding tutor's replies are checked as before", () => {
-    expect(checkReply("Use `total / people` there.", { ...o, noInlineCode: false })).toEqual([]);
-    expect(checkReply("Use `total / people` there.", { band: "pro", step: null, judged: true, noCode: true })).toEqual([]);
-  });
-});
-
 describe("checkTurn at the design step: the architect's replies are held to no code (live check 2026-11-10)", () => {
-  const o = { step: "design" as const, names: new Set(["split_amount"]), sourceLines: ["def split_amount(total, people):", "    share = total * people", "    return share"] };
-  it("code in a fence or in backticks is role-code; the fallback is plain words", async () => {
-    expect(checkTurn("The expression would be `total / people`.", o)).toEqual(["role-code"]);
-    expect(checkTurn("Swap the `*` on line 2.", o)).toEqual(["role-code"]);
-    expect(checkTurn("```python\nreturn a / b\n```", o)).toEqual(["role-code"]);
+  const o = { step: "design" as const, names: new Set(["split_amount"]), sourceLines: ["def main():", "    main()", "def split_amount(total, people):", "    share = total * people", "    return share"] };
+  it("a code fence of any language is role-code; so is an untagged fence that holds a definition or their own line changed", async () => {
+    for (const fence of ["```python\nreturn a / b\n```", "```sql\nCREATE TABLE users (id INT);\n```", "```bash\npip install requests\n```", "```toml\nname = \"x\"\n```",
+      "```\ndef part(a, b):\n    return a / b\n```", "```text\nshare = total / people\n```"]) expect([fence, checkTurn(fence, o)]).toEqual([fence, ["role-code"]]);
     const { fallbackReply, TURN_LIMITS, turnInstruction } = await import("../extensions/tutor/turns.js");
     expect(fallbackReply("design")).not.toMatch(/[`=*]/);
     expect(TURN_LIMITS.design).toMatchObject({ ownCode: true, noCode: true });
     expect(turnInstruction("design")).toMatch(/no code/i);
   });
-  it("the learner's names, a quote of their own line, and a plain diagram are how an architect talks", () => {
-    expect(checkTurn("`split_amount` is the pure part. Line 2 computes `share = total * people`, which grows with more people.\n\n```\ninput\n  |\nsplit_amount\n```", o)).toEqual([]);
+  it("their own line with the change in it, in backticks, is the fix told (prose-fix)", () => {
+    expect(checkTurn("The expression would be `total / people`.", o)).toEqual(["prose-fix"]);
+    expect(checkTurn("Make it `share = total / people`.", o)).toEqual(["prose-fix"]);
+  });
+  it("the learner's names, a quote of their own line, one operator pointed at, and a plain diagram are how an architect talks", () => {
+    expect(checkTurn("`split_amount` is the pure part. Line 2 computes `share = total * people`, which grows with more people.\n\n```\ninput\n  |\nsplit_amount --> print\n+------+\n```", o)).toEqual([]);
+    expect(checkTurn("The `*` on line 4 is where the part stops doing what its name says.", o)).toEqual([]);
+    expect(checkTurn("calc.py holds the arithmetic: the addition of the tip and the division among people.", o)).toEqual([]);
+  });
+  it("review I3: ordinary architecture wording in backticks is not code", () => {
+    for (const span of ["O(n * m)", "n + 1 queries", "4xx - 5xx", "key = value", "timeout = 30", "PYTHONPATH=src", "DEBUG=1 python main.py", "for each", "if x", "from a to b", "let it crash", "const correctness", "import order", "1 + 1", "a -> b", "GET /users", "(total, people) -> float", "pip install -r requirements.txt"])
+      expect([span, checkTurn(`Think about \`${span}\` here.`, o)]).toEqual([span, []]);
+  });
+  it("review I4: the graded-check comparison is the coding tutor's; it never holds a design answer", () => {
+    const proseScope = { referenceLines: ["    return total - people"], sourceLines: ["    return total * people"] };
+    expect(checkTurn("The core part - split_amount - should be pure and tested alone.", { ...o, proseScope })).toEqual([]);
+  });
+});
+
+describe("fixInWords: a fix told with no hidden solution to compare against (live check 2026-11-10)", () => {
+  const src = ["def add_tip(total, percent):", "    return total + total * percent / 100", "def split_amount(total, people):", "    share = total * people", "    return share"];
+  const w = { sourceLines: src, words: true }, t = { sourceLines: src, words: false };
+  it("two operators set against each other, one of them in the learner's code, is the swap", () => {
+    expect(fixInWords("In split_amount, change the `*` to `/` and run it.", t)).toBe("swap");
+    expect(fixInWords("Splitting an amount should use division, not multiplication.", w)).toBe("swap");
+    expect(fixInWords("The name suggests it should divide, but the body performs multiplication.", w)).toBe("swap");
+    expect(fixInWords("Each person gets 48 ÷ 3 = 16, not 48 × 3 = 144.", t)).toBe("swap");
+    expect(fixInWords("Splitting an amount should use division, not multiplication.", t)).toBeNull(); // by name only where words count
+  });
+  it("teaching one operator, the verb add, or operators the learner's code does not have is no swap (the false alarm in 68 real replies)", () => {
+    expect(fixInWords("In your own function, add an `if` that checks whether the divisor is zero before the division.", w)).toBeNull();
+    expect(fixInWords("`/` always gives a float in Python.", w)).toBeNull();
+    expect(fixInWords("Use `<=` rather than `>=` in a countdown.", { sourceLines: ["x = 1"], words: true })).toBeNull();
+    expect(fixInWords("Look at line 4 again: what does that operation do to the total as more people join?", w)).toBeNull();
+    // Two operators named side by side with nothing set against anything describe the code; they tell no change.
+    expect(fixInWords("calc.py holds the arithmetic: the addition of the tip and the division among people.", w)).toBeNull();
+    expect(fixInWords("Both `*` and `/` appear in add_tip.", t)).toBeNull();
+  });
+  it("the nemotron architect's own sentences from the live run are caught: no word like 'not' is needed, only a plain listing is exempt", () => {
+    const calc = { sourceLines: ["    return total + total * percent / 100", "    share = total * people"], words: true };
+    expect(fixInWords("Consider whether the `*` operator matches the intended sharing logic, or if `/` would better reflect splitting the amount across the group.", calc)).toBe("swap");
+    expect(fixInWords("In distribution scenarios, dividing a total by the count of recipients yields each person's share; multiplying by the count inflates the total.", calc)).toBe("swap");
+    expect(fixInWords("Consider whether the multiplication construct matches the intended sharing behavior, or if a division construct would better reflect partitioning the total.", calc)).toBe("swap");
+    expect(fixInWords("add_tip uses both multiplication and division to turn a percent into an amount.", calc)).toBeNull();
+  });
+  it("other kinds of bug (side note 2026-11-10: not only multiply/divide): comparisons, off-by-one, sign, operand order, index", () => {
+    const f = (line: string) => ({ sourceLines: [line], words: true });
+    expect(fixInWords("It should be greater than or equal, not just greater than.", f("    return age > 18"))).toBe("swap");
+    expect(fixInWords("Use `>=` rather than `>` so 18 counts.", f("    return age > 18"))).toBe("swap");
+    expect(fixInWords("Write `age >= 18` there.", f("    return age > 18"))).toBe("edited-line");
+    expect(fixInWords("Make the loop `range(1, n + 1)`.", f("    for i in range(1, n):"))).toBe("edited-line");
+    expect(fixInWords("Change is `paid - price`.", f("    return paid + price"))).toBe("edited-line");
+    expect(fixInWords("You need subtraction here, not addition.", f("    return paid + price"))).toBe("swap");
+    expect(fixInWords("It should be `sum(numbers) / len(numbers)`.", f("    return len(numbers) / sum(numbers)"))).toBe("edited-line");
+    expect(fixInWords("The last one is `items[len(items) - 1]`.", f("    return items[len(items)]"))).toBe("edited-line");
+    // pointing and asking stay free
+    expect(fixInWords("Which ages should count: is 18 itself inside or outside what `>` accepts?", f("    return age > 18"))).toBeNull();
+    expect(fixInWords("Trace `range(1, n)` by hand for n = 4: which numbers does the loop visit?", f("    for i in range(1, n):"))).toBeNull();
+    expect(fixInWords("Think about the `n + 1 queries` problem.", f("    for i in range(1, n):"))).toBeNull();
+  });
+  it("a swap told over two neighbouring sentences needs an explicit contrast (the architect's live reply)", () => {
+    const calc = { sourceLines: ["    return total + total * percent / 100", "    share = total * people"], words: true };
+    expect(fixInWords("When the intent is to split a fixed amount among several people, the typical operator is division (total ÷ people), which produces individual shares. Multiplication, by contrast, produces a value that grows with the number of people.", calc)).toBe("swap");
+    expect(fixInWords("add_tip handles the multiplication by the percent. The division by 100 turns the percent into a fraction.", calc)).toBeNull();
+    expect(fixInWords("The part multiplies its two inputs. Its name, however, promises a share: what should happen to a share as more people join?", calc)).toBeNull();
+  });
+  it("operators the learner asked about themselves are their topic, not a leak (side note 2026-11-10)", () => {
+    const answer = "`//` drops the fractional part, but `/` keeps it.";
+    expect(fixInWords(answer, t)).toBe("swap");
+    expect(fixInWords(answer, { ...t, asked: "what is the difference between / and // ?" })).toBeNull();
+    expect(fixInWords("Floor division drops the fraction, but division keeps it.", { ...w, asked: "how is floor division different from normal division?" })).toBeNull();
+    expect(fixInWords("In split_amount, change the `*` to `/`.", { ...t, asked: "why is my answer too big? it is off-by-one maybe" })).toBe("swap");
+    expect(checkTurn(answer, { step: "teach", names: new Set(), sourceLines: src, asked: "what is the difference between `/` and `//`?" })).toEqual([]);
+  });
+  it("their own line with a change in it is the fix; a quote of it, or an unrelated example, is not", () => {
+    expect(fixInWords("Try `share = total / people` there.", t)).toBe("edited-line");
+    expect(fixInWords("The expression would be `total / people`.", t)).toBe("edited-line");
+    expect(fixInWords("Line 4 computes `share = total * people`.", t)).toBeNull();
+    expect(fixInWords("On another problem: `tip = bill / guests` splits a bill.", t)).toBeNull();
+    expect(fixInWords("`split_amount(total, people)` is called from main.", t)).toBeNull();
+  });
+  it("checkTurn holds it as prose-fix before the fix step, and lets the fix step say it", () => {
+    const o = { names: new Set(["split_amount"]), sourceLines: src };
+    expect(checkTurn("In your function, change the `*` to `/`.", { ...o, step: "teach" })).toEqual(["prose-fix"]);
+    expect(checkTurn("Splitting should use division, not multiplication.", { ...o, step: "hint" })).toEqual(["prose-fix"]);
+    expect(checkTurn("The part should use division where it multiplies.", { ...o, step: "design" })).toEqual(["prose-fix"]);
+    expect(checkTurn("You multiply where the task divides: that is why the share grows.", { ...o, step: "why" })).toEqual([]); // why may name the kind of change in words
+    expect(checkTurn("Change the `*` to `/`: a share is the total divided by the people.", { ...o, step: "fix" })).toEqual([]);
   });
 });

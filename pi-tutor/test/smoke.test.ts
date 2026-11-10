@@ -1374,6 +1374,46 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     p.close();
     expect(o?.stage).not.toBe("done");
   });
+  it("during getting-started a question about code is still checked: a stuck ask, an error ask and the architect (author 2026-11-10)", async () => {
+    const dir = mkd(pjoin(tmp(), "first-aside-"));
+    wfile(pjoin(dir, "a.py"), "def split_amount(total, people):\n    share = total * people\n    return share\n");
+    const b = await boot({ cwd: dir });
+    expect((await userTurn(b, "hi, I want to learn Python"))["tutor_onboard"]).toBeTruthy();
+    const J = "\n```tutor-judgment\n{\"judgment\":\"none\"}\n```";
+    const shown = (m: unknown) => ((m as { content: { type: string; text?: string }[] }).content.find((c) => c.type === "text")?.text ?? "");
+    const run = async (start: Record<string, unknown>, message: unknown) => {
+      const opts = { sections: {} as Record<string, string> };
+      await b.events["before_agent_start"]({ type: "before_agent_start", systemPromptOptions: opts, ...start }, b.ctx);
+      const r = (await b.events["message_end"]({ type: "message_end", message }, b.ctx)) as { message?: object } | undefined;
+      if (r?.message) { for (const k of Object.keys(message as object)) delete (message as Record<string, unknown>)[k]; Object.assign(message as object, r.message); }
+      await b.events["turn_end"]({ type: "turn_end", message }, b.ctx);
+      return opts.sections;
+    };
+    // <leader>ts: the tutor's own hidden message, answered as the tutor and held to this turn's rule
+    const leak = assistant("In `split_amount`, change the `*` to `/`." + J);
+    const sections = await run({ messageType: "custom", message: { role: "custom", customType: "tutor_nudge", content: "[tutor] stuck (asked): idle at a.py:2", display: false, timestamp: 1 } }, leak);
+    expect(sections["tutor_onboard"]).toBeUndefined();
+    expect(sections["tutor"]).toBeTruthy();
+    expect(shown(leak)).toBe(REWRITE_TEXT);
+    // <leader>te
+    const leak2 = assistant("Use `/` instead of `*` there." + J);
+    await run({ messageType: "user", prompt: "[ask-error] a.py:2: unexpected result | code: share = total * people" }, leak2);
+    expect(shown(leak2)).toBe(REWRITE_TEXT);
+    // an answer to the getting-started questions is still getting-started, and unchecked as before
+    const chat = assistant("Welcome! `x = total / people` is the kind of line you will write soon.");
+    expect((await run({ messageType: "user", prompt: "I have never programmed before" }, chat))["tutor_onboard"]).toBeTruthy();
+    expect(shown(chat)).toContain("Welcome!");
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const p = Profile.open(process.env.PI_TUTOR_PROFILE!);
+    const o = JSON.parse(p.setting("onboarding") ?? "null");
+    p.close();
+    expect(o?.stage).not.toBe("done");
+    // the architect
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    const leak3 = assistant("```python\ndef part(a, b):\n    return a / b\n```" + J);
+    await run({ messageType: "user", prompt: "how should I split it?" }, leak3);
+    expect(shown(leak3)).toBe(REWRITE_TEXT);
+  });
   it("an off-topic first message also starts onboarding (Review Focus 3)", async () => {
     const b = await boot();
     expect((await userTurn(b, "what is LazyVim?"))["tutor_onboard"]).toBeTruthy();
@@ -2559,14 +2599,29 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     const leak = reply("To compute each person's share, the expression would be `total / people`.");
     await turn(b.events, b.ctx, "what is off in my design?", leak);
     expect(textOf(leak)).toBe(REWRITE_TEXT);
-    expect(check()).toMatchObject({ issues: ["role-code"], step: "design" });
+    expect(check()).toMatchObject({ issues: ["prose-fix"], step: "design" });
     const fenced = reply("Like this:\n\n```python\ndef part(a, b):\n    return a / b\n```");
     await turn(b.events, b.ctx, "and how?", fenced);
     expect(textOf(fenced)).toBe(REWRITE_TEXT);
     const fine = reply("`split_amount` is your one pure part: it takes the total and the head count. Line 2 computes `share = total * people`, which grows with more people, so the part does not do what its name says. `src/main.py` holds nothing else.\n\n```\ninput\n  |\nsplit_amount\n  |\nprint\n```");
+    const checks = b.entries.filter((e) => e.type === "tutor_check").length;
     await turn(b.events, b.ctx, "say it as a design", fine);
     expect(textOf(fine)).not.toBe(REWRITE_TEXT);
     expect(textOf(fine)).toContain("one pure part");
+    expect(b.entries.filter((e) => e.type === "tutor_check").length).toBe(checks); // review I2: no after-the-fact flag on an allowed quote
+  });
+  it("a fix told in words on a plain question, with no hidden solution to compare against, is held (live check 2026-11-10)", async () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-held-words-"));
+    wfile(pjoin(dir, "a.py"), "def split_amount(total, people):\n    share = total * people\n    return share\n");
+    const b = await boot({ cwd: dir, branch: [ep(1)] });
+    await level10(b);
+    const leak = reply("**What to try**: In `split_amount`, change the `*` to `/` and test it.");
+    await turn(b.events, b.ctx, "why is my answer too big?", leak);
+    expect(textOf(leak)).toBe(REWRITE_TEXT);
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["prose-fix"] });
+    const fine = reply("Look at line 2 again: what happens to each share as more people join?");
+    await turn(b.events, b.ctx, "hm?", fine);
+    expect(textOf(fine)).not.toBe(REWRITE_TEXT);
   });
   it("learner-session fixes Task 6: an 'unrelated' example that is a script task's answer renamed is held (the session's case)", async () => {
     // A beginner's script task names no function, so the old name check had nothing to protect.
