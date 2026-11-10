@@ -64,7 +64,22 @@ function codeAllowed(o: { band: Band; step: TurnStep | null; noCode: boolean }, 
 }
 
 /** `cols`: the learner's real diagram width (diagramCols); prompts still ask for 40, the check allows what fits. */
-export function checkReply(text: string, o: { band: Band; step: TurnStep | null; judged: boolean; noCode: boolean; cols?: number }): Issue[] {
+/**
+ * Live check 2026-11-10 (the architect handed over `share = total / people` in backticks): what makes an inline span
+ * code, for a role that never writes any. A name, a file, a path, a flag or a call (`split_amount(total, people)`)
+ * points at a part; a statement, an expression or a bare operator is code.
+ */
+function inlineCode(span: string): boolean {
+  const t = span.trim();
+  if (/^[-+*%=<>!&|^~]+$/.test(t) || (/^[-+*/%=<>!&|^~]{2,}$/.test(t))) return t !== "->" && t !== "=>" && t !== "--";
+  if (/^(?:return|def|function|fn|local|let|const|var|import|from|if|for|while)\s+\S/.test(t)) return true;
+  if (/\w\s*(?:\+=|-=|\*=|\/=|==|!=|<=|>=)\s*[\w("'[]/.test(t)) return true;
+  if (/[\w)\]"']\s*[+*%]\s*[\w("'[]/.test(t)) return true;
+  if (/[\w)\]"']\s+[-/]\s+[\w("'[]/.test(t)) return true;
+  return !t.startsWith("-") && /(?:^|[\s(])[A-Za-z_][\w.\]["']*\s*=\s*[\w("'[-]/.test(t);
+}
+
+export function checkReply(text: string, o: { band: Band; step: TurnStep | null; judged: boolean; noCode: boolean; noInlineCode?: boolean; cols?: number }): Issue[] {
   const issues = new Set<Issue>();
   if (!o.judged) issues.add("missing-judgment");
   for (const m of text.matchAll(FENCES)) {
@@ -82,6 +97,7 @@ export function checkReply(text: string, o: { band: Band; step: TurnStep | null;
     if (!codeAllowed(o, body.filter((l) => l.trim()).length)) issues.add("code-above-rung");
   }
   const prose = text.replace(FENCES, "");
+  if (o.noInlineCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => inlineCode(m[1]))) issues.add("code-above-rung");
   if (INTERNALS.test(prose)) issues.add("internals");
   const proseLines = prose.split(/\r?\n/).filter((l) => l.trim()).length;
   if (proseLines > SUMMARY_AFTER && !/in short/i.test(prose)) issues.add("no-summary");
@@ -96,6 +112,7 @@ const FIX: Record<Issue | TurnIssue, (cols: number) => string> = {
   "wide-diagram": (cols) => `a diagram line was wider than the learner's pane (${cols} characters); stack it vertically`,
   "internals": () => "it mentioned the tutor's machinery (rungs, INDEX.md, SKILL.md, the judgment block); talk about the code and the concept",
   "no-summary": () => "a long reply had no **In short** line",
+  "role-code": () => "it showed code, and this role never writes any: name the construct or point at the place in words",
   "own-code": () => "it showed the learner's own code (their names) before this turn allows the fix; teach on an unrelated example or point at the place",
   "prose-fix": () => "it told the learner the exact change in words before this turn allows the fix; point at the place or ask what they meant instead",
   "too-long": () => "it was longer than this turn allows",
@@ -167,7 +184,10 @@ export function scrubInternals(raw: string, o: { intakeJson?: boolean } = {}): s
  * judgment block that the system prompt asks for; round 2: a hint-level reply stated the fix in words.
  * A reminder next to the learner's message is read last.
  */
-export function replyReminder(step: TurnStep | null, recipe = false): string {
+export function replyReminder(step: TurnStep | null, recipe = false, role: { noCode?: boolean } = {}): string {
+  // Live check 2026-11-10: the architect got the coding tutor's five parts here, read last, and a small model followed
+  // them over its role: a coding-tutor reply with the fix in it. A role that never writes code gets its own line.
+  if (role.noCode) return "[tutor-reply] Answer in your role, in plain sentences: the parts, how data moves between them, and the trade-offs. No code, not even inline or as pseudocode: name the construct instead. Do not state the fix to the learner's code, in code or in words. Keep diagrams narrow, and end with the ```tutor-judgment block.";
   const hold = recipe
     ? " During the design recipe the learner writes every artifact: do not state the fix, in code or in words."
     : step !== null && step !== "fix" ? " Do not state the fix, in code or in words." : "";
@@ -191,7 +211,7 @@ export function formatCheck(issues: (Issue | TurnIssue)[], cols = DIAGRAM_COLS, 
 // ---- Reply checks for one turn (spec 2026-10-21 §6, §10) ----
 
 /** "checker" (habits Task 19): an optional second model read the reply and said it breaks this turn's rule. */
-export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix" | "checker" | "empty";
+export type TurnIssue = "own-code" | "too-long" | "no-question" | "machinery" | "prose-fix" | "checker" | "empty" | "role-code";
 
 // Spec 2026-10-26 §5.3: nemotron named the fix in words ("use / instead of *", "true division is needed").
 const INSTRUCTION = /\b(use|using|change|replace|switch|should be|instead of|try|needs?|need to|is needed|requires?|must be)\b/i;
@@ -317,6 +337,12 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   const seen = [...quoted];
   const spanLeaks = (span: string) => leaks(span) && !seen.some((l) => l.includes(span.trim()));
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
+  // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
+  // statement, expression or bare operator in backticks, unless it quotes a line the learner already has.
+  if (limits.noCode) {
+    const fenced = [...text.matchAll(FENCES)].some((m) => CODE_TAGS.has(m[2].trim().toLowerCase()));
+    if (fenced || [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => inlineCode(m[1]) && !(m[1].trim().length >= 8 && seen.some((l) => l.includes(m[1].trim()))))) issues.add("role-code"); // a bare `*` is in every line: no quote
+  }
   const plain = prose.replace(/`[^`\n]*`/g, "x");
   const sentences = plain.split(/[.!?]+(?=\s|$)/).filter((x) => /\w/.test(x)).length;
   if (limits.maxSentences !== null && sentences > limits.maxSentences) issues.add("too-long");

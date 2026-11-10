@@ -17,7 +17,8 @@ export type Trigger =
 export type CloseReason = "cleared" | "run_passed" | "judged" | "superseded";
 
 /** What this turn may do (spec §5): teach before any failed attempt, then hint → why → ask → fix. */
-export type TurnStep = "teach" | "hint" | "why" | "ask" | "fix";
+/** `design` is the architect's turn (live check 2026-11-10): no place on the ladder, but its reply is held to no code. */
+export type TurnStep = "teach" | "hint" | "why" | "ask" | "fix" | "design";
 
 export interface Episode {
   id: string;

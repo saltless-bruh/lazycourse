@@ -573,7 +573,8 @@ export default function (pi: ExtensionAPI): void {
       pi.appendEntry("tutor_episode", episode);
     }
     // Author 2026-11-09: this ask, not the failed runs before it, moves help (one step, and only after new effort).
-    episode = askHelp(episode!, sourceHash(root));
+    // Live check 2026-11-10: the architect answers about the spot in its own way and never moves help (spec 2026-10-13 §3).
+    if (roleNamed(activeRole).ladder) episode = askHelp(episode!, sourceHash(root));
     if (episode.spot) remember(episode);
     pi.appendEntry("tutor_episode", episode);
     ui?.notify(`stuck: ${rel}:${p.line}`, "info");
@@ -804,7 +805,9 @@ export default function (pi: ExtensionAPI): void {
     if (!isRewrite) rewrite = null;
     // Final review I2: on a run's episode the fix answers the failed run's own nudge (or its rewrite, or a pro's
     // /tutor-fix); a chat question after it is at why, so a later unrelated question never runs with the leak check off.
-    let step = role.ladder ? stepFor(episode, { exam: exam !== null }) : null;
+    // Live check 2026-11-10: the architect's turn has its own step, so its reply is held and checked for code like
+    // the coding tutor's (a small model wrote the fix out although its role and reminder forbid code).
+    let step: TurnStep | null = role.ladder ? stepFor(episode, { exam: exam !== null }) : role.name === "architect" ? "design" : null;
     const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || prompt.startsWith(`${TUTOR_PREFIX} stuck (asked): run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
     if (isNotes) step = null;
@@ -876,7 +879,7 @@ export default function (pi: ExtensionAPI): void {
     else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder));
+    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder, { noCode: !role.ladder }));
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -1079,7 +1082,7 @@ export default function (pi: ExtensionAPI): void {
   /** A teaching turn: its reply is held off screen while it streams and checked before it is shown. */
   const held = () => run !== null && run.step !== null && !onboardingActive();
   /** Phase 1 minor M4: a hint or a question is plain sentences, so a bold label in it is no heading to fold to. */
-  const folds = () => held() && run!.step !== "hint" && run!.step !== "ask";
+  const folds = () => held() && run!.step !== "hint" && run!.step !== "ask" && run!.step !== "design";
   const guarded = () => held() && run!.step !== "fix";
   /**
    * Habits Task 19 (spec 2026-10-26 §9): `/tutor-checker <provider/model>` names a second model that reads a held
@@ -1265,7 +1268,7 @@ export default function (pi: ExtensionAPI): void {
     if (j && !cur.judged) { cur.judged = true; applyTurnJudgment(guardJudgment(j, cur.prompt), cur.episodeId, cur.lang); }
     if (final) {
       if (!cur.judged) state.last = "missing";
-      lastIssues = checkReply(text, { band: bandFor(level()), step: cur.step, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
+      lastIssues = checkReply(text, { band: bandFor(level()), step: cur.step, judged: cur.judged, noCode: bandFor(level()) === "pro" || !roleNamed(activeRole).ladder, noInlineCode: !roleNamed(activeRole).ladder, cols: diagramCols(paneWidth) });
       if (lastIssues.length) pi.appendEntry("tutor_check", { issues: lastIssues });
     }
     paint();

@@ -244,6 +244,16 @@ describe("formatCheck", () => {
 });
 
 describe("replyReminder", () => {
+  it("a role that never writes code gets its own reminder, not the coding tutor's five parts (live check 2026-11-10)", () => {
+    const r = replyReminder(null, false, { noCode: true });
+    expect(r.startsWith("[tutor-reply]")).toBe(true);
+    expect(r).not.toContain("\n");
+    expect(r).not.toMatch(/What's happening|What to try|This turn:/);
+    expect(r).toMatch(/no code/i);
+    expect(r).toMatch(/do not state the fix/i);
+    expect(r).toContain("tutor-judgment");
+    expect(replyReminder(null)).toContain("What's happening"); // the coding tutor's is unchanged
+  });
   it("is one short line naming the structure and the judgment block", () => {
     const r = replyReminder(null);
     expect(r.startsWith("[tutor-reply]")).toBe(true);
@@ -501,5 +511,40 @@ describe("re-run finding: the plan's named variables are the learner's names", (
     const turn = (t: string) => checkTurn(t + "\n\nWhat would you try? ```tutor-judgment\n{}\n```", { step: "teach", names, sourceLines: [] });
     expect(turn("Consider the constraint `sentence.strip() != ''`.")).toContain("own-code");
     expect(turn("Look at where `sentence` gets its value.")).not.toContain("own-code");
+  });
+});
+
+describe("checkReply: a role that never writes code shows none inline either (live check 2026-11-10)", () => {
+  const o = { band: "intermediate" as const, step: null, judged: true, noCode: true, noInlineCode: true };
+  it("a statement or a bare operator in backticks is code", () => {
+    expect(checkReply("Change `*` to `/` on line 2: `share = total / people`.", o)).toContain("code-above-rung");
+    expect(checkReply("Use `total / people` there.", o)).toContain("code-above-rung");
+    expect(checkReply("Swap the `*` for division.", o)).toContain("code-above-rung");
+    expect(checkReply("Then `return share` at the end.", o)).toContain("code-above-rung");
+    expect(checkReply("Add `x += 1` in the loop.", o)).toContain("code-above-rung");
+  });
+  it("names, files, calls and paths are how an architect points at parts: not code", () => {
+    const fine = "`split_amount` is the core; `src/main.py` holds it. `main()` calls `split_amount(total, people)` and the `/` route reads `config.yaml`. Keep `--verbose` out of it; the `tip-calc` module stays pure.";
+    expect(checkReply(fine, o)).toEqual([]);
+  });
+  it("only with the role's switch: the coding tutor's replies are checked as before", () => {
+    expect(checkReply("Use `total / people` there.", { ...o, noInlineCode: false })).toEqual([]);
+    expect(checkReply("Use `total / people` there.", { band: "pro", step: null, judged: true, noCode: true })).toEqual([]);
+  });
+});
+
+describe("checkTurn at the design step: the architect's replies are held to no code (live check 2026-11-10)", () => {
+  const o = { step: "design" as const, names: new Set(["split_amount"]), sourceLines: ["def split_amount(total, people):", "    share = total * people", "    return share"] };
+  it("code in a fence or in backticks is role-code; the fallback is plain words", async () => {
+    expect(checkTurn("The expression would be `total / people`.", o)).toEqual(["role-code"]);
+    expect(checkTurn("Swap the `*` on line 2.", o)).toEqual(["role-code"]);
+    expect(checkTurn("```python\nreturn a / b\n```", o)).toEqual(["role-code"]);
+    const { fallbackReply, TURN_LIMITS, turnInstruction } = await import("../extensions/tutor/turns.js");
+    expect(fallbackReply("design")).not.toMatch(/[`=*]/);
+    expect(TURN_LIMITS.design).toMatchObject({ ownCode: true, noCode: true });
+    expect(turnInstruction("design")).toMatch(/no code/i);
+  });
+  it("the learner's names, a quote of their own line, and a plain diagram are how an architect talks", () => {
+    expect(checkTurn("`split_amount` is the pure part. Line 2 computes `share = total * people`, which grows with more people.\n\n```\ninput\n  |\nsplit_amount\n```", o)).toEqual([]);
   });
 });

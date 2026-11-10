@@ -571,8 +571,11 @@ describe("roles in the turn loop", () => {
   it("architect replies may not hold code blocks", async () => {
     const b = await boot();
     await b.commands["tutor-architect"].handler("", b.ctx);
-    await turn(b.events, b.ctx, "how do I split it?", assistant("```python\nimport x\n```\n```tutor-judgment\n{\"judgment\":\"none\"}\n```"));
-    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toEqual({ issues: ["code-above-rung"] });
+    // Live check 2026-11-10: held and asked again before the learner sees it (it was only reported afterwards).
+    const coded = assistant("```python\nimport x\n```\n```tutor-judgment\n{\"judgment\":\"none\"}\n```");
+    await turn(b.events, b.ctx, "how do I split it?", coded);
+    expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["role-code"], step: "design" });
+    expect((coded.content as { type: string; text?: string }[]).find((c) => c.type === "text")?.text).toBe(REWRITE_TEXT);
   });
   it("restores the role from the branch", async () => {
     const b = await boot({ branch: [{ type: "custom", customType: "tutor_role", data: { role: "architect" } }] });
@@ -676,7 +679,7 @@ describe("per-turn reply reminder (golden round 1: 3 of 5 replies dropped the ju
     const b = await boot();
     await b.commands["tutor-architect"].handler("", b.ctx); // no episode context for the architect
     const opts = await turn(b.events, b.ctx, "how should I split modules?", judged("none"));
-    expect(opts.message?.content).toBe(replyReminder(null));
+    expect(opts.message?.content).toBe(replyReminder("design", false, { noCode: true })); // live check 2026-11-10: the architect's own
     await b.commands["tutor-architect"].handler("off", b.ctx);
     const tutor = await turn(b.events, b.ctx, "hi", judged("none"));
     expect(tutor.message?.content.startsWith("[episode]")).toBe(true);
@@ -2545,6 +2548,25 @@ describe("held replies (spec 2026-10-21 §6)", () => {
       expect(textOf(leak)).toBe(REWRITE_TEXT);
       expect(b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data).toMatchObject({ issues: ["own-code"] });
     } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+  it("the architect's reply with code in it is held and asked again; naming the parts and quoting the learner's line goes through (live check 2026-11-10)", async () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-held-arch-"));
+    mkdir(pjoin(dir, "src"));
+    wfile(pjoin(dir, "src", "main.py"), "def split_amount(total, people):\n    share = total * people\n    return share\n");
+    const b = await boot({ cwd: dir });
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    const check = () => b.entries.filter((e) => e.type === "tutor_check").at(-1)?.data;
+    const leak = reply("To compute each person's share, the expression would be `total / people`.");
+    await turn(b.events, b.ctx, "what is off in my design?", leak);
+    expect(textOf(leak)).toBe(REWRITE_TEXT);
+    expect(check()).toMatchObject({ issues: ["role-code"], step: "design" });
+    const fenced = reply("Like this:\n\n```python\ndef part(a, b):\n    return a / b\n```");
+    await turn(b.events, b.ctx, "and how?", fenced);
+    expect(textOf(fenced)).toBe(REWRITE_TEXT);
+    const fine = reply("`split_amount` is your one pure part: it takes the total and the head count. Line 2 computes `share = total * people`, which grows with more people, so the part does not do what its name says. `src/main.py` holds nothing else.\n\n```\ninput\n  |\nsplit_amount\n  |\nprint\n```");
+    await turn(b.events, b.ctx, "say it as a design", fine);
+    expect(textOf(fine)).not.toBe(REWRITE_TEXT);
+    expect(textOf(fine)).toContain("one pure part");
   });
   it("learner-session fixes Task 6: an 'unrelated' example that is a script task's answer renamed is held (the session's case)", async () => {
     // A beginner's script task names no function, so the old name check had nothing to protect.
