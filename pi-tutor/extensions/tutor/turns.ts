@@ -13,12 +13,14 @@ export const EMPTY_TEXT = "_(tutor is writing its answer…)_";
 export const LOST_TEXT = "I lost my answer on the way — please ask again.";
 
 /** What a reply at each step may be; the reply check (compliance.checkTurn) holds it to these. */
-export const TURN_LIMITS: Record<TurnStep, { maxSentences: number | null; ownCode: boolean; question: boolean }> = {
+export const TURN_LIMITS: Record<TurnStep, { maxSentences: number | null; ownCode: boolean; question: boolean; noCode?: boolean }> = {
   teach: { maxSentences: null, ownCode: false, question: false },
   hint: { maxSentences: 2, ownCode: false, question: false },
   why: { maxSentences: 6, ownCode: false, question: false },
   ask: { maxSentences: 3, ownCode: false, question: true },
   fix: { maxSentences: null, ownCode: true, question: false },
+  // The architect names the learner's parts freely (ownCode) but writes no code at all, fenced or inline.
+  design: { maxSentences: null, ownCode: true, question: false, noCode: true },
 };
 
 const INSTRUCTION: Record<TurnStep, string> = {
@@ -27,6 +29,7 @@ const INSTRUCTION: Record<TurnStep, string> = {
   why: "Say clearly why it is wrong and what kind of change fixes it, from the run output. At most 6 sentences. No code with the learner's names, and do not state the corrected line.",
   ask: "Before explaining anything, ask what they were thinking when they wrote that part, or whether they guessed. Only the question: at most 3 sentences, ending with a question mark.",
   fix: "Give the fix for only the stuck part: that one line, with one sentence of why. Everything else stays theirs.",
+  design: "Answer as the architecture professor: the parts, how data moves between them, and the trade-offs, in plain sentences. No code, not even inline or as pseudocode, and do not state the fix to their code: say what the part should do, not how to write it.",
 };
 
 export function turnInstruction(step: TurnStep): string {
@@ -46,6 +49,7 @@ export function fallbackReply(step: TurnStep, spot?: string, recipe?: { n: numbe
       : "Tell me which step you are on and what you tried so far, and I will show the idea on a small example.";
     case "hint": return `Look again at the spot the last run points to${at}: what does that part do with its values? Change it, then run again.`;
     case "ask": return "Before I explain: what were you thinking when you wrote that part? Did you reason it out, or was it a guess?";
+    case "design": return "Let's look at it as a design: which part takes what in, and what should it hand on? Tell me the part you are unsure about and what you expect it to give back, and we will follow the data from there.";
     case "why":
     case "fix": return `The last run still fails at the same spot${at}. Compare what it printed with what you expected, and work out which operation or value makes the difference.`;
   }

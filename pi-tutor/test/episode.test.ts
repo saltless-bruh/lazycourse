@@ -1629,6 +1629,25 @@ describe("<leader>ts asks for stuck help (ask-first)", () => {
     expect(third).toMatch(/this turn: /);
     expect(third).not.toMatch(/this turn: (One small hint|Teach)/);
   }, 30000);
+  it("in architect mode <leader>ts gets the architect's own reminder and counts no help step (live check 2026-11-10)", async () => {
+    const b = await linked();
+    writeFileSync(join(h!.root, "a.py"), "x = 1\n");
+    await runPayload(1, "ZeroDivisionError: division by zero");
+    await until(() => (episodes(b.entries).at(-1) as { attempts?: number } | undefined)?.attempts === 1);
+    const ask = async () => { const n = asked(b).length; await stuck(join(h!.root, "a.py"), 1); await until(() => asked(b).length === n + 1); const t = await nudgeTurn(b.events, b.ctx, asked(b).at(-1)!.text, judged("none")); return JSON.stringify(t.message?.content ?? ""); };
+    const last = () => episodes(b.entries).at(-1) as { climbs?: number; askedAt?: unknown };
+    await b.commands["tutor-architect"].handler("", b.ctx);
+    const seen = await ask();
+    expect(seen).toMatch(/\[tutor-reply\]/);
+    expect(seen).not.toMatch(/What's happening|this turn:/i);
+    expect(seen).toMatch(/no code/i);
+    expect(last().climbs ?? 0).toBe(0);
+    expect(last().askedAt).toBeUndefined();
+    // Back with the coding tutor, the next ask is the first one counted on this spot.
+    await b.commands["tutor-architect"].handler("off", b.ctx);
+    expect(await ask()).toMatch(/this turn: One small hint/);
+    expect(last().climbs).toBe(1);
+  }, 30000);
   it("pressed on an error counts toward reads-errors like <leader>te", async () => {
     const { b, root } = await doneProject("def split_amount(total, people):\n    return total / people\n");
     await nvim!.command(`edit ${join(root, "src", "main.py")}`);

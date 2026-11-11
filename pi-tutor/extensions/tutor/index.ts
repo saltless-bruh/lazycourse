@@ -208,7 +208,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; asked?: string; code?: string; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -573,7 +573,8 @@ export default function (pi: ExtensionAPI): void {
       pi.appendEntry("tutor_episode", episode);
     }
     // Author 2026-11-09: this ask, not the failed runs before it, moves help (one step, and only after new effort).
-    episode = askHelp(episode!, sourceHash(root));
+    // Live check 2026-11-10: the architect answers about the spot in its own way and never moves help (spec 2026-10-13 §3).
+    if (roleNamed(activeRole).ladder) episode = askHelp(episode!, sourceHash(root));
     if (episode.spot) remember(episode);
     pi.appendEntry("tutor_episode", episode);
     ui?.notify(`stuck: ${rel}:${p.line}`, "info");
@@ -763,7 +764,15 @@ export default function (pi: ExtensionAPI): void {
       saveOnboarding(newOnboarding(null));
       onboardingHere = true;
     }
-    if (onboardingActive()) {
+    // Author 2026-11-10: a question about code asked while getting-started is still running (<leader>ts, <leader>te,
+    // the architect) is no answer to the getting-started questions: it is a tutor turn, held and checked like any
+    // other, and getting-started goes on afterwards where it was. A rewrite of such a turn stays one.
+    const asidePrompt = promptOf(event);
+    // Review 2026-11-11 I2: in the architect role only what the learner typed is the architect's; the tutor's own
+    // getting-started steps ("[tutor] onboarding: …") stay getting-started, or it would stall until the role is left.
+    const aside = onboardingActive() && ((roleNamed(activeRole).name === "architect" && event.messageType === "user") || asidePrompt.startsWith(`${TUTOR_PREFIX} stuck (asked)`) || asidePrompt.startsWith("[ask-error]")
+      || (event.messageType === "custom" && event.message.customType === "tutor_rewrite" && run?.aside === true));
+    if (onboardingActive() && !aside) {
       // Spec 2026-10-19 §6: the onboarding rules replace the ladder prompt (no judgment block asked for).
       event.systemPromptOptions.sections["tutor"] = systemText("onboard");
       event.systemPromptOptions.sections["tutor_onboard"] = onboardPrompt(onboarding!);
@@ -804,11 +813,16 @@ export default function (pi: ExtensionAPI): void {
     if (!isRewrite) rewrite = null;
     // Final review I2: on a run's episode the fix answers the failed run's own nudge (or its rewrite, or a pro's
     // /tutor-fix); a chat question after it is at why, so a later unrelated question never runs with the leak check off.
-    let step = role.ladder ? stepFor(episode, { exam: exam !== null }) : null;
+    // Live check 2026-11-10: the architect's turn has its own step, so its reply is held and checked for code like
+    // the coding tutor's (a small model wrote the fix out although its role and reminder forbid code).
+    let step: TurnStep | null = role.ladder ? stepFor(episode, { exam: exam !== null }) : role.name === "architect" ? "design" : null;
     const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || prompt.startsWith(`${TUTOR_PREFIX} stuck (asked): run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
     if (isNotes) step = null;
-    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0 };
+    // Review 2026-11-11 M1: what the learner asked belongs to the turn that answers it (and that turn's rewrites); a
+    // `<leader>ts` ask carries no question, so an older chat message never exempts its reply.
+    const asked = event.messageType === "user" && !prompt.startsWith("[ask-error]") && !prompt.startsWith(TUTOR_PREFIX) ? prompt : isRewrite ? run?.asked : undefined;
+    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0, aside, asked };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -831,6 +845,9 @@ export default function (pi: ExtensionAPI): void {
       // The failed run's output is what the learner saw too: quoting it is not a leak.
       const trace = episode?.trigger.kind === "run" ? episode.trigger.trace : "";
       run.sourceLines = [...sources, trace].flatMap((t) => t.split(/\r?\n/));
+      // For the second reader: the file in the editor (its window round the cursor), else the project's files; 150 lines at most.
+      const inEditor = snap && realCwd(snap.path).startsWith(root + "/") ? snap.lines.join("\n") : sources.join("\n");
+      run.code = inEditor.split(/\r?\n/).slice(0, 150).join("\n");
       // Spec §7: the current milestone's hidden reference; its lines are the answer until the fix step.
       if (project && profile && tasksMd !== null) {
         const p = profile, key = `checks:${project.path}`, now = currentMilestone(tasksMd, lesson);
@@ -876,7 +893,7 @@ export default function (pi: ExtensionAPI): void {
     else if (lastIssues.length) parts.push(formatCheck(lastIssues, diagramCols(paneWidth)));
     const fb = formatFeedback(activeFeedback(feedbackHistory));
     if (fb) parts.push(fb);
-    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder));
+    parts.push(isNotes ? NOTES_REMINDER : replyReminder(run.step, workflow !== null && role.ladder, { noCode: run.step === "design" })); // one switch: the held design step
     if (snap) parts.push(formatEditorContext(snap));
     return { message: { customType: "tutor_editor", content: parts.join("\n\n"), display: false, details: { band, path: snap?.path, episode: episode?.id } } };
   });
@@ -1077,28 +1094,35 @@ export default function (pi: ExtensionAPI): void {
   // reworded text while it streams; message_end swaps it into the finished reply before turn_end,
   // the saved session and the model's next context see it. Fences (the judgment block) are kept.
   /** A teaching turn: its reply is held off screen while it streams and checked before it is shown. */
-  const held = () => run !== null && run.step !== null && !onboardingActive();
+  /** Getting-started is running and this turn is part of it (not a code question aside from it). */
+  const inOnboarding = () => onboardingActive() && run?.aside !== true;
+  const held = () => run !== null && run.step !== null && !inOnboarding();
   /** Phase 1 minor M4: a hint or a question is plain sentences, so a bold label in it is no heading to fold to. */
-  const folds = () => held() && run!.step !== "hint" && run!.step !== "ask";
+  const folds = () => held() && run!.step !== "hint" && run!.step !== "ask" && run!.step !== "design";
   const guarded = () => held() && run!.step !== "fix";
   /**
    * Habits Task 19 (spec 2026-10-26 §9): `/tutor-checker <provider/model>` names a second model that reads a held
-   * reply after code's checks passed, against this turn's rule. Its "no: <reason>" is handled like a failed code
+   * reply after code's checks passed, against this turn's rule. Its "leak: <reason>" is handled like a failed code
    * check; an error, a timeout or an unclear answer lets the reply through, since it may only make replies stricter.
    */
-  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, names: Set<string>): Promise<string | undefined> {
+  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, code: string): Promise<string | undefined> {
     const id = profile?.setting("checker");
     if (!id || id === "off") return undefined;
+    // Author 2026-11-11: the reader is asked one thing — does the reply tell the exact change? — so at the fix step,
+    // where the change is what the turn is for, there is nothing for it to read.
+    if (step === "fix") return undefined;
     const slash = id.indexOf("/");
     if (slash <= 0) { checkerSkipped(`${id} is not a provider/model`); return undefined; } // final review M3
     const model = ctx.modelRegistry.find(id.slice(0, slash), id.slice(slash + 1));
     if (!model) { checkerSkipped(`no model ${id} in Pi's model list`); return undefined; }
-    // Final review I3: the facts the rule speaks of, and for `why` only the corrected line is held back.
-    const rule = `${turnInstruction(step)}${step === "why" ? " Do not write the corrected line." : step !== "fix" ? " Do not state the fix, in code or in words." : ""}`;
+    // Measured 2026-11-11 on 27 recorded replies: judging the whole turn rule, the reader sent back 5–7 of 12 good
+    // replies (a summary instead of a question, backticks round a name); asked only whether the reply tells the exact
+    // change, with the learner's code to judge against, 0–1 — and code's own check (fixInWords) covers what it then
+    // lets through. Final review I3: at `why` the kind of change may be named; only the corrected line is held back.
+    const allowed = step === "why" ? "At this point the reply may say what kind of change is needed; only the corrected line or the exact replacement tells the change.\n" : "";
     const spot = episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : episode?.spot ?? "";
-    const facts = [spot ? `The spot: ${spot}` : "", names.size ? `The learner's names: ${[...names].slice(0, 30).join(", ")}` : ""].filter(Boolean).join("\n");
-    // Final review M2: the reply is data inside tags, never instructions to the checker.
-    const ask = `This turn's rule: ${rule}${facts ? `\n${facts}` : ""}\n\nThe reply:\n<reply>\n${text}\n</reply>`;
+    // Final review M2: the code and the reply are data inside tags, never instructions to the checker.
+    const ask = `${allowed}${spot ? `The spot: ${spot}\n` : ""}The learner's code as it is now:\n<code>\n${code}\n</code>\n\nThe reply:\n<reply>\n${text}\n</reply>`;
     const t0 = Date.now();
     // Final review I1: Esc stops the wait, and nothing it said afterwards counts.
     const signal = AbortSignal.any([AbortSignal.timeout(CHECKER_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])]);
@@ -1108,13 +1132,15 @@ export default function (pi: ExtensionAPI): void {
       if (ctx.signal?.aborted) { checkerSkipped("stopped"); return undefined; }
       if (r.stopReason !== "stop") { checkerSkipped(r.stopReason === "aborted" ? "no answer in three minutes" : r.errorMessage || r.stopReason); return undefined; }
       const answer = r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n").trim();
-      // Final review M1: only a first line that is "yes" or "no" (or "no: reason") is a verdict.
+      // Final review M1: only a first line that is a verdict counts.
       const first = (answer.split("\n")[0] ?? "").replace(/\*+/g, "").trim();
-      const v = /^\W*(yes|no)\b\W*?(?:[:—–-]\s*(.*)|\W*)$/i.exec(first);
+      // Review 2026-11-11 I3: `ok` / `leak: reason`. A bare yes or no answers "does it tell the change?" one way and
+      // "is it fine?" the other, so neither is a verdict.
+      const v = /^\W*(ok|leak)\b\W*?(?:[:—–-]\s*(.*)|\W*)$/i.exec(first);
       if (!v) { checkerSkipped(`an unclear answer: ${first.slice(0, 60) || "nothing"}`); return undefined; }
       const verdict = v[1].toLowerCase();
       pi.appendEntry("tutor_checker", { verdict, ms: Date.now() - t0 }); // live audits count what it read
-      return verdict === "no" ? (v[2]?.trim() || "it breaks this turn's rule") : undefined;
+      return verdict === "leak" ? (v[2]?.trim() || "it tells the exact change to make") : undefined;
     } catch (e) {
       checkerSkipped(ctx.signal?.aborted ? "stopped" : e instanceof Error ? e.message : String(e));
       return undefined;
@@ -1138,7 +1164,7 @@ export default function (pi: ExtensionAPI): void {
       if (!profile) { ctx.ui.notify("/tutor-checker needs the tutor's profile, which is not open", "warning"); return; } // final review M4
       const p = profile;
       profileWrite(() => p.setSetting("checker", want));
-      ctx.ui.notify(want === "off" ? "no second reader: code's checks alone hold replies" : `held replies are also read by ${want} against the turn's rule; it can only make them stricter`, "info");
+      ctx.ui.notify(want === "off" ? "no second reader: code's checks alone hold replies" : `held replies are also read by ${want}, which sends back one that tells you the exact change; it can only make them stricter`, "info");
     },
   });
 
@@ -1151,7 +1177,7 @@ export default function (pi: ExtensionAPI): void {
     paneWidth = c.availableWidth;
     if (held() && c.isStreaming) return HOLD_TEXT;
     // Learner-session fixes (spec §4): every assistant message, every turn type, onboarding included.
-    const shown = hideJudgment(scrubInternals(cleanReply(md), { intakeJson: onboardingActive() }));
+    const shown = hideJudgment(scrubInternals(cleanReply(md), { intakeJson: inOnboarding() }));
     return folds() ? foldPreamble(shown) : shown;
   });
   pi.on("message_end", async (event, ctx) => {
@@ -1159,7 +1185,7 @@ export default function (pi: ExtensionAPI): void {
     if (m.role !== "assistant") return;
     // Live check 2026-10-19: a run Pi continues from our kick has no before_agent_start, so the onboarding
     // state, not a flag set there, decides what an exchange is.
-    if (onboardingActive()) {
+    if (inOnboarding()) {
       // The note must be read here: the scrubbed reply (no fence) is what turn_end and the session see.
       const text = m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
       // A retry's reply without a note keeps the note the blank reply carried (author 2026-11-09).
@@ -1169,7 +1195,7 @@ export default function (pi: ExtensionAPI): void {
     let content = m.content.map((c) => {
       if (c.type !== "text") return c;
       const clean = cleanReply(c.text);
-      const scrubbed = scrubInternals(clean, { intakeJson: onboardingActive() });
+      const scrubbed = scrubInternals(clean, { intakeJson: inOnboarding() });
       const text = folds() ? foldPreamble(scrubbed) : scrubbed;
       if (text === c.text) return c;
       changed = true;
@@ -1178,12 +1204,12 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: cur.asked });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
         const steersBefore = pendingSteers;
-        reason = await askChecker(ctx, cur.step, text, cur.names ?? new Set());
+        reason = await askChecker(ctx, cur.step, text, cur.code ?? "");
         // Phase 8 B4: a message typed during the wait continues this run before any rewrite could start.
         typedMeanwhile = pendingSteers > steersBefore;
         if (reason) issues = ["checker"];
@@ -1229,7 +1255,7 @@ export default function (pi: ExtensionAPI): void {
       const line = reask ? EMPTY_TEXT : LOST_TEXT;
       if (reask) {
         emptyAsked = true; pendingEmpty = true;
-        if (onboardingActive()) { onboardWaits = true; waitNote = intake ?? null; }
+        if (inOnboarding()) { onboardWaits = true; waitNote = intake ?? null; }
         // Review I1: the judgment counts on the reply the learner reads, so this one's is dropped; the re-ask keeps
         // this turn's step (a fix stays a fix) and is told why.
         if (cur) {
@@ -1250,7 +1276,7 @@ export default function (pi: ExtensionAPI): void {
   pi.on("turn_end", async (event) => {
     const m = event.message;
     if (m.role !== "assistant") return;
-    if (onboardingActive()) return; // onboarding exchanges carry no judgment
+    if (inOnboarding()) return; // onboarding exchanges carry no judgment
     // Aborted, errored and truncated turns carry no judgment.
     if (m.stopReason !== "stop" && m.stopReason !== "toolUse") return; // pending, deferred, aborted, error, length carry no judgment
     const cur = run ?? (run = { prompt: "", step: roleNamed(activeRole).ladder ? stepFor(episode, { exam: exam !== null }) : null, judged: false });
@@ -2957,7 +2983,7 @@ export default function (pi: ExtensionAPI): void {
       // in the learner's chat); before_agent_start builds its context; started once Pi is idle (2026-10-19).
       rewriteWhenIdle(ctx, `Your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
     }
-    if (!onboardingActive() || !onboarding) return;
+    if (!inOnboarding() || !onboarding) return;
     // Third review I1/M2: what the blank reply recorded stays; the retry's (or the learner's next) note adds to it.
     const note = waitNote ? { ...waitNote, ...(intake ?? {}) } : intake;
     intake = undefined; waitNote = null;
