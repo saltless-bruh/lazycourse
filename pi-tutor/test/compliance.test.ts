@@ -617,3 +617,13 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(checkTurn("Change the `*` to `/`: a share is the total divided by the people.", { ...o, step: "fix" })).toEqual([]);
   });
 });
+
+describe("a reply that only repeats the tutor's own placeholder is no reply (live run 2026-11-11)", () => {
+  it("checkTurn calls it empty, so it is asked again or replaced, never shown", async () => {
+    const { HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } = await import("../extensions/tutor/turns.js");
+    const o = { step: "teach" as const, names: new Set<string>(), sourceLines: ["x = 1"] };
+    for (const t of ["**(tutor is rewriting this reply…)**", REWRITE_TEXT, HOLD_TEXT, EMPTY_TEXT, "(tutor is rewriting this reply...)\n```tutor-judgment\n{\"judgment\":\"none\"}\n```"])
+      expect([t, checkTurn(t, o)]).toEqual([t, ["empty"]]);
+    expect(checkTurn("The tutor is rewriting this reply because the first one was unclear: look at line 1 again.", o)).toEqual([]);
+  });
+});

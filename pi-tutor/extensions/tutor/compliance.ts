@@ -2,7 +2,7 @@ import { stripIntake } from "./onboard.js";
 import type { Band } from "./policy.js";
 import { parseJudgment, type Judgment } from "./judgment.js";
 import type { TurnStep } from "./ladder.js";
-import { turnInstruction, TURN_LIMITS } from "./turns.js";
+import { turnInstruction, TURN_LIMITS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } from "./turns.js";
 import { LANGUAGE_NAMES, termHits, windowOverlap } from "./similarity.js";
 
 // Rules the extension enforces or reports (spec 2026-10-13 §2, §7 #2; live findings with nemotron).
@@ -222,6 +222,8 @@ const tokensOf = (lines: string[]) => new Set(lines.join("\n").match(/\/\/|<=|>=
 
 /** A line that defines or pulls something in: code in any fence, whatever its tag. */
 const STATEMENT = /^(?:def|fn|func|function|class)\s+\w+\s*[(:<{]|^import\s+\S|^from\s+\S+\s+import\b|^(?:if|elif|for|while)\b.*:\s*$|^(?:SELECT|CREATE TABLE|INSERT INTO|UPDATE)\b/;
+const lettersOnly = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
+const PLACEHOLDERS = new Set([HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT].map(lettersOnly));
 const OP_SPAN = /^(?:\/\/|<=|>=|==|!=|[-+*/%<>])$/;
 const OP_SIGNS: Record<string, string> = { "÷": "/", "×": "*" };
 const WORD_OR_NUMBER = /[A-Za-z_]\w*|\d+(?:\.\d+)?/g;
@@ -398,6 +400,9 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
   const text = hideJudgment(raw);
+  // Live run 2026-11-11: after two rewrites nemotron answered with the placeholder it saw in its own history
+  // ("**(tutor is rewriting this reply…)**"), and that was shown as the reply. It is no reply.
+  if (PLACEHOLDERS.has(lettersOnly(text))) return ["empty"];
   const quoted = new Set(o.sourceLines.map((l) => l.trim()).filter(Boolean));
   // Spec 2026-10-21 §7: a line of the hidden reference solution (8+ characters) is the answer, named or not.
   const answer = new Set((o.referenceLines ?? []).map((l) => l.trim()).filter((l) => l.length >= 8));
