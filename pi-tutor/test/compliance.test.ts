@@ -648,6 +648,106 @@ describe("second review 2026-11-11: code with no learner line to compare, diagra
   });
 });
 
+describe("re-measure 2026-11-11: a fix inside a question, a value named in passing, and the everyday word remainder", () => {
+  const f = (...lines: string[]) => ({ sourceLines: lines, words: true });
+  const adult = f("def is_adult(age):", "    return age > 18"), avg = f("def average(numbers):", "    return len(numbers) / sum(numbers)"), change = f("def change(paid, price):", "    return paid + price");
+  it("an operator their code does not have, named as the thing to change to or use, is the fix even inside a question", () => {
+    expect(fixInWords("What do you think changing the operator to `>=` would do, and would that align with the intended definition of \"adult\"?", adult)).toBe("swap");
+    expect(fixInWords("The `>` operator checks for strictly greater than, so 18 itself returns `False`. Using `>=` will include 18 as an adult.", adult)).toBe("swap");
+    expect(fixInWords("What should the function use instead of `+`, and what would the correct output be?", change)).toBeNull(); // points at theirs, names nothing new
+    expect(fixInWords("Python also has `//`; what does using it on 7 and 2 give?", { ...adult, asked: "what does // do?" })).toBeNull();
+    expect(fixInWords("The `>` here is strict. Which numbers does it let through?", adult)).toBeNull();
+  });
+  it("saying the two sides of a division or subtraction go the other way round is the fix", () => {
+    expect(fixInWords("The average should divide the total by the count, not the other way around.", avg)).toBe("swap");
+    expect(fixInWords("An average is calculated by dividing the total sum by how many numbers there are. What do you think would happen if we swapped the order of the division?", avg)).toBe("swap");
+    expect(fixInWords("How would you reorder the division to calculate the average correctly?", avg)).toBe("swap");
+    expect(fixInWords("Division is not commutative: what does that mean for which value goes on top?", avg)).toBeNull();
+    expect(fixInWords("What would happen if we swapped the order of the addition?", change)).toBeNull(); // their code divides and subtracts nothing
+    expect(fixInWords("How would you reorder the division to calculate the average correctly?", { ...avg, words: false })).toBeNull(); // why may name the kind of change
+  });
+  it("a value named in passing (`age = 18`) is not their line edited", () => {
+    expect(fixInWords("The line `return age > 18` uses a strict greater-than operator. With `age = 18`, the expression `18 > 18` evaluates to `False` because 18 is not greater than itself.", adult)).toBeNull();
+    expect(fixInWords("Set `share = people` there.", f("    share = total * people"))).toBe("edited-line"); // their own assignment, changed
+  });
+  it("remainder as an everyday word names no operator; the modulo operator does", () => {
+    const r = "Calling it with `20` and `15` produces `35`, which is the total of those values rather than a remainder. This means the output reflects addition, not what is left after the price is accounted for.";
+    expect(fixInWords(r, change)).toBeNull();
+    expect(fixInWords("You want the modulo here, not addition.", change)).toBe("swap");
+    expect(fixInWords("Use the remainder operator rather than addition.", change)).toBe("swap");
+  });
+});
+
+describe("fresh batch 2026-11-11: their line with one token changed, short names, and explaining an operator", () => {
+  const f = (...lines: string[]) => ({ sourceLines: lines, words: true });
+  it("their line with exactly one token changed is the fix, however short its names", () => {
+    expect(fixInWords("Try changing it to `x > best`.", f("        if x < best:"))).toBe("edited-line");
+    expect(fixInWords("Try changing it to `n % 2 == 0`.", f("    return n % 2 == 1"))).toBe("edited-line");
+    expect(fixInWords("Change it to `n -= 1` to count down.", f("        n += 1"))).toBe("edited-line");
+    // a value put in for a name is working the line through, not changing it
+    expect(fixInWords("With `n = 5`, `range(1, 5)` generates the numbers 1, 2, 3, 4.", f("    for i in range(1, n):"))).toBeNull();
+    expect(fixInWords("The expression `18 > 18` evaluates to `False`.", f("    return age > 18"))).toBeNull();
+    expect(fixInWords("Think about the `n + 1 queries` problem, or `key = value` pairs.", f("    share = total * people", "    for i in range(1, n):"))).toBeNull();
+  });
+  it("a worked value, an unrelated string, and a bare call name are not their line changed", () => {
+    expect(fixInWords("For `n = 4`, `4 % 2` is `0`, and `0 == 1` evaluates to `False`.", f("    return n % 2 == 1"))).toBeNull();
+    expect(fixInWords("For an unrelated example, `'Hi' + 'There'` gives `'HiThere'`, not `'Hi There'`.", f("    return first + last", "print(full_name('Ada', 'Lovelace'))"))).toBeNull();
+    expect(fixInWords("Remember that Python's `range()` stops before the second argument.", f("    for i in range(1, n):"))).toBeNull();
+  });
+  it("a keyword shared with their line is not one of their names", () => {
+    expect(fixInWords("A classic way this happens is writing `while score > 0: score += 1`.", f("    while n > 0:", "        n += 1"))).toBeNull();
+  });
+  it("explaining the remainder operator by division is its meaning, not a swap", () => {
+    const even = f("    return n % 2 == 1");
+    expect(fixInWords("Think of the `%` operator as asking \"what's left over after dividing by 2?\"", even)).toBeNull();
+    expect(fixInWords("`7 % 2` is `1` (7 divided by 2 leaves remainder 1), while `8 % 2` is `0`.", even)).toBeNull();
+    expect(fixInWords("Use `/` rather than `%` here.", even)).toBe("swap");
+  });
+  it("before the fix step, a code fence holding their line with one token changed is their own code fixed", () => {
+    const o = { step: "teach" as const, names: new Set(["countdown"]), sourceLines: ["def countdown(n):", "    while n > 0:", "        print(n)", "        n += 1", "", "countdown(3)"] };
+    expect(checkTurn("Count down instead:\n```python\ndef countdown(n):\n    while n > 0:\n        print(n)\n        n -= 1   # counts down, not up\ncountdown(3)\n```\nWhat changes?", o)).toContain("own-code");
+    expect(checkTurn("Your loop today:\n```python\n    while n > 0:\n        n += 1\n```\nWhat happens to n each time round?", o)).toEqual([]);
+    expect(checkTurn("```python\n        n -= 1\n```", { ...o, step: "fix" })).toEqual([]);
+  });
+});
+
+describe("review of leak-shapes 2026-11-11: the new rules must not hold everyday teaching", () => {
+  const f = (...lines: string[]) => ({ sourceLines: lines, words: true });
+  it("C1: saying what an operator is used for is a lesson; the swap needs an operator of the same family in their code", () => {
+    expect(fixInWords("In Python you use `+` to join two strings.", f("    return first.upper()"))).toBeNull();
+    expect(fixInWords("Remember that you use `==` to compare two values. Which line compares?", f("    if age > 18:"))).toBeNull();
+    expect(fixInWords("Python uses `*` for multiplying. What does your line do?", f("    return a + b"))).toBeNull();
+    expect(fixInWords("We use `%` to test evenness because it gives the remainder.", f("    return n / 2"))).toBeNull();
+    expect(fixInWords("Rust uses `!=` for not equal, just like Python.", f("    if a == b {"))).toBeNull();
+    expect(fixInWords("Change the comparison to `>=` there.", f("    total = a + b"))).toBeNull(); // no comparison of theirs to change
+    expect(fixInWords("Using `>=` will include 18 as an adult.", f("    return age > 18"))).toBe("swap");
+  });
+  it("C2: an unrelated example one name away from their line is an example, inline or fenced", () => {
+    const teach = (src: string[]) => ({ step: "teach" as const, names: new Set<string>(), sourceLines: src });
+    for (const [fence, line] of [["```python\nprint(name)\n```", "print(total)"], ["```python\nfound = False\n```", "done = False"], ["```rust\nlet mut y = 0;\n```", "let mut x = 0;"],
+      ["```go\nfmt.Println(y)\n```", "fmt.Println(x)"], ["```js\nconsole.log(name);\n```", "console.log(total);"], ["```python\nfrom math import sqrt\n```", "from math import floor"]]) expect([fence, checkTurn(fence + "\nWhat does it print?", teach([line]))]).toEqual([fence, []]);
+    expect(fixInWords("You can print a value with `print(name)`.", f("print(total)"))).toBeNull();
+    // M1: a quote of their line with a trailing comment of another language is still a quote
+    expect(checkTurn("```rust\nlet avg = total / count; // here\n```\nWhat is count?", teach(["let avg = total / count; // TODO"]))).toEqual([]);
+    expect(checkTurn("```rust\nlet avg = total * count; // here\n```\nWhat is count?", teach(["let avg = total / count; // TODO"]))).toEqual(["own-code"]);
+  });
+  it("C3: reverse, flip and swap about lists, strings or signs say nothing about their division", () => {
+    expect(fixInWords("`s[::-1]` reverses the string, and subtracting 1 from the length gives the last index.", f("    return s[len(s) - 1]"))).toBeNull();
+    expect(fixInWords("To reverse a list, step through it with a minus one step.", f("    return a - b"))).toBeNull();
+    expect(fixInWords("To flip the sign of a number, put a `-` in front of it.", f("    return a - b"))).toBeNull();
+    expect(fixInWords("A reverse proxy divides traffic between the two servers.", f("    return total / servers"))).toBeNull();
+    expect(fixInWords("`.rev()` reverses an iterator, so counting down needs no subtraction.", f("fn count(n: u32) -> u32 {", "    n + 1"))).toBeNull();
+    expect(fixInWords("What would the output be if the order of the values in the division were reversed?", f("    return len(numbers) / sum(numbers)"))).toBe("swap");
+  });
+  it("I1, I2, I4: fixes the old rules held are still held", () => {
+    expect(fixInWords("Use division instead of `%` here.", f("    return n % 2"))).toBe("swap");
+    expect(fixInWords("You want integer division here, not `%`.", f("    return n % 2"))).toBe("swap");
+    expect(fixInWords("You need the remainder here, not division.", f("    return n / 2"))).toBe("swap");
+    expect(fixInWords("What is the remainder of 7 divided by 2?", f("    return n % 2 == 1"))).toBeNull();
+    expect(fixInWords("Try `while i <= n - 1 do`.", f("while i < n do"))).toBe("edited-line");
+  });
+});
+
 describe("a reply that only repeats the tutor's own placeholder is no reply (live run 2026-11-11)", () => {
   it("checkTurn calls it empty, so it is asked again or replaced, never shown", async () => {
     const { HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } = await import("../extensions/tutor/turns.js");

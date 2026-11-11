@@ -218,7 +218,8 @@ const OP_WORDS: Record<string, RegExp> = {
   "+": /\badd(ing|ition)?\b/i, "-": /\bsubtract(ing|ion)?\b/i, "%": /\b(remainder|modulo)\b/i,
   "<=": /\bless than or equal\b/i, ">=": /\bgreater than or equal\b/i,
 };
-const tokensOf = (lines: string[]) => new Set(lines.join("\n").match(/\/\/|<=|>=|==|!=|[-+*/%<>]|\.?[A-Za-z_]\w*(?=\()/g) ?? []);
+// Review 2026-11-11 C3: a Rust or JS arrow (`->`, `=>`) is no minus or greater-than.
+const tokensOf = (lines: string[]) => new Set(lines.join("\n").replace(/->|=>/g, " ").match(/\/\/|<=|>=|==|!=|[-+*/%<>]|\.?[A-Za-z_]\w*(?=\()/g) ?? []);
 
 /** A line that defines or pulls something in: code in any fence, whatever its tag. */
 const STATEMENT = /^(?:def|fn|func|function|class)\s+\w+\s*[(:<{]|^import\s+\S|^from\s+\S+\s+import\b|^(?:if|elif|for|while)\b.*:\s*$|^(?:SELECT|CREATE TABLE|INSERT INTO|UPDATE)\b/;
@@ -230,7 +231,7 @@ const WORD_OR_NUMBER = /[A-Za-z_]\w*|\d+(?:\.\d+)?/g;
 /** Operator names for the swap check: stricter than OP_WORDS ("add an `if`" names no operator; in 68 real replies it was the one false alarm). */
 const SWAP_WORDS: [string, RegExp][] = [
   ["//", /\b(?:floor|integer) divi(?:de|sion)\b/gi], ["/", /\bdivi(?:de|des|ded|ding|sion)\b/gi], ["*", /\bmultipl(?:y|ies|ied|ying|ication)\b/gi],
-  ["+", /\baddition\b|\bplus\b/gi], ["-", /\bsubtract(?:s|ed|ing|ion)?\b|\bminus\b/gi], ["%", /\bremainder\b|\bmodulo\b/gi],
+  ["+", /\baddition\b|\bplus\b/gi], ["-", /\bsubtract(?:s|ed|ing|ion)?\b|\bminus\b/gi], ["%", /\bmodulo\b|\bremainder operator\b|\bthe remainder\b/gi],
   ["<=", /\bless than or equal\b/gi], [">=", /\bgreater than or equal\b/gi], ["<", /\bless than\b/gi], [">", /\bgreater than\b/gi],
 ];
 
@@ -254,6 +255,19 @@ const SWAP_WORDS: [string, RegExp][] = [
 // two numbers", "this part multiplies, while that part divides"); they no longer count as a contrast by themselves.
 const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|versus|vs\.?|better|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
 const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b/i;
+// Re-measure 2026-11-11: the fix was put inside a question ("what would changing the operator to `>=` do?", "what
+// if we swapped the order of the division?"). An operator their code lacks, named as the one to change to or use,
+// and the two sides of a division or subtraction said to go the other way round, are the change whatever the mood.
+const CHANGE_TO = /\b(?:chang\w*|replac\w*|swap\w*|switch\w*|us(?:e|es|ing)|instead)\b/i;
+// Review 2026-11-11 C3: the order word has to be about the operation's two sides ("reverses the string" is not).
+const SIDES = String.raw`(?:order|operands|sides|values|numbers|two|numerator|denominator|division|subtraction)`;
+const OTHER_WAY = new RegExp(String.raw`\bother way (?:a)?round\b|\b(?:swap\w*|revers\w*|reorder\w*|flip\w*|switch\w*) (?:the )?${SIDES}\b|\b${SIDES}\b[^.?!]*\b(?:swapped|reversed|flipped)\b`, "i");
+// Review 2026-11-11 C1: "you use \`+\` to join strings" says what an operator is for; and an operator can only
+// replace one of theirs of the same kind (a comparison for a comparison, arithmetic for arithmetic).
+const USE_FOR = /\bus(?:e|es|ing) `[^`\n]+` (?:to|for)\b/i;
+const FAMILIES = [["<", ">", "<=", ">=", "==", "!="], ["+", "-", "*", "/", "//", "%"]];
+const kin = (op: string, theirs: Set<string>) => FAMILIES.some((fam) => fam.includes(op) && fam.some((x) => theirs.has(x)));
+const ORDERED = ["/", "//", "-", "%"];
 const LISTING = /\b(?:and|both|as well as|along with|each|either)\b/i;
 
 /**
@@ -268,15 +282,65 @@ const writtenCode = (line: string) => WRITTEN.test(line.trim());
 const DIAGRAM_TAGS = new Set(["", "text", "txt", "plaintext", "plain", "ascii", "diagram", "mermaid"]);
 const ARROW = /-->|->|=>|[→▶►]/;
 
+// Review 2026-11-11 C2: words every program in the language has; sharing one with an example is no sign it is theirs.
+const LANGUAGE = new Set(["print", "len", "range", "True", "False", "None", "true", "false", "nil", "null", "self", "this", "mut", "fmt", "Println", "println", "console", "log", "math", "import", "from", "int", "str", "float", "string", "pub", "use", "std", "require"]);
+const KEYWORDS = new Set(["def", "return", "if", "elif", "else", "for", "while", "in", "and", "or", "not", "is", "let", "const", "var", "function", "fn", "local", "then", "end", "do"]);
+const CODE_TOKEN = /'[^'\n]*'|"[^"\n]*"|\/\/=?|[-+*/%]=|==|!=|<=|>=|[-+*/%<>=]|[A-Za-z_]\w*|\d+(?:\.\d+)?|\S/g;
+/**
+ * Fresh batch 2026-11-11: `x > best` beside their `if x < best:`, `n -= 1` beside `n += 1`, `n % 2 == 0` beside
+ * `== 1` — a stretch of one of their lines with exactly one token changed, however short the names. A value put in
+ * for one of their names (`18 > 18`, `range(1, 5)`) is the line worked through, not changed.
+ */
+function oneTokenEdit(code: string, lines: string[]): boolean {
+  const mine = code.trim().match(CODE_TOKEN) ?? [];
+  if (mine.length < 3) return false;
+  return lines.some((l) => {
+    const theirs = l.match(CODE_TOKEN) ?? [];
+    for (let at = 0; at + mine.length <= theirs.length; at++) {
+      let diff = -1, n = 0;
+      for (let i = 0; i < mine.length && n < 2; i++) if (mine[i] !== theirs[at + i]) { diff = i; n++; }
+      if (n !== 1) continue;
+      // The change is like for like (an operator, a number or a name for another), in a stretch that still carries
+      // one of their names: `0 == 1` is a worked value, `range()` a call named, `'HiThere'` someone else's string.
+      const kind = (t: string) => (/^[A-Za-z_]/.test(t) ? (KEYWORDS.has(t) || LANGUAGE.has(t) ? "keyword" : "name") : /^\d/.test(t) ? "number" : /^['"]/.test(t) ? "string" : /^(?:\/\/=?|[-+*/%]=|==|!=|<=|>=|[-+*/%<>=])$/.test(t) ? "op" : "other");
+      const was = kind(theirs[at + diff]);
+      // Review C2: one name for another (`print(name)` beside `print(total)`) is another example, not their line fixed.
+      if (was !== kind(mine[diff]) || (was !== "op" && was !== "number")) continue;
+      if (!mine.some((t, i) => i !== diff && kind(t) === "name")) continue;
+      return true;
+    }
+    return false;
+  });
+}
+
 /** Code that is not a quote of the learner's lines but carries two or more names of one of them: their line, changed. */
 function editedLine(code: string, lines: string[]): boolean {
   const t = code.trim();
-  if (!inlineCode(t) || lines.some((l) => l.includes(t))) return false;
+  if (lines.some((l) => l.includes(t))) return false;
+  // Re-measure 2026-11-11: "with `age = 18`, the expression is False" names a value; it is their line edited only
+  // when they assign that name themselves.
+  const bound = /^([A-Za-z_]\w*)\s*=\s*[\w.'"]+$/.exec(t);
+  if (bound && !lines.some((l) => new RegExp(`^\\s*${bound[1]}\\s*=(?!=)`).test(l))) return false;
+  return oneTokenEdit(t, lines) || sharesNames(t, lines);
+}
+/** Their line with one token changed, by the same quote and binding rules as editedLine. */
+function changedLine(code: string, lines: string[]): boolean {
+  const t = code.trim();
+  if (lines.some((l) => l.includes(t))) return false;
+  const bound = /^([A-Za-z_]\w*)\s*=\s*[\w.'"]+$/.exec(t);
+  if (bound && !lines.some((l) => new RegExp(`^\\s*${bound[1]}\\s*=(?!=)`).test(l))) return false;
+  return oneTokenEdit(t, lines);
+}
+function sharesNames(t: string, lines: string[]): boolean {
+  if (!inlineCode(t)) return false;
   // Names and numbers count (`age >= 18` beside `age > 18`), with at least one real name among them (`n + 1` is not theirs).
   const mine = new Set(t.match(WORD_OR_NUMBER) ?? []);
   return lines.some((l) => {
     const shared = (l.match(WORD_OR_NUMBER) ?? []).filter((w, i, a) => a.indexOf(w) === i && mine.has(w));
-    return shared.length >= 2 && shared.some((w) => /^[A-Za-z_]\w{2,}$/.test(w));
+    // Fresh batch 2026-11-11: `while` in an unrelated example is the language's word, not one of their names.
+    // Review I4: with only short names of theirs, a keyword of the same line beside two of them still places it.
+    const own = shared.filter((w) => !KEYWORDS.has(w));
+    return shared.length >= 2 && (own.some((w) => /^[A-Za-z_]\w{2,}$/.test(w)) || (own.length >= 2 && own.length < shared.length));
   });
 }
 
@@ -299,7 +363,11 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     if (o.words) {
       // In order, each name taken out once found: "floor division" is one operator, not two.
       let rest = sentence.replace(/`[^`\n]*`/g, " ");
+      const shown = new Set(ops);
       for (const [op, re] of SWAP_WORDS) { if (rest.search(re) >= 0) { ops.add(op); rest = rest.replace(re, " "); } }
+      // Fresh batch 2026-11-11: "`%` asks what is left over after dividing by 2" says what the operator means.
+      // Review I1: only when nothing sets them against each other ("use division instead of `%`" is the swap).
+      if (ops.has("%") && !CONTRAST.test(sentence)) for (const op of ["/", "//"]) if (!shown.has(op)) ops.delete(op);
     }
     return ops;
   };
@@ -311,6 +379,10 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     // learner's code describe that code ("this part multiplies, while that part divides") unless set against each other.
     const listed = LISTING.test(sentence) || ops.size >= 3 || [...ops].every((op) => theirs.has(op));
     if (told(ops) && (CONTRAST.test(sentence) || !listed)) return "swap";
+    const shown = new Set<string>();
+    for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (OP_SPAN.test(m[1].trim())) shown.add(m[1].trim());
+    if (CHANGE_TO.test(sentence) && !USE_FOR.test(sentence) && [...shown].some((op) => !theirs.has(op) && !askedOps.has(op) && kin(op, theirs))) return "swap";
+    if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => ops.has(op) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
     // each in two neighbouring sentences, told apart in so many words.
     const next = sentences[i + 1];
@@ -435,6 +507,13 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     // Final review I1: a ```markdown fence is checked too (style.md asks for quotes in one); its text also counts as prose.
     if (QUOTES.has(tag)) quotedProse += `\n${m[3]}`;
     if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
+    // Fresh batch 2026-11-11: their whole function shown again with `n -= 1` for `n += 1` carries none of the checked
+    // names on the changed line; one token changed in one of their lines is their code fixed.
+    if (!limits.ownCode && CODE_TAGS.has(tag) && m[3].split(/\r?\n/).some((l) => {
+      // Review C2/M1: judged exactly like an inline span (same quote and binding rules), its comment taken off first.
+      const t = l.replace(tag === "python" || tag === "py" ? /\s#.*$/ : tag === "lua" ? /\s--.*$/ : /\s\/\/.*$/, "").trim();
+      return t !== "" && !quoted.has(t) && changedLine(t, [...quoted]);
+    })) issues.add("own-code");
     // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
     if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }
