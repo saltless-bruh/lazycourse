@@ -457,7 +457,7 @@ Rust keeps one build folder per project in the tutor's cache. `/tutor-exam sandb
 | **Feedback** | `/tutor-feedback too-long\|too-vague\|too-much-help\|good` adjusts style and help, per language inside a project until `good`. |
 | **Learned skills** | `/tutor-learn` drafts a skill from your last finished stuck episode; edit and submit to keep it, Esc to discard. |
 | **Architect** | `/tutor-architect [question]` switches to an architecture professor (components, data flow, trade-offs, no code) until `off`. Its replies are checked before you see them: code, or your own line with the change in it, is sent back to be rewritten. |
-| **Second checker** | `/tutor-checker <provider/model>` adds a model that reads each reply after code's checks pass; it can only make replies stricter. |
+| **Second checker** | `/tutor-checker <provider/model>` adds a model that reads each reply after code's checks pass and asks one thing: does it tell you the exact change to make? If so the reply is rewritten. It sees your code, is not asked at the fix step, can only make replies stricter, and adds a wait to every checked reply. |
 
 The box's second line says `outside nvim` when Pi runs without Neovim, and `nvim closed` when the editor exited.
 

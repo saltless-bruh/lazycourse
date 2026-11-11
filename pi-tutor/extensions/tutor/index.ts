@@ -208,7 +208,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; code?: string; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -840,6 +840,9 @@ export default function (pi: ExtensionAPI): void {
       // The failed run's output is what the learner saw too: quoting it is not a leak.
       const trace = episode?.trigger.kind === "run" ? episode.trigger.trace : "";
       run.sourceLines = [...sources, trace].flatMap((t) => t.split(/\r?\n/));
+      // For the second reader: the file in the editor (its window round the cursor), else the project's files; 150 lines at most.
+      const inEditor = snap && realCwd(snap.path).startsWith(root + "/") ? snap.lines.join("\n") : sources.join("\n");
+      run.code = inEditor.split(/\r?\n/).slice(0, 150).join("\n");
       // Spec §7: the current milestone's hidden reference; its lines are the answer until the fix step.
       if (project && profile && tasksMd !== null) {
         const p = profile, key = `checks:${project.path}`, now = currentMilestone(tasksMd, lesson);
@@ -1097,19 +1100,24 @@ export default function (pi: ExtensionAPI): void {
    * reply after code's checks passed, against this turn's rule. Its "no: <reason>" is handled like a failed code
    * check; an error, a timeout or an unclear answer lets the reply through, since it may only make replies stricter.
    */
-  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, names: Set<string>): Promise<string | undefined> {
+  async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, code: string): Promise<string | undefined> {
     const id = profile?.setting("checker");
     if (!id || id === "off") return undefined;
+    // Author 2026-11-11: the reader is asked one thing — does the reply tell the exact change? — so at the fix step,
+    // where the change is what the turn is for, there is nothing for it to read.
+    if (step === "fix") return undefined;
     const slash = id.indexOf("/");
     if (slash <= 0) { checkerSkipped(`${id} is not a provider/model`); return undefined; } // final review M3
     const model = ctx.modelRegistry.find(id.slice(0, slash), id.slice(slash + 1));
     if (!model) { checkerSkipped(`no model ${id} in Pi's model list`); return undefined; }
-    // Final review I3: the facts the rule speaks of, and for `why` only the corrected line is held back.
-    const rule = `${turnInstruction(step)}${step === "why" ? " Do not write the corrected line." : step !== "fix" ? " Do not state the fix, in code or in words." : ""}`;
+    // Measured 2026-11-11 on 27 recorded replies: judging the whole turn rule, the reader sent back 5–7 of 12 good
+    // replies (a summary instead of a question, backticks round a name); asked only whether the reply tells the exact
+    // change, with the learner's code to judge against, 0–1 — and code's own check (fixInWords) covers what it then
+    // lets through. Final review I3: at `why` the kind of change may be named; only the corrected line is held back.
+    const allowed = step === "why" ? "At this point the reply may say what kind of change is needed; only the corrected line or the exact replacement tells the change.\n" : "";
     const spot = episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : episode?.spot ?? "";
-    const facts = [spot ? `The spot: ${spot}` : "", names.size ? `The learner's names: ${[...names].slice(0, 30).join(", ")}` : ""].filter(Boolean).join("\n");
-    // Final review M2: the reply is data inside tags, never instructions to the checker.
-    const ask = `This turn's rule: ${rule}${facts ? `\n${facts}` : ""}\n\nThe reply:\n<reply>\n${text}\n</reply>`;
+    // Final review M2: the code and the reply are data inside tags, never instructions to the checker.
+    const ask = `${allowed}${spot ? `The spot: ${spot}\n` : ""}The learner's code as it is now:\n<code>\n${code}\n</code>\n\nThe reply:\n<reply>\n${text}\n</reply>`;
     const t0 = Date.now();
     // Final review I1: Esc stops the wait, and nothing it said afterwards counts.
     const signal = AbortSignal.any([AbortSignal.timeout(CHECKER_TIMEOUT_MS), ...(ctx.signal ? [ctx.signal] : [])]);
@@ -1149,7 +1157,7 @@ export default function (pi: ExtensionAPI): void {
       if (!profile) { ctx.ui.notify("/tutor-checker needs the tutor's profile, which is not open", "warning"); return; } // final review M4
       const p = profile;
       profileWrite(() => p.setSetting("checker", want));
-      ctx.ui.notify(want === "off" ? "no second reader: code's checks alone hold replies" : `held replies are also read by ${want} against the turn's rule; it can only make them stricter`, "info");
+      ctx.ui.notify(want === "off" ? "no second reader: code's checks alone hold replies" : `held replies are also read by ${want}, which sends back one that tells you the exact change; it can only make them stricter`, "info");
     },
   });
 
@@ -1194,7 +1202,7 @@ export default function (pi: ExtensionAPI): void {
       let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
         const steersBefore = pendingSteers;
-        reason = await askChecker(ctx, cur.step, text, cur.names ?? new Set());
+        reason = await askChecker(ctx, cur.step, text, cur.code ?? "");
         // Phase 8 B4: a message typed during the wait continues this run before any rewrite could start.
         typedMeanwhile = pendingSteers > steersBefore;
         if (reason) issues = ["checker"];

@@ -85,7 +85,7 @@
     "when": [] },
   { "name": "/tutor-checker", "where": "pane", "args": "<provider/model> | off", "group": "record",
     "for": "a second model checks each reply",
-    "help": "Sets a second model that reads each held reply against the turn's rule before you see it. `off` turns it off.",
+    "help": "Sets a second model that reads each reply before you see it and sends it back to be rewritten if it tells you the exact change to make before the fix step. It adds a wait to every checked reply. `off` turns it off.",
     "when": [] },
   { "name": "/reload", "where": "pane", "twin": ":TutorReload", "builtin": true, "group": "record",
     "for": "reload the tutor extension",
