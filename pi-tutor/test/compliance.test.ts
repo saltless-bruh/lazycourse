@@ -711,6 +711,43 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
   });
 });
 
+describe("review of leak-shapes 2026-11-11: the new rules must not hold everyday teaching", () => {
+  const f = (...lines: string[]) => ({ sourceLines: lines, words: true });
+  it("C1: saying what an operator is used for is a lesson; the swap needs an operator of the same family in their code", () => {
+    expect(fixInWords("In Python you use `+` to join two strings.", f("    return first.upper()"))).toBeNull();
+    expect(fixInWords("Remember that you use `==` to compare two values. Which line compares?", f("    if age > 18:"))).toBeNull();
+    expect(fixInWords("Python uses `*` for multiplying. What does your line do?", f("    return a + b"))).toBeNull();
+    expect(fixInWords("We use `%` to test evenness because it gives the remainder.", f("    return n / 2"))).toBeNull();
+    expect(fixInWords("Rust uses `!=` for not equal, just like Python.", f("    if a == b {"))).toBeNull();
+    expect(fixInWords("Change the comparison to `>=` there.", f("    total = a + b"))).toBeNull(); // no comparison of theirs to change
+    expect(fixInWords("Using `>=` will include 18 as an adult.", f("    return age > 18"))).toBe("swap");
+  });
+  it("C2: an unrelated example one name away from their line is an example, inline or fenced", () => {
+    const teach = (src: string[]) => ({ step: "teach" as const, names: new Set<string>(), sourceLines: src });
+    for (const [fence, line] of [["```python\nprint(name)\n```", "print(total)"], ["```python\nfound = False\n```", "done = False"], ["```rust\nlet mut y = 0;\n```", "let mut x = 0;"],
+      ["```go\nfmt.Println(y)\n```", "fmt.Println(x)"], ["```js\nconsole.log(name);\n```", "console.log(total);"], ["```python\nfrom math import sqrt\n```", "from math import floor"]]) expect([fence, checkTurn(fence + "\nWhat does it print?", teach([line]))]).toEqual([fence, []]);
+    expect(fixInWords("You can print a value with `print(name)`.", f("print(total)"))).toBeNull();
+    // M1: a quote of their line with a trailing comment of another language is still a quote
+    expect(checkTurn("```rust\nlet avg = total / count; // here\n```\nWhat is count?", teach(["let avg = total / count; // TODO"]))).toEqual([]);
+    expect(checkTurn("```rust\nlet avg = total * count; // here\n```\nWhat is count?", teach(["let avg = total / count; // TODO"]))).toEqual(["own-code"]);
+  });
+  it("C3: reverse, flip and swap about lists, strings or signs say nothing about their division", () => {
+    expect(fixInWords("`s[::-1]` reverses the string, and subtracting 1 from the length gives the last index.", f("    return s[len(s) - 1]"))).toBeNull();
+    expect(fixInWords("To reverse a list, step through it with a minus one step.", f("    return a - b"))).toBeNull();
+    expect(fixInWords("To flip the sign of a number, put a `-` in front of it.", f("    return a - b"))).toBeNull();
+    expect(fixInWords("A reverse proxy divides traffic between the two servers.", f("    return total / servers"))).toBeNull();
+    expect(fixInWords("`.rev()` reverses an iterator, so counting down needs no subtraction.", f("fn count(n: u32) -> u32 {", "    n + 1"))).toBeNull();
+    expect(fixInWords("What would the output be if the order of the values in the division were reversed?", f("    return len(numbers) / sum(numbers)"))).toBe("swap");
+  });
+  it("I1, I2, I4: fixes the old rules held are still held", () => {
+    expect(fixInWords("Use division instead of `%` here.", f("    return n % 2"))).toBe("swap");
+    expect(fixInWords("You want integer division here, not `%`.", f("    return n % 2"))).toBe("swap");
+    expect(fixInWords("You need the remainder here, not division.", f("    return n / 2"))).toBe("swap");
+    expect(fixInWords("What is the remainder of 7 divided by 2?", f("    return n % 2 == 1"))).toBeNull();
+    expect(fixInWords("Try `while i <= n - 1 do`.", f("while i < n do"))).toBe("edited-line");
+  });
+});
+
 describe("a reply that only repeats the tutor's own placeholder is no reply (live run 2026-11-11)", () => {
   it("checkTurn calls it empty, so it is asked again or replaced, never shown", async () => {
     const { HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } = await import("../extensions/tutor/turns.js");
