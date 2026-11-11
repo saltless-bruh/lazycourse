@@ -678,6 +678,39 @@ describe("re-measure 2026-11-11: a fix inside a question, a value named in passi
   });
 });
 
+describe("fresh batch 2026-11-11: their line with one token changed, short names, and explaining an operator", () => {
+  const f = (...lines: string[]) => ({ sourceLines: lines, words: true });
+  it("their line with exactly one token changed is the fix, however short its names", () => {
+    expect(fixInWords("Try changing it to `x > best`.", f("        if x < best:"))).toBe("edited-line");
+    expect(fixInWords("Try changing it to `n % 2 == 0`.", f("    return n % 2 == 1"))).toBe("edited-line");
+    expect(fixInWords("Change it to `n -= 1` to count down.", f("        n += 1"))).toBe("edited-line");
+    // a value put in for a name is working the line through, not changing it
+    expect(fixInWords("With `n = 5`, `range(1, 5)` generates the numbers 1, 2, 3, 4.", f("    for i in range(1, n):"))).toBeNull();
+    expect(fixInWords("The expression `18 > 18` evaluates to `False`.", f("    return age > 18"))).toBeNull();
+    expect(fixInWords("Think about the `n + 1 queries` problem, or `key = value` pairs.", f("    share = total * people", "    for i in range(1, n):"))).toBeNull();
+  });
+  it("a worked value, an unrelated string, and a bare call name are not their line changed", () => {
+    expect(fixInWords("For `n = 4`, `4 % 2` is `0`, and `0 == 1` evaluates to `False`.", f("    return n % 2 == 1"))).toBeNull();
+    expect(fixInWords("For an unrelated example, `'Hi' + 'There'` gives `'HiThere'`, not `'Hi There'`.", f("    return first + last", "print(full_name('Ada', 'Lovelace'))"))).toBeNull();
+    expect(fixInWords("Remember that Python's `range()` stops before the second argument.", f("    for i in range(1, n):"))).toBeNull();
+  });
+  it("a keyword shared with their line is not one of their names", () => {
+    expect(fixInWords("A classic way this happens is writing `while score > 0: score += 1`.", f("    while n > 0:", "        n += 1"))).toBeNull();
+  });
+  it("explaining the remainder operator by division is its meaning, not a swap", () => {
+    const even = f("    return n % 2 == 1");
+    expect(fixInWords("Think of the `%` operator as asking \"what's left over after dividing by 2?\"", even)).toBeNull();
+    expect(fixInWords("`7 % 2` is `1` (7 divided by 2 leaves remainder 1), while `8 % 2` is `0`.", even)).toBeNull();
+    expect(fixInWords("Use `/` rather than `%` here.", even)).toBe("swap");
+  });
+  it("before the fix step, a code fence holding their line with one token changed is their own code fixed", () => {
+    const o = { step: "teach" as const, names: new Set(["countdown"]), sourceLines: ["def countdown(n):", "    while n > 0:", "        print(n)", "        n += 1", "", "countdown(3)"] };
+    expect(checkTurn("Count down instead:\n```python\ndef countdown(n):\n    while n > 0:\n        print(n)\n        n -= 1   # counts down, not up\ncountdown(3)\n```\nWhat changes?", o)).toContain("own-code");
+    expect(checkTurn("Your loop today:\n```python\n    while n > 0:\n        n += 1\n```\nWhat happens to n each time round?", o)).toEqual([]);
+    expect(checkTurn("```python\n        n -= 1\n```", { ...o, step: "fix" })).toEqual([]);
+  });
+});
+
 describe("a reply that only repeats the tutor's own placeholder is no reply (live run 2026-11-11)", () => {
   it("checkTurn calls it empty, so it is asked again or replaced, never shown", async () => {
     const { HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } = await import("../extensions/tutor/turns.js");

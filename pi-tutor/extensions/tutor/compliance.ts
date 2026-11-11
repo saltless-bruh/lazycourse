@@ -274,19 +274,50 @@ const writtenCode = (line: string) => WRITTEN.test(line.trim());
 const DIAGRAM_TAGS = new Set(["", "text", "txt", "plaintext", "plain", "ascii", "diagram", "mermaid"]);
 const ARROW = /-->|->|=>|[→▶►]/;
 
+const KEYWORDS = new Set(["def", "return", "if", "elif", "else", "for", "while", "in", "and", "or", "not", "is", "let", "const", "var", "function", "fn", "local", "then", "end", "do"]);
+const CODE_TOKEN = /'[^'\n]*'|"[^"\n]*"|\/\/=?|[-+*/%]=|==|!=|<=|>=|[-+*/%<>=]|[A-Za-z_]\w*|\d+(?:\.\d+)?|\S/g;
+/**
+ * Fresh batch 2026-11-11: `x > best` beside their `if x < best:`, `n -= 1` beside `n += 1`, `n % 2 == 0` beside
+ * `== 1` — a stretch of one of their lines with exactly one token changed, however short the names. A value put in
+ * for one of their names (`18 > 18`, `range(1, 5)`) is the line worked through, not changed.
+ */
+function oneTokenEdit(code: string, lines: string[]): boolean {
+  const mine = code.trim().match(CODE_TOKEN) ?? [];
+  if (mine.length < 3) return false;
+  return lines.some((l) => {
+    const theirs = l.match(CODE_TOKEN) ?? [];
+    for (let at = 0; at + mine.length <= theirs.length; at++) {
+      let diff = -1, n = 0;
+      for (let i = 0; i < mine.length && n < 2; i++) if (mine[i] !== theirs[at + i]) { diff = i; n++; }
+      if (n !== 1) continue;
+      // The change is like for like (an operator, a number or a name for another), in a stretch that still carries
+      // one of their names: `0 == 1` is a worked value, `range()` a call named, `'HiThere'` someone else's string.
+      const kind = (t: string) => (/^[A-Za-z_]/.test(t) ? (KEYWORDS.has(t) ? "keyword" : "name") : /^\d/.test(t) ? "number" : /^['"]/.test(t) ? "string" : /^(?:\/\/=?|[-+*/%]=|==|!=|<=|>=|[-+*/%<>=])$/.test(t) ? "op" : "other");
+      const was = kind(theirs[at + diff]);
+      if (was !== kind(mine[diff]) || was === "other" || was === "keyword" || was === "string") continue;
+      if (!mine.some((t, i) => i !== diff && kind(t) === "name")) continue;
+      return true;
+    }
+    return false;
+  });
+}
+
 /** Code that is not a quote of the learner's lines but carries two or more names of one of them: their line, changed. */
 function editedLine(code: string, lines: string[]): boolean {
   const t = code.trim();
-  if (!inlineCode(t) || lines.some((l) => l.includes(t))) return false;
+  if (lines.some((l) => l.includes(t))) return false;
   // Re-measure 2026-11-11: "with `age = 18`, the expression is False" names a value; it is their line edited only
   // when they assign that name themselves.
   const bound = /^([A-Za-z_]\w*)\s*=\s*[\w.'"]+$/.exec(t);
   if (bound && !lines.some((l) => new RegExp(`^\\s*${bound[1]}\\s*=(?!=)`).test(l))) return false;
+  if (oneTokenEdit(t, lines)) return true;
+  if (!inlineCode(t)) return false;
   // Names and numbers count (`age >= 18` beside `age > 18`), with at least one real name among them (`n + 1` is not theirs).
   const mine = new Set(t.match(WORD_OR_NUMBER) ?? []);
   return lines.some((l) => {
     const shared = (l.match(WORD_OR_NUMBER) ?? []).filter((w, i, a) => a.indexOf(w) === i && mine.has(w));
-    return shared.length >= 2 && shared.some((w) => /^[A-Za-z_]\w{2,}$/.test(w));
+    // Fresh batch 2026-11-11: `while` in an unrelated example is the language's word, not one of their names.
+    return shared.length >= 2 && shared.some((w) => /^[A-Za-z_]\w{2,}$/.test(w) && !KEYWORDS.has(w));
   });
 }
 
@@ -309,7 +340,10 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     if (o.words) {
       // In order, each name taken out once found: "floor division" is one operator, not two.
       let rest = sentence.replace(/`[^`\n]*`/g, " ");
+      const shown = new Set(ops);
       for (const [op, re] of SWAP_WORDS) { if (rest.search(re) >= 0) { ops.add(op); rest = rest.replace(re, " "); } }
+      // Fresh batch 2026-11-11: "`%` asks what is left over after dividing by 2" says what the operator means.
+      if (shown.has("%")) for (const op of ["/", "//"]) if (!shown.has(op)) ops.delete(op);
     }
     return ops;
   };
@@ -449,6 +483,9 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     // Final review I1: a ```markdown fence is checked too (style.md asks for quotes in one); its text also counts as prose.
     if (QUOTES.has(tag)) quotedProse += `\n${m[3]}`;
     if (!limits.ownCode && m[3].split(/\r?\n/).some(leaks)) issues.add("own-code");
+    // Fresh batch 2026-11-11: their whole function shown again with `n -= 1` for `n += 1` carries none of the checked
+    // names on the changed line; one token changed in one of their lines is their code fixed.
+    if (!limits.ownCode && CODE_TAGS.has(tag) && m[3].split(/\r?\n/).some((l) => { const t = l.replace(/\s#.*$/, "").trim(); return !quoted.has(t) && oneTokenEdit(t, [...quoted]); })) issues.add("own-code");
     // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
     if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }
