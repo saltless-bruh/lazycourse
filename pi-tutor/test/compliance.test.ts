@@ -618,6 +618,36 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
   });
 });
 
+describe("second review 2026-11-11: code with no learner line to compare, diagrams, and ordinary teaching sentences", () => {
+  const bare = { step: "design" as const, names: new Set<string>(), sourceLines: [] as string[] };
+  const mine = { step: "design" as const, names: new Set(["split_amount"]), sourceLines: ["def split_amount(total, people):", "    share = total * people", "    return share"] };
+  it("I1: the architect writing a statement is role-code even when the learner has no code yet", () => {
+    for (const r of ["Write it as `share = total / people` inside `split_bill`.", "Start with `def split_bill(total, people): return total / people`.",
+      "Like this:\n```\nshare = total / people\nreturn round(share, 2)\n```", "End it with `return total / people`."]) expect([r, checkTurn(r, bare)]).toEqual([r, ["role-code"]]);
+    expect(checkTurn("Line 2 computes `share = total * people`.", mine)).toEqual([]); // a quote of their line
+  });
+  it("I5: a diagram fence under a diagram tag, and a fenced quote of their own lines, are not code", () => {
+    for (const tag of ["txt", "plaintext", "plain", "ascii", "diagram", "mermaid"]) expect([tag, checkTurn("```" + tag + "\n[ Bill ] --> [ Split ]\n```", bare)]).toEqual([tag, []]);
+    expect(checkTurn("Your part today:\n```python\n    share = total * people\n    return share\n```", mine)).toEqual([]);
+    expect(checkTurn("```python\n    share = total / people\n```", mine)).toEqual(["role-code"]);
+    expect(checkTurn("```txt\nshare = total / people\n```", mine)).toEqual(["role-code"]);
+    // M3: a flow line that passes through their expression is a diagram
+    expect(checkTurn("```\nprice, qty --> total --> total * people --> share\n```", mine)).toEqual([]);
+  });
+  it("I4: describing what each part does, listing operators, and naming a pair without setting them apart are teaching", () => {
+    const both = { sourceLines: ["total = price * qty", "share = total / people"], words: true };
+    expect(fixInWords("The bill part multiplies price by quantity, while the split part divides the total among people.", both)).toBeNull();
+    expect(fixInWords("Python's arithmetic operators are `+`, `-`, `*`, `/`. Which one does your line use?", both)).toBeNull();
+    expect(fixInWords("Each of `*` or `/` takes two numbers. What does your line give for 10 and 2?", both)).toBeNull();
+    const one = { sourceLines: ["share = total * people"], words: true };
+    expect(fixInWords("Python's arithmetic operators are `+`, `-`, `*`, `/`. Which one does your line use?", one)).toBeNull();
+    expect(fixInWords("Either `*` or `/` takes two numbers.", one)).toBeNull();
+    // still the fix: the operator their code lacks, set against theirs
+    expect(fixInWords("The split part multiplies, while a share divides.", one)).toBe("swap");
+    expect(fixInWords("It multiplies; it should divide.", both)).toBe("swap");
+  });
+});
+
 describe("a reply that only repeats the tutor's own placeholder is no reply (live run 2026-11-11)", () => {
   it("checkTurn calls it empty, so it is asked again or replaced, never shown", async () => {
     const { HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } = await import("../extensions/tutor/turns.js");

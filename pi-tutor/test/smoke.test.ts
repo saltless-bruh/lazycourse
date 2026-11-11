@@ -1413,6 +1413,11 @@ describe("first run (learner-session fixes Task 3, spec §2)", () => {
     const leak3 = assistant("```python\ndef part(a, b):\n    return a / b\n```" + J);
     await run({ messageType: "user", prompt: "how should I split it?" }, leak3);
     expect(shown(leak3)).toBe(REWRITE_TEXT);
+    // review 2026-11-11 I2: the tutor's own getting-started step stays getting-started while the architect is on
+    const next = assistant("Which language do you want to start with?");
+    const s2 = await run({ messageType: "custom", message: { role: "custom", customType: "tutor_nudge", content: "[tutor] onboarding: ask which language they want", display: false, timestamp: 2 } }, next);
+    expect(s2["tutor_onboard"]).toBeTruthy();
+    expect(shown(next)).toContain("Which language");
   });
   it("an off-topic first message also starts onboarding (Review Focus 3)", async () => {
     const b = await boot();
@@ -2655,7 +2660,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     reg.find = (provider: string, id: string) => (provider === "nvidia" && id === "z-ai/glm-5.3-flash" ? { provider, id } : undefined);
     reg.complete = async (model: unknown, c: { systemPrompt: string; messages: { content: { text: string }[] }[] }, o?: { signal?: AbortSignal }) => {
       calls.push({ model, system: c.systemPrompt, user: c.messages[0].content[0].text, signal: o?.signal });
-      const a = answers.shift() ?? "yes";
+      const a = answers.shift() ?? "ok";
       if (typeof a !== "string") return { role: "assistant", content: [], ...a };
       return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: a }] };
     };
@@ -2698,7 +2703,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     reg.complete = async () => {
       calls.push({ model: null, user: "", system: "" });
       await b.events["input"]({ type: "input", text: "oh wait, I see it", source: "interactive", streamingBehavior: "steer" }, b.ctx);
-      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "no: it names the operator" }] };
+      return { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "leak: it names the operator" }] };
     };
     const good = reply("Swap the star for the other one in `split_amount`.");
     await turn(b.events, b.ctx, "help", good);
@@ -2717,7 +2722,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
   it("on: a 'no' from the checker is handled like a failed code check, with its reason in the rewrite", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);
-    const calls = await checkerOn(b, ["no: it tells the learner which operator to use"]);
+    const calls = await checkerOn(b, ["leak: it tells the learner which operator to use"]);
     expect(b.notes.at(-1)).toMatch(/replies are also read by nvidia\/z-ai\/glm-5\.3-flash/);
     const good = reply("Swap the star for the other one in `split_amount`.");
     await turn(b.events, b.ctx, "help", good);
@@ -2744,7 +2749,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
   it("the reader is not asked at the fix step (the change is allowed there), and at the why step it is told what is allowed (author 2026-11-11)", async () => {
     const b = await boot({ cwd: project(), branch: [ep(4)] });
     await level10(b);
-    const calls = await checkerOn(b, ["yes"]); // were the reader asked at the fix step, this "yes" would be used up there
+    const calls = await checkerOn(b, ["ok"]); // were the reader asked at the fix step, this "yes" would be used up there
     const given = reply("Change the star to a slash in `split_amount`: a share is the total divided by the people.");
     const fix = await turn(b.events, b.ctx, "[tutor] stuck signal: run failed (exit 1): python3 src/main.py", given);
     expect(fix.message?.content).toContain("this turn: Give the fix for only the stuck part");
@@ -2760,7 +2765,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
   it("on: a reply code rejected is never sent to the checker; a 'yes', an error or an unclear answer lets the reply through", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);
-    const calls = await checkerOn(b, ["yes", { stopReason: "error", errorMessage: "rate limited" }, "No problems, yes"]);
+    const calls = await checkerOn(b, ["ok", { stopReason: "error", errorMessage: "rate limited" }, "No problems, yes"]);
     const leak = reply("Change it to `return total / people`.");
     await turn(b.events, b.ctx, "help", leak);
     expect(textOf(leak)).toBe(REWRITE_TEXT);
@@ -2777,7 +2782,23 @@ describe("held replies (spec 2026-10-21 §6)", () => {
       "the second reader did not answer (an unclear answer: No problems, yes); this reply was shown unread",
     ]);
     expect(b.entries.filter((e) => e.type === "tutor_checker_skip")).toHaveLength(2);
-    expect(b.entries.filter((e) => e.type === "tutor_checker").map((e) => (e.data as { verdict: string }).verdict)).toEqual(["yes"]);
+    expect(b.entries.filter((e) => e.type === "tutor_checker").map((e) => (e.data as { verdict: string }).verdict)).toEqual(["ok"]);
+  });
+  it("review 2026-11-11 I3: the reader answers `ok` or `leak: <reason>`; a bare yes or no fits the question both ways, so it is no verdict", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    await checkerOn(b, ["yes", "no: it only explains what the code does"]);
+    for (const text of ["Look at the operator inside `split_amount`.", "Which operator divides?"]) {
+      const r = reply(text);
+      await turn(b.events, b.ctx, "help", r);
+      expect(textOf(r)).toContain(text);
+    }
+    expect(b.entries.filter((e) => e.type === "tutor_checker_skip")).toHaveLength(2);
+    const { readFileSync } = await import("node:fs");
+    const prompt = readFileSync(new URL("../prompts/system/checker.md", import.meta.url), "utf8");
+    expect(prompt).toMatch(/`ok`/);
+    expect(prompt).toMatch(/`leak: /);
+    expect(prompt).not.toMatch(/`yes`|`no[:`]/);
   });
   it("final review I1: Esc during the check stops it, the reply stands, and no rewrite starts", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
@@ -2801,7 +2822,7 @@ describe("held replies (spec 2026-10-21 §6)", () => {
   it("final review M6: a checker 'no' on every try ends in the fallback after the re-ask cap", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);
-    await checkerOn(b, ["no: a", "**no**: b", "no: c"]);
+    await checkerOn(b, ["leak: a", "**leak**: b", "leak: c"]);
     const first = reply("Look at the operator inside `split_amount`.");
     await turn(b.events, b.ctx, "help", first);
     expect(textOf(first)).toBe(REWRITE_TEXT);

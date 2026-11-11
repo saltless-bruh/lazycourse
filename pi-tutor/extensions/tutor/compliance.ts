@@ -250,9 +250,23 @@ const SWAP_WORDS: [string, RegExp][] = [
  * among people", "both `*` and `/`"). Live run 2026-11-10: nemotron set them against each other with no "not" at all
  * ("…or if `/` would better reflect splitting", "dividing yields each share; multiplying inflates the total").
  */
-const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|while|versus|vs\.?|or|would|better|whether|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
+// Review 2026-11-11 I4: "or", "while", "would" and "whether" also join plain descriptions ("each of `*` or `/` takes
+// two numbers", "this part multiplies, while that part divides"); they no longer count as a contrast by themselves.
+const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|versus|vs\.?|better|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
 const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b/i;
-const LISTING = /\b(?:and|both|as well as|along with)\b/i;
+const LISTING = /\b(?:and|both|as well as|along with|each|either)\b/i;
+
+/**
+ * Review 2026-11-11 I1: a statement written out — a definition, a `return` of an expression or call, an assignment
+ * whose right side computes something. With no learner line to compare against (the design comes before the code),
+ * this shape is what tells the architect wrote code; `key = value` and `timeout = 30` compute nothing and stay wording.
+ */
+const COMPUTES = String.raw`(?:[\w)\]]\s*[-+*/%]\s*[\w(]|\w\()`;
+const WRITTEN = new RegExp(String.raw`^(?:def|fn|func|function|class)\s+\w+\s*[(:<{]|^return\b.*${COMPUTES}|^[A-Za-z_][\w.\[\]]*\s*[-+*/%]?=(?!=)\s*.*${COMPUTES}`);
+const writtenCode = (line: string) => WRITTEN.test(line.trim());
+/** Fence tags that hold a drawing, not code (review 2026-11-11 I5: the architect's main tool). */
+const DIAGRAM_TAGS = new Set(["", "text", "txt", "plaintext", "plain", "ascii", "diagram", "mermaid"]);
+const ARROW = /-->|->|=>|[→▶►]/;
 
 /** Code that is not a quote of the learner's lines but carries two or more names of one of them: their line, changed. */
 function editedLine(code: string, lines: string[]): boolean {
@@ -293,7 +307,10 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
   const sentences = prose.split(/(?<=[.!?])\s+|\n+/);
   for (let i = 0; i < sentences.length; i++) {
     const sentence = sentences[i], ops = opsOf(sentence);
-    if (told(ops) && (CONTRAST.test(sentence) || !LISTING.test(sentence))) return "swap";
+    // Review 2026-11-11 I4: three or more operators are a list of them; operators that are all already in the
+    // learner's code describe that code ("this part multiplies, while that part divides") unless set against each other.
+    const listed = LISTING.test(sentence) || ops.size >= 3 || [...ops].every((op) => theirs.has(op));
+    if (told(ops) && (CONTRAST.test(sentence) || !listed)) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
     // each in two neighbouring sentences, told apart in so many words.
     const next = sentences[i + 1];
@@ -435,9 +452,12 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     for (const m of text.matchAll(FENCES)) {
       const tag = m[2].trim().toLowerCase();
       if (tag === "tutor-judgment" || m[3].includes('"judgment"') || QUOTES.has(tag)) continue;
-      if (tag !== "" && tag !== "text") { issues.add("role-code"); break; }
       const body = m[3].split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !DIAGRAM_ONLY.test(l));
-      if (body.some((l) => STATEMENT.test(l) || editedLine(l, seen))) { issues.add("role-code"); break; }
+      // Review 2026-11-11 I5: a fenced quote of their own lines is a quote, whatever the tag.
+      if (body.length && body.every((l) => quoted.has(l))) continue;
+      if (!DIAGRAM_TAGS.has(tag)) { issues.add("role-code"); break; }
+      // M3: a flow line that passes through their expression ("a --> total * people --> share") is a diagram.
+      if (body.some((l) => STATEMENT.test(l) || writtenCode(l) || (!ARROW.test(l) && editedLine(l, seen)))) { issues.add("role-code"); break; }
     }
   }
   const plain = prose.replace(/`[^`\n]*`/g, "x");
@@ -453,6 +473,9 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   // still recognisable against the learner's own lines. Why may name the kind of change, so names count only before it.
   if (o.step !== "fix" && !issues.has("own-code") && !issues.has("role-code") && !issues.has("prose-fix")
     && fixInWords(raw, { sourceLines: o.sourceLines, words: o.step === "teach" || o.step === "hint" || o.step === "design", asked: o.asked })) issues.add("prose-fix");
+  // Review 2026-11-11 I1: a statement in backticks is code from a role that writes none, even with no learner line
+  // to compare it with; a quote of their own line stays a quote.
+  if (limits.noCode && !issues.size && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => writtenCode(m[1]) && !seen.some((l) => l.includes(m[1].trim())))) issues.add("role-code");
   return [...issues];
 }
 

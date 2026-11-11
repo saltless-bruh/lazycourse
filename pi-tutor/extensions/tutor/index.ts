@@ -208,7 +208,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; code?: string; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; asked?: string; code?: string; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -768,7 +768,9 @@ export default function (pi: ExtensionAPI): void {
     // the architect) is no answer to the getting-started questions: it is a tutor turn, held and checked like any
     // other, and getting-started goes on afterwards where it was. A rewrite of such a turn stays one.
     const asidePrompt = promptOf(event);
-    const aside = onboardingActive() && (roleNamed(activeRole).name === "architect" || asidePrompt.startsWith(`${TUTOR_PREFIX} stuck (asked)`) || asidePrompt.startsWith("[ask-error]")
+    // Review 2026-11-11 I2: in the architect role only what the learner typed is the architect's; the tutor's own
+    // getting-started steps ("[tutor] onboarding: …") stay getting-started, or it would stall until the role is left.
+    const aside = onboardingActive() && ((roleNamed(activeRole).name === "architect" && event.messageType === "user") || asidePrompt.startsWith(`${TUTOR_PREFIX} stuck (asked)`) || asidePrompt.startsWith("[ask-error]")
       || (event.messageType === "custom" && event.message.customType === "tutor_rewrite" && run?.aside === true));
     if (onboardingActive() && !aside) {
       // Spec 2026-10-19 §6: the onboarding rules replace the ladder prompt (no judgment block asked for).
@@ -817,7 +819,10 @@ export default function (pi: ExtensionAPI): void {
     const answersRun = prompt.startsWith(`${TUTOR_PREFIX} stuck signal: run failed`) || prompt.startsWith(`${TUTOR_PREFIX} stuck (asked): run failed`) || (isRewrite && rewrite?.step === "fix") || episode?.fixAsked === true;
     if (step === "fix" && episode?.trigger.kind === "run" && !answersRun) step = "why";
     if (isNotes) step = null;
-    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0, aside };
+    // Review 2026-11-11 M1: what the learner asked belongs to the turn that answers it (and that turn's rewrites); a
+    // `<leader>ts` ask carries no question, so an older chat message never exempts its reply.
+    const asked = event.messageType === "user" && !prompt.startsWith("[ask-error]") && !prompt.startsWith(TUTOR_PREFIX) ? prompt : isRewrite ? run?.asked : undefined;
+    run = { prompt, step, judged: false, episodeId: role.ladder ? episode?.id ?? null : undefined, reasks: rewrite?.reasks ?? 0, aside, asked };
     let snap: EditorSnapshot | null = null;
     if (link) {
       try { snap = await link.snapshot(band === "beginner" ? "full" : "window"); } catch { snap = null; }
@@ -1097,7 +1102,7 @@ export default function (pi: ExtensionAPI): void {
   const guarded = () => held() && run!.step !== "fix";
   /**
    * Habits Task 19 (spec 2026-10-26 §9): `/tutor-checker <provider/model>` names a second model that reads a held
-   * reply after code's checks passed, against this turn's rule. Its "no: <reason>" is handled like a failed code
+   * reply after code's checks passed, against this turn's rule. Its "leak: <reason>" is handled like a failed code
    * check; an error, a timeout or an unclear answer lets the reply through, since it may only make replies stricter.
    */
   async function askChecker(ctx: ExtensionContext, step: TurnStep, text: string, code: string): Promise<string | undefined> {
@@ -1127,13 +1132,15 @@ export default function (pi: ExtensionAPI): void {
       if (ctx.signal?.aborted) { checkerSkipped("stopped"); return undefined; }
       if (r.stopReason !== "stop") { checkerSkipped(r.stopReason === "aborted" ? "no answer in three minutes" : r.errorMessage || r.stopReason); return undefined; }
       const answer = r.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n").trim();
-      // Final review M1: only a first line that is "yes" or "no" (or "no: reason") is a verdict.
+      // Final review M1: only a first line that is a verdict counts.
       const first = (answer.split("\n")[0] ?? "").replace(/\*+/g, "").trim();
-      const v = /^\W*(yes|no)\b\W*?(?:[:—–-]\s*(.*)|\W*)$/i.exec(first);
+      // Review 2026-11-11 I3: `ok` / `leak: reason`. A bare yes or no answers "does it tell the change?" one way and
+      // "is it fine?" the other, so neither is a verdict.
+      const v = /^\W*(ok|leak)\b\W*?(?:[:—–-]\s*(.*)|\W*)$/i.exec(first);
       if (!v) { checkerSkipped(`an unclear answer: ${first.slice(0, 60) || "nothing"}`); return undefined; }
       const verdict = v[1].toLowerCase();
       pi.appendEntry("tutor_checker", { verdict, ms: Date.now() - t0 }); // live audits count what it read
-      return verdict === "no" ? (v[2]?.trim() || "it breaks this turn's rule") : undefined;
+      return verdict === "leak" ? (v[2]?.trim() || "it tells the exact change to make") : undefined;
     } catch (e) {
       checkerSkipped(ctx.signal?.aborted ? "stopped" : e instanceof Error ? e.message : String(e));
       return undefined;
@@ -1197,7 +1204,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: lastLearnerText });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: cur.asked });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
       if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
