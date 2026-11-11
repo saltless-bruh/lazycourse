@@ -230,7 +230,7 @@ const WORD_OR_NUMBER = /[A-Za-z_]\w*|\d+(?:\.\d+)?/g;
 /** Operator names for the swap check: stricter than OP_WORDS ("add an `if`" names no operator; in 68 real replies it was the one false alarm). */
 const SWAP_WORDS: [string, RegExp][] = [
   ["//", /\b(?:floor|integer) divi(?:de|sion)\b/gi], ["/", /\bdivi(?:de|des|ded|ding|sion)\b/gi], ["*", /\bmultipl(?:y|ies|ied|ying|ication)\b/gi],
-  ["+", /\baddition\b|\bplus\b/gi], ["-", /\bsubtract(?:s|ed|ing|ion)?\b|\bminus\b/gi], ["%", /\bremainder\b|\bmodulo\b/gi],
+  ["+", /\baddition\b|\bplus\b/gi], ["-", /\bsubtract(?:s|ed|ing|ion)?\b|\bminus\b/gi], ["%", /\bmodulo\b|\bremainder operator\b/gi],
   ["<=", /\bless than or equal\b/gi], [">=", /\bgreater than or equal\b/gi], ["<", /\bless than\b/gi], [">", /\bgreater than\b/gi],
 ];
 
@@ -254,6 +254,12 @@ const SWAP_WORDS: [string, RegExp][] = [
 // two numbers", "this part multiplies, while that part divides"); they no longer count as a contrast by themselves.
 const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|versus|vs\.?|better|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
 const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b/i;
+// Re-measure 2026-11-11: the fix was put inside a question ("what would changing the operator to `>=` do?", "what
+// if we swapped the order of the division?"). An operator their code lacks, named as the one to change to or use,
+// and the two sides of a division or subtraction said to go the other way round, are the change whatever the mood.
+const CHANGE_TO = /\b(?:chang\w*|replac\w*|swap\w*|switch\w*|us(?:e|es|ing)|instead)\b/i;
+const OTHER_WAY = /\b(?:swap\w*|revers\w*|reorder\w*|flip\w*|other way (?:a)?round)\b/i;
+const ORDERED = ["/", "//", "-", "%"];
 const LISTING = /\b(?:and|both|as well as|along with|each|either)\b/i;
 
 /**
@@ -272,6 +278,10 @@ const ARROW = /-->|->|=>|[→▶►]/;
 function editedLine(code: string, lines: string[]): boolean {
   const t = code.trim();
   if (!inlineCode(t) || lines.some((l) => l.includes(t))) return false;
+  // Re-measure 2026-11-11: "with `age = 18`, the expression is False" names a value; it is their line edited only
+  // when they assign that name themselves.
+  const bound = /^([A-Za-z_]\w*)\s*=\s*[\w.'"]+$/.exec(t);
+  if (bound && !lines.some((l) => new RegExp(`^\\s*${bound[1]}\\s*=(?!=)`).test(l))) return false;
   // Names and numbers count (`age >= 18` beside `age > 18`), with at least one real name among them (`n + 1` is not theirs).
   const mine = new Set(t.match(WORD_OR_NUMBER) ?? []);
   return lines.some((l) => {
@@ -311,6 +321,10 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     // learner's code describe that code ("this part multiplies, while that part divides") unless set against each other.
     const listed = LISTING.test(sentence) || ops.size >= 3 || [...ops].every((op) => theirs.has(op));
     if (told(ops) && (CONTRAST.test(sentence) || !listed)) return "swap";
+    const shown = new Set<string>();
+    for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (OP_SPAN.test(m[1].trim())) shown.add(m[1].trim());
+    if (theirs.size && CHANGE_TO.test(sentence) && [...shown].some((op) => !theirs.has(op) && !askedOps.has(op))) return "swap";
+    if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => ops.has(op) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
     // each in two neighbouring sentences, told apart in so many words.
     const next = sentences[i + 1];

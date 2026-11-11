@@ -648,6 +648,36 @@ describe("second review 2026-11-11: code with no learner line to compare, diagra
   });
 });
 
+describe("re-measure 2026-11-11: a fix inside a question, a value named in passing, and the everyday word remainder", () => {
+  const f = (...lines: string[]) => ({ sourceLines: lines, words: true });
+  const adult = f("def is_adult(age):", "    return age > 18"), avg = f("def average(numbers):", "    return len(numbers) / sum(numbers)"), change = f("def change(paid, price):", "    return paid + price");
+  it("an operator their code does not have, named as the thing to change to or use, is the fix even inside a question", () => {
+    expect(fixInWords("What do you think changing the operator to `>=` would do, and would that align with the intended definition of \"adult\"?", adult)).toBe("swap");
+    expect(fixInWords("The `>` operator checks for strictly greater than, so 18 itself returns `False`. Using `>=` will include 18 as an adult.", adult)).toBe("swap");
+    expect(fixInWords("What should the function use instead of `+`, and what would the correct output be?", change)).toBeNull(); // points at theirs, names nothing new
+    expect(fixInWords("Python also has `//`; what does using it on 7 and 2 give?", { ...adult, asked: "what does // do?" })).toBeNull();
+    expect(fixInWords("The `>` here is strict. Which numbers does it let through?", adult)).toBeNull();
+  });
+  it("saying the two sides of a division or subtraction go the other way round is the fix", () => {
+    expect(fixInWords("The average should divide the total by the count, not the other way around.", avg)).toBe("swap");
+    expect(fixInWords("An average is calculated by dividing the total sum by how many numbers there are. What do you think would happen if we swapped the order of the division?", avg)).toBe("swap");
+    expect(fixInWords("How would you reorder the division to calculate the average correctly?", avg)).toBe("swap");
+    expect(fixInWords("Division is not commutative: what does that mean for which value goes on top?", avg)).toBeNull();
+    expect(fixInWords("What would happen if we swapped the order of the addition?", change)).toBeNull(); // their code divides and subtracts nothing
+    expect(fixInWords("How would you reorder the division to calculate the average correctly?", { ...avg, words: false })).toBeNull(); // why may name the kind of change
+  });
+  it("a value named in passing (`age = 18`) is not their line edited", () => {
+    expect(fixInWords("The line `return age > 18` uses a strict greater-than operator. With `age = 18`, the expression `18 > 18` evaluates to `False` because 18 is not greater than itself.", adult)).toBeNull();
+    expect(fixInWords("Set `share = people` there.", f("    share = total * people"))).toBe("edited-line"); // their own assignment, changed
+  });
+  it("remainder as an everyday word names no operator; the modulo operator does", () => {
+    const r = "Calling it with `20` and `15` produces `35`, which is the total of those values rather than a remainder. This means the output reflects addition, not what is left after the price is accounted for.";
+    expect(fixInWords(r, change)).toBeNull();
+    expect(fixInWords("You want the modulo here, not addition.", change)).toBe("swap");
+    expect(fixInWords("Use the remainder operator rather than addition.", change)).toBe("swap");
+  });
+});
+
 describe("a reply that only repeats the tutor's own placeholder is no reply (live run 2026-11-11)", () => {
   it("checkTurn calls it empty, so it is asked again or replaced, never shown", async () => {
     const { HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT } = await import("../extensions/tutor/turns.js");
