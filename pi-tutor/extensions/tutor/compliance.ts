@@ -265,7 +265,7 @@ const SIDES = String.raw`(?:order|operands|sides|values|numbers|two|numerator|de
 const BY = String.raw`(?:(?:divided|subtracted|taken|multiplied) )?(?:by|from|over|into|and|minus|times)`;
 // Re-check 2026-11-18: "the total divided by the count, or the count divided by the total", "…, or vice versa" and
 // "price minus discount or discount minus price" are the same; one idiom said twice ("step by step") is not two sides.
-const CONNECTOR_OP: Record<string, string> = { over: "/", minus: "-", times: "*" };
+const CONNECTOR_OP: Record<string, string> = { over: "/", minus: "-", times: "*", from: "-" };
 const BOTH_WAYS = new RegExp(String.raw`\b(?:the )?(\w+) ${BY} (?:the )?(?!\1\b)(\w+),? or (?:(?:the )?\2 ${BY} (?:the )?\1\b|vice versa\b|the other way (?:a)?round\b)`, "i");
 const OTHER_WAY = new RegExp(String.raw`\bother way (?:a)?round\b|\b(?:swap\w*|revers\w*|reorder\w*|flip\w*|switch\w*) (?:the )?${SIDES}\b|\b${SIDES}\b[^.?!]*\b(?:swapped|reversed|flipped)\b`, "i");
 // Review 2026-11-11 C1: "you use \`+\` to join strings" says what an operator is for; and an operator can only
@@ -393,8 +393,13 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     // sentence sets the two sides both ways round; after "Line 2 divides." a swap is of something else (test values).
     const both = i > 0 && !ops.size ? BOTH_WAYS.exec(sentences[i - 1]) : null;
     const before = both ? opsOf(sentences[i - 1]) : new Set<string>();
-    // Re-check 2026-11-18: "the count over the total, or vice versa": the word between the two sides is the operation.
-    const said = both ? CONNECTOR_OP[/\b(over|minus|times)\b/i.exec(both[0])?.[1].toLowerCase() ?? ""] : undefined;
+    // Re-check 2026-11-18: "the count over the total, or vice versa" (or "the price from the discount or the discount
+    // from the price"): the word between the two sides is the operation.
+    // Review of dc517a6: "from" is everyday direction ("data flows from the caller, or vice versa"); it is subtraction
+    // only with both sides repeated in the other order.
+    const mirrored = !!both && !/\b(?:vice versa|other way)\b/i.test(both[0]);
+    const word = both ? /\b(over|minus|times|from)\b/i.exec(both[0])?.[1].toLowerCase() : undefined;
+    const said = word && (word !== "from" || mirrored) ? CONNECTOR_OP[word] : undefined;
     if (said) before.add(said);
     if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => (ops.has(op) || before.has(op)) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
