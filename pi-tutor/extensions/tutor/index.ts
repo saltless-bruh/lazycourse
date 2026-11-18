@@ -309,6 +309,9 @@ export default function (pi: ExtensionAPI): void {
   let lastNow = "";
   /** Author 2026-11-09: one re-ask per learner turn for a reply with nothing visible; the re-ask is due at agent_end. */
   let emptyAsked = false, pendingEmpty = false;
+  // Live check 2026-11-18: Pi retries a timed-out reply itself (agent.continue, no before_agent_start); the lost line is
+  // said once per message of the learner, not once per retry.
+  let lostShown = false;
   /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
   let onboardWaits = false;
   /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
@@ -629,7 +632,7 @@ export default function (pi: ExtensionAPI): void {
     // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
     // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
     rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
-    emptyAsked = false; pendingEmpty = false; onboardWaits = false; waitNote = null;
+    emptyAsked = false; pendingEmpty = false; lostShown = false; onboardWaits = false; waitNote = null;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
@@ -772,7 +775,7 @@ export default function (pi: ExtensionAPI): void {
   }
   pi.on("before_agent_start", async (event) => {
     // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
-    if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) emptyAsked = false;
+    if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) { emptyAsked = false; lostShown = false; }
     // Third review M1: a new message from the learner is the next turn: no queued rewrite or onboarding wait survives it.
     if (event.messageType === "user") { rewriteToken++; onboardWaits = false; }
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
@@ -1105,7 +1108,7 @@ export default function (pi: ExtensionAPI): void {
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // Phase 8 review I3: a held reply that got the fallback marked the run rejected; the reply to this message is new.
     run = { ...run, prompt: text, judged: false, rejected: false, reasks: 0 };
-    emptyAsked = false; pendingEmpty = false; onboardWaits = false; // review I3: the learner moved on; their message gets the next reply
+    emptyAsked = false; pendingEmpty = false; lostShown = false; onboardWaits = false; // review I3: the learner moved on; their message gets the next reply
     learnerMessage(text);
   });
 
@@ -1285,10 +1288,13 @@ export default function (pi: ExtensionAPI): void {
         }
       }
       pi.appendEntry("tutor_check", { issues: ["empty"], step: cur?.step ?? null, rejected: shown.slice(0, 2000) });
-      const i = content.findIndex((c) => c.type === "text");
-      content = i < 0 ? [...content, { type: "text" as const, text: line }]
-        : content.map((c, k) => (k === i && c.type === "text" ? { ...c, text: `${line}\n${c.text}` } : c));
-      changed = true;
+      if (reask || !lostShown) {
+        if (!reask) lostShown = true;
+        const i = content.findIndex((c) => c.type === "text");
+        content = i < 0 ? [...content, { type: "text" as const, text: line }]
+          : content.map((c, k) => (k === i && c.type === "text" ? { ...c, text: `${line}\n${c.text}` } : c));
+        changed = true;
+      }
     }
     return changed ? { message: { ...m, content } } : undefined;
   });

@@ -3156,6 +3156,23 @@ describe("empty replies", () => {
     expect(rewrites(b)).toHaveLength(0);
   });
 
+  it("live check 2026-11-18: Pi's own retries of a timed-out reply show the lost line once, a new message gets it again", async () => {
+    const b = await boot();
+    const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] });
+    const first = timedOut();
+    await turn(b.events, b.ctx, "what is normal mode?", first);
+    expect(visible(first)).toMatch(/lost my answer/i);
+    // Pi retries with agent.continue(): no before_agent_start, only another message_end.
+    for (let n = 0; n < 4; n++) {
+      const retry = timedOut();
+      const e = (await b.events["message_end"]({ type: "message_end", message: retry }, b.ctx)) as { message?: object } | undefined;
+      expect(visible(e?.message ?? retry)).toBe("");
+    }
+    const later = timedOut();
+    await turn(b.events, b.ctx, "and insert mode?", later);
+    expect(visible(later)).toMatch(/lost my answer/i);
+  });
+
   it("empty again: an honest line, and no third try", async () => {
     const b = await boot();
     await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());
