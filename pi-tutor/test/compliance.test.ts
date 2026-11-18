@@ -685,6 +685,9 @@ describe("re-measure 2026-11-11: a fix inside a question, a value named in passi
     expect(fixInWords("Is it the count over the total, or vice versa? Try swapping the order.", avg2)).toBe("swap");
     expect(fixInWords("Is it price minus discount or discount minus price? Try the other way round.", off)).toBe("swap");
     expect(fixInWords("Divide it step by step, or step by step with prints. Try swapping the two numbers.", avg2)).toBeNull();
+    // Re-check 2026-11-18: "from" between the two sides, both ways round, is subtraction.
+    expect(fixInWords("Is it the price from the discount or the discount from the price? Swap the order and see.", off)).toBe("swap");
+    expect(fixInWords("Is it the count from the total or the total from the count? Swap the order.", avg2)).toBeNull(); // their code only divides
     expect(fixInWords("Ask whether you're dividing the total by the count. Try swapping the order.", { ...avg, words: false })).toBeNull();
   });
   it("a value named in passing (`age = 18`) is not their line edited", () => {
