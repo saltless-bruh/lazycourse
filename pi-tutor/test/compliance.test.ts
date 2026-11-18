@@ -666,6 +666,15 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(fixInWords("Line 2's `+` and line 3's `-` have the opposite effect on the total.", sum)).toBeNull();
     expect(fixInWords("Your `+` on line 2 has the opposite effect of the `-` on line 3, so the total goes up then down.", sum)).toBeNull();
     expect(fixInWords("Your comparison should, as a result, include equality.", adult)).toBe("swap");
+    // re-check of leak-minors: ≥ between two operands is maths; ≥ after "use", "to", "be" is the operator named
+    expect(fixInWords("Make sure your loop handles i ≥ start and stops at the end.", { sourceLines: ["    while i < end:"], words: true })).toBeNull();
+    expect(fixInWords("The task says n ≥ len(xs), so you don't need to handle an empty list.", loop)).toBeNull();
+    expect(fixInWords("Switch to ≥ instead.", adult)).toBe("swap");
+    expect(fixInWords("Your check should use ≥ instead.", adult)).toBe("swap");
+    expect(fixInWords("Use ≥ here.", adult)).toBe("swap");
+    expect(fixInWords("The comparison should be ≥ 18.", adult)).toBe("swap");
+    // "the problem is" is the tutor talking about the bug, not quoting the task
+    expect(fixInWords("The problem is that the age should be at least 18, not above it.", adult)).toBe("swap");
   });
   it("review of leak-words: \"does the opposite\" in one sentence; an opposite sign or case is no operator contrast", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };

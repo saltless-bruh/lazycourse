@@ -265,7 +265,8 @@ const SET_APART = new RegExp(String.raw`\b(?:not|instead|rather than|whereas|ver
 // Live check 2026-11-18: "the operator should include equality" beside their `age > 18` names `>=` with no symbol.
 // Review of leak-words: said of their comparison only ("`range()` is not inclusive" and "accept equal-length arrays" are not).
 // Review of leak-minors I3: ≥ named as the operator ("should be ≥"), not written between two operands ("n ≥ 1").
-const SIGN = String.raw`[≥≤](?!\s*(?:\d|[A-Za-z_]\w*\s*(?:[,.;:)]|$)))`;
+// Re-check: decided by the word before it — "use ≥", "to ≥", "be ≥" name it; "i ≥ start", "n ≥ len(xs)" are operands.
+const SIGN = String.raw`(?<=(?:^|\b(?:be|is|are|use|uses|using|to|with|into|an?|the|of|not)|[:\x60"'(])\s*)[≥≤]`;
 const INCLUSIVE = new RegExp(String.raw`\binclud\w*\s+(?:\w+\s+){0,3}equal\w*|\b(?:allow\w*|let(?:s|ting)?)\s+(?:for\s+)?equality\b|\bor[- ]equal\b|\binclusive\b|\bnon-?strict\b|${SIGN}`, "i");
 // Re-check of leak-words: the comparison itself has to be what is made inclusive ("check whether `range()` is
 // inclusive" and "the task's condition says…" are hints), or an operator is named in the sentence.
@@ -278,7 +279,8 @@ const BOUND_DOWN = new RegExp(String.raw`\b(?:at most|no (?:more|greater) than) 
 /** A boundary told inclusive ("at least 18") that one of their strict comparisons against that same number leaves out. */
 // Review of leak-minors: the task's own words ("the task says … at least 18") and counts ("at most 10 times",
 // "0 or more numbers") are no boundary told.
-const QUOTES_TASK = /\b(?:task|spec|specification|instructions?|exercise|problem|requirements?|description)\b/i;
+// Re-check N3: "the problem is…" is the tutor naming the bug, not quoting the task.
+const QUOTES_TASK = /\b(?:task|spec|specification|instructions?|exercise|requirements?|description)\b/i;
 const COUNTED = /^\s+(?:more\s+|fewer\s+|other\s+)?(?:times?|items?|tries|attempts?|numbers?|inputs?|elements?|results?|values?|entries|entry|characters?|chars?|rows?|steps?|lines?|words?|digits?|iterations?|loops?|calls?|arguments?|args?|people|users?|records?|cases?|tests?)\b/i;
 function boundTold(sentence: string, lines: string[]): ">" | "<" | null {
   if (QUOTES_TASK.test(sentence)) return null;
