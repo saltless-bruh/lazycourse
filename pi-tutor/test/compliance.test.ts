@@ -593,6 +593,26 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(fixInWords("add_tip handles the multiplication by the percent. The division by 100 turns the percent into a fraction.", calc)).toBeNull();
     expect(fixInWords("The part multiplies its two inputs. Its name, however, promises a share: what should happen to a share as more people join?", calc)).toBeNull();
   });
+  it("live check 2026-11-18: \"does the opposite\" sets two operators apart over neighbouring sentences", () => {
+    const best = { sourceLines: ["    for x in xs:", "        if x < best:", "            best = x"], words: true };
+    expect(fixInWords("A `>` gate lets newer, larger values replace the current leader, so the running `best` climbs toward the maximum. A `<` gate does the opposite, keeping the smallest.", best)).toBe("swap");
+    expect(fixInWords("`>` keeps larger values. `<`, on the opposite side, keeps smaller ones.", best)).toBe("swap");
+    // one operator, or an opposite that is not about operators, stays free
+    expect(fixInWords("Your `<` gate decides who stays. What does the loop do with the opposite case?", best)).toBeNull();
+  });
+  it("live check 2026-11-18: a strict comparison told to include equality is the fix in words", () => {
+    const adult = { sourceLines: ["def is_adult(age):", "    return age > 18"], words: true };
+    expect(fixInWords("If the intent is \"18 and older,\" the operator should include equality.", adult)).toBe("swap");
+    expect(fixInWords("The comparison needs to be inclusive so 18 counts.", adult)).toBe("swap");
+    expect(fixInWords("Change the check so that it also allows equality.", adult)).toBe("swap");
+    // asking, and a comparison already inclusive, stay free
+    expect(fixInWords("Does your comparison include 18 itself? Try `is_adult(18)` by hand.", adult)).toBeNull();
+    expect(fixInWords("Does the comparison include equality?", adult)).toBeNull();
+    const already = { sourceLines: ["def is_adult(age):", "    return age >= 18"], words: true };
+    expect(fixInWords("The operator should include equality, and it does: 18 counts.", already)).toBeNull();
+    // only when wording counts (teach, hint, design)
+    expect(fixInWords("The operator should include equality.", { ...adult, words: false })).toBeNull();
+  });
   it("operators the learner asked about themselves are their topic, not a leak (side note 2026-11-10)", () => {
     const answer = "`//` drops the fractional part, but `/` keeps it.";
     expect(fixInWords(answer, t)).toBe("swap");

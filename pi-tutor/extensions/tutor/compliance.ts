@@ -254,7 +254,11 @@ const SWAP_WORDS: [string, RegExp][] = [
 // Review 2026-11-11 I4: "or", "while", "would" and "whether" also join plain descriptions ("each of `*` or `/` takes
 // two numbers", "this part multiplies, while that part divides"); they no longer count as a contrast by themselves.
 const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|versus|vs\.?|better|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
-const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b/i;
+// Live check 2026-11-18: "A `>` gate … climbs toward the maximum. A `<` gate does the opposite."
+const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|opposite|typical(?:ly)?|should|correct|appropriate)\b/i;
+// Live check 2026-11-18: "the operator should include equality" beside their `age > 18` names `>=` with no symbol.
+const INCLUSIVE = /\b(?:includ\w*|allow\w*|accept\w*|count\w*)\s+(?:the\s+)?equal(?:ity|s)?\b|\bor equal\b|\binclusive\b/i;
+const TELLS = /\b(?:should|needs?|need to|must|has to|have to|chang\w*|make|use|switch\w*|replac\w*)\b/i;
 // Re-measure 2026-11-11: the fix was put inside a question ("what would changing the operator to `>=` do?", "what
 // if we swapped the order of the division?"). An operator their code lacks, named as the one to change to or use,
 // and the two sides of a division or subtraction said to go the other way round, are the change whatever the mood.
@@ -401,6 +405,8 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     const word = both ? /\b(over|minus|times|from)\b/i.exec(both[0])?.[1].toLowerCase() : undefined;
     const said = word && (word !== "from" || mirrored) ? CONNECTOR_OP[word] : undefined;
     if (said) before.add(said);
+    // A strict comparison of theirs (`>` with no `>=`) told, in so many words, to take in equality.
+    if (o.words && INCLUSIVE.test(sentence) && TELLS.test(sentence) && [["<", "<="], [">", ">="]].some(([lt, le]) => theirs.has(lt) && !theirs.has(le) && !askedOps.has(lt))) return "swap";
     if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => (ops.has(op) || before.has(op)) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
     // each in two neighbouring sentences, told apart in so many words.
