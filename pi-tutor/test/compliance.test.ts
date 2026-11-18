@@ -596,7 +596,7 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
   it("live check 2026-11-18: \"does the opposite\" sets two operators apart over neighbouring sentences", () => {
     const best = { sourceLines: ["    for x in xs:", "        if x < best:", "            best = x"], words: true };
     expect(fixInWords("A `>` gate lets newer, larger values replace the current leader, so the running `best` climbs toward the maximum. A `<` gate does the opposite, keeping the smallest.", best)).toBe("swap");
-    expect(fixInWords("`>` keeps larger values. `<`, on the opposite side, keeps smaller ones.", best)).toBe("swap");
+    expect(fixInWords("`>` keeps larger values. A `<` gate is the opposite.", best)).toBe("swap");
     // one operator, or an opposite that is not about operators, stays free
     expect(fixInWords("Your `<` gate decides who stays. What does the loop do with the opposite case?", best)).toBeNull();
   });
@@ -612,6 +612,29 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(fixInWords("The operator should include equality, and it does: 18 counts.", already)).toBeNull();
     // only when wording counts (teach, hint, design)
     expect(fixInWords("The operator should include equality.", { ...adult, words: false })).toBeNull();
+    expect(fixInWords("The comparison should be greater-than-or-equal.", adult)).toBe("swap");
+    expect(fixInWords("Your check should also include values equal to 18.", adult)).toBe("swap");
+  });
+  it("review of leak-words: equality told only about their comparison, and never their own question", () => {
+    const loop = { sourceLines: ["    while i < n:", "        i += 1"], words: true };
+    expect(fixInWords("`range(1, n)` is not inclusive of `n`, so you need to think about where it stops.", loop)).toBeNull();
+    expect(fixInWords("Python slices make the start inclusive and the end exclusive.", loop)).toBeNull();
+    expect(fixInWords("Your loop stops before n. Does the task say the sum should be inclusive of n?", loop)).toBeNull();
+    expect(fixInWords("Your function should accept equal values for both arguments.", loop)).toBeNull();
+    expect(fixInWords("The loop should count equal steps each time; trace it with n = 3.", loop)).toBeNull();
+    expect(fixInWords("Your signature should accept equal-length arrays.", { sourceLines: ["function first(xs: Array<number>) {"], words: true })).toBeNull();
+    const mixed = { sourceLines: ["    if x > hi:", "    if i <= 3:"], words: true };
+    expect(fixInWords("Your `<=` on line 5 should include 3 itself: less than or equal.", mixed)).toBeNull();
+    const adult = { sourceLines: ["    return age > 18"], words: true };
+    expect(fixInWords("Use `>=` when you want greater than or equal.", { ...adult, asked: "what does >= mean?" })).toBeNull();
+  });
+  it("review of leak-words: \"does the opposite\" in one sentence; an opposite sign or case is no operator contrast", () => {
+    const best = { sourceLines: ["        if x < best:"], words: true };
+    expect(fixInWords("A `>` gate climbs toward the maximum, and a `<` gate does the opposite.", best)).toBe("swap");
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate does the reverse.", best)).toBe("swap");
+    const change = { sourceLines: ["    return paid - price", "    if paid < price:"], words: true };
+    expect(fixInWords("Your `-` gives the change. If the customer paid less than the price, the result has the opposite sign.", change)).toBeNull();
+    expect(fixInWords("Line 2 uses `-` to find the change. Then line 3 uses `<` to check the opposite case, when they paid too little.", change)).toBeNull();
   });
   it("operators the learner asked about themselves are their topic, not a leak (side note 2026-11-10)", () => {
     const answer = "`//` drops the fractional part, but `/` keeps it.";
