@@ -533,6 +533,23 @@ export default function (pi: ExtensionAPI): void {
     };
     poll();
   }
+  /**
+   * Live check 2026-11-17: where a code spot's fallback may say the learner asked from. The line is named only when it
+   * holds code in the saved file inside the project root. The latest ask's line wins (review 2026-11-18 M1); a churn
+   * episode without one is a region with no one line.
+   */
+  function askedFrom(ep: Episode | null): { line: number | null; error: boolean } | undefined {
+    const t = ep?.trigger;
+    if (!t || (t.kind !== "idle" && t.kind !== "error" && t.kind !== "churn")) return undefined;
+    const at = ep?.askLine ?? (t.kind === "churn" ? null : { line: t.line, error: t.kind === "error" });
+    if (!at) return { line: null, error: false };
+    let text: string | undefined;
+    try {
+      const root = realCwd(project?.path ?? session?.cwd ?? process.cwd()), real = realpathSync(t.path);
+      if (real.startsWith(root + "/")) text = readFileSync(real, "utf8").split(/\r?\n/)[at.line - 1];
+    } catch { text = undefined; }
+    return { line: text?.trim() ? at.line : null, error: at.error };
+  }
   /** Asked readers of an error (path|message): one reads-errors event each, however often the learner presses (M5). */
   const askedErrors = new Set<string>();
   function runAsk(p: Extract<TutorPayload, { kind: "stuck" }>) {
@@ -575,6 +592,8 @@ export default function (pi: ExtensionAPI): void {
     // Author 2026-11-09: this ask, not the failed runs before it, moves help (one step, and only after new effort).
     // Live check 2026-11-10: the architect answers about the spot in its own way and never moves help (spec 2026-10-13 §3).
     if (roleNamed(activeRole).ladder) episode = askHelp(episode!, sourceHash(root));
+    // Review 2026-11-18 M1: a later ask in the same file keeps the episode; its own line is what the fallback names.
+    if (episode!.trigger.kind !== "run") episode = { ...episode!, askLine: { line: p.line, error: !!p.error } };
     if (episode.spot) remember(episode);
     pi.appendEntry("tutor_episode", episode);
     ui?.notify(`stuck: ${rel}:${p.line}`, "info");
@@ -1207,7 +1226,8 @@ export default function (pi: ExtensionAPI): void {
       let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: cur.asked });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
-      if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
+      // Live check 2026-11-17: a reply with only the judgment block is caught as empty below; the reader would only cost time.
+      if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall") && hideJudgment(text).trim()) {
         const steersBefore = pendingSteers;
         reason = await askChecker(ctx, cur.step, text, cur.code ?? "");
         // Phase 8 B4: a message typed during the wait continues this run before any rewrite could start.
@@ -1229,7 +1249,8 @@ export default function (pi: ExtensionAPI): void {
           pendingRewrite = issues;
         } else if (final) {
           const inRecipe = workflow && roleNamed(activeRole).ladder ? { n: workflow.step, ...STEP_SPECS[workflow.step - 1] } : undefined;
-          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined, inRecipe);
+          const t = episode?.trigger;
+          replacement = fallbackReply(cur.step, t?.kind === "run" ? spotLine(t.trace) : undefined, inRecipe, askedFrom(episode));
           rewrite = null;
         }
         // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.

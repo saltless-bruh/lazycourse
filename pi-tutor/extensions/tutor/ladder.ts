@@ -34,6 +34,8 @@ export interface Episode {
   climbs?: number;
   /** The tries and source hash at the learner's last ask: the next ask climbs only if either moved. */
   askedAt?: { attempts: number; hash: string };
+  /** Review 2026-11-18 M1: the line of the learner's latest <leader>ts and whether an error was on it (the trigger keeps the first). */
+  askLine?: { line: number; error: boolean };
   /** Pro: the learner asked for the fix (/tutor-fix). */
   fixAsked?: boolean;
   /** Well-known concepts reach why/ask/fix one attempt later. */

@@ -1556,6 +1556,14 @@ describe("<leader>ts asks for stuck help (ask-first)", () => {
     expect(episodes(b.entries).at(-1)).toMatchObject({ trigger: { kind: "idle", line: 1 } });
     expect(b.notes.some((n) => /^stuck: a\.py:1$/.test(n))).toBe(true);
   }, 20000);
+  it("review 2026-11-18 M1: a second ask in the same file keeps the episode and records the line it came from", async () => {
+    const b = await linked();
+    await stuck(join(h!.root, "a.py"), 1);
+    await until(() => asked(b).length === 1);
+    await stuck(join(h!.root, "a.py"), 2, "boom");
+    await until(() => (episodes(b.entries).at(-1) as { askLine?: { line: number } } | undefined)?.askLine?.line === 2);
+    expect(episodes(b.entries).at(-1)).toMatchObject({ askLine: { line: 2, error: true } });
+  }, 20000);
   it("while Pi is mid-reply the request waits and is answered after (Review Focus 1)", async () => {
     const b = await linked(true);
     await stuck(join(h!.root, "a.py"), 1);

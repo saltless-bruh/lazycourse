@@ -261,6 +261,12 @@ const SET_APART = /\b(?:not|instead|rather than|whereas|versus|by contrast|in co
 const CHANGE_TO = /\b(?:chang\w*|replac\w*|swap\w*|switch\w*|us(?:e|es|ing)|instead)\b/i;
 // Review 2026-11-11 C3: the order word has to be about the operation's two sides ("reverses the string" is not).
 const SIDES = String.raw`(?:order|operands|sides|values|numbers|two|numerator|denominator|division|subtraction)`;
+/** "the total by the count or the count by the total": the two sides of one operation named in both orders. */
+const BY = String.raw`(?:(?:divided|subtracted|taken|multiplied) )?(?:by|from|over|into|and|minus|times)`;
+// Re-check 2026-11-18: "the total divided by the count, or the count divided by the total", "…, or vice versa" and
+// "price minus discount or discount minus price" are the same; one idiom said twice ("step by step") is not two sides.
+const CONNECTOR_OP: Record<string, string> = { over: "/", minus: "-", times: "*" };
+const BOTH_WAYS = new RegExp(String.raw`\b(?:the )?(\w+) ${BY} (?:the )?(?!\1\b)(\w+),? or (?:(?:the )?\2 ${BY} (?:the )?\1\b|vice versa\b|the other way (?:a)?round\b)`, "i");
 const OTHER_WAY = new RegExp(String.raw`\bother way (?:a)?round\b|\b(?:swap\w*|revers\w*|reorder\w*|flip\w*|switch\w*) (?:the )?${SIDES}\b|\b${SIDES}\b[^.?!]*\b(?:swapped|reversed|flipped)\b`, "i");
 // Review 2026-11-11 C1: "you use \`+\` to join strings" says what an operator is for; and an operator can only
 // replace one of theirs of the same kind (a comparison for a comparison, arithmetic for arithmetic).
@@ -382,7 +388,15 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     const shown = new Set<string>();
     for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (OP_SPAN.test(m[1].trim())) shown.add(m[1].trim());
     if (CHANGE_TO.test(sentence) && !USE_FOR.test(sentence) && [...shown].some((op) => !theirs.has(op) && !askedOps.has(op) && kin(op, theirs))) return "swap";
-    if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => ops.has(op) && theirs.has(op) && !askedOps.has(op))) return "swap";
+    // Live check 2026-11-17: "…dividing the total by the count or the count by the total. Try swapping the order…":
+    // the operation is named in the sentence before the one that says to swap. Review 2026-11-18 I1: only when that
+    // sentence sets the two sides both ways round; after "Line 2 divides." a swap is of something else (test values).
+    const both = i > 0 && !ops.size ? BOTH_WAYS.exec(sentences[i - 1]) : null;
+    const before = both ? opsOf(sentences[i - 1]) : new Set<string>();
+    // Re-check 2026-11-18: "the count over the total, or vice versa": the word between the two sides is the operation.
+    const said = both ? CONNECTOR_OP[/\b(over|minus|times)\b/i.exec(both[0])?.[1].toLowerCase() ?? ""] : undefined;
+    if (said) before.add(said);
+    if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => (ops.has(op) || before.has(op)) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
     // each in two neighbouring sentences, told apart in so many words.
     const next = sentences[i + 1];

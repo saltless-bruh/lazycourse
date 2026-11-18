@@ -36,8 +36,19 @@ export function turnInstruction(step: TurnStep): string {
   return INSTRUCTION[step];
 }
 
+// Live check 2026-11-17, author: the line a stuck ask comes from is where the cursor was, not the mistake, so the
+// fallback never says the problem is there. It asks for a hand trace (Xie, Nelson & Ko 2018: novices trace too
+// little, and with inputs that hide the bug); the error line is named as reported, because the editor reported it.
+const TRACE = "Pick one input where the answer is wrong, work out by hand what each line gives for it, and tell me the first line whose result surprises you.";
+function traceFrom(asked: { line: number | null; error: boolean }): string {
+  if (asked.line === null) return TRACE;
+  return asked.error
+    ? `The error is reported on line ${asked.line}. Read what it says, work out by hand what each line up to it gives, and tell me the first value that is not what you expected.`
+    : `You asked from line ${asked.line}. ${TRACE}`;
+}
+
 /** Shown when every re-ask of a reply failed its check: written by code, so it can never hold code or the fix. */
-export function fallbackReply(step: TurnStep, spot?: string, recipe?: { n: number; name: string; explain: string; learnerWrites: string }): string {
+export function fallbackReply(step: TurnStep, spot?: string, recipe?: { n: number; name: string; explain: string; learnerWrites: string }, asked?: { line: number | null; error: boolean }): string {
   // Phase 1 minor M6: shown as plain text. `*`, `[`, `]` and a word-edge `_` would render as Markdown; an
   // underscore inside a name (split_amount) never does, so it stays as the learner saw it.
   const plain = (t: string) => t.replace(/`/g, "").replace(/([*[\]])/g, "\\$1").replace(/(^|[^A-Za-z0-9])_|_(?=[^A-Za-z0-9]|$)/g, (m) => m.replace("_", "\\_"));
@@ -46,8 +57,10 @@ export function fallbackReply(step: TurnStep, spot?: string, recipe?: { n: numbe
     // Re-run finding: inside the recipe the step's own sentence (written by code) is the safe answer (spec §6).
     case "teach": return recipe
       ? plain(`Step ${recipe.n}, ${recipe.name}: ${recipe.explain}. Your turn: ${recipe.learnerWrites}.`)
+      : asked ? traceFrom(asked)
       : "Tell me which step you are on and what you tried so far, and I will show the idea on a small example.";
-    case "hint": return `Look again at the spot the last run points to${at}: what does that part do with its values? Change it, then run again.`;
+    case "hint": return !spot && asked ? traceFrom(asked)
+      : `Look again at the spot the last run points to${at}: what does that part do with its values? Change it, then run again.`;
     case "ask": return "Before I explain: what were you thinking when you wrote that part? Did you reason it out, or was it a guess?";
     case "design": return "Let's look at it as a design: which part takes what in, and what should it hand on? Tell me the part you are unsure about and what you expect it to give back, and we will follow the data from there.";
     case "why":
