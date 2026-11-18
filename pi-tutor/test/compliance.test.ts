@@ -653,6 +653,19 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(fixInWords("The list should have at least 3 items before you call it.", adult)).toBeNull();
     expect(fixInWords("Use the condition you wrote and test whether the output includes the equal case.", { sourceLines: ["    while i < n:"], words: true })).toBeNull();
     expect(fixInWords("Is someone who is exactly 18 at least 18? Trace `is_adult(18)` by hand.", adult)).toBeNull();
+    // review of leak-minors: the task's own words, counts, maths notation, and their own two operators stay free
+    expect(fixInWords("The task says a user must be at least 18. What does your function return for exactly 18?", adult)).toBeNull();
+    expect(fixInWords("The loop should run at most 10 times.", { sourceLines: ["    i = 0", "    while i < 10:"], words: true })).toBeNull();
+    expect(fixInWords("The user should get no more than 3 tries.", { sourceLines: ["    while attempts < 3:"], words: true })).toBeNull();
+    expect(fixInWords("The input can hold 0 or more numbers, so make sure your code handles an empty list.", { sourceLines: ["    if len(nums) > 0:"], words: true })).toBeNull();
+    expect(fixInWords("Each test should check that the function returns at least 1 result.", { sourceLines: ["    return n > 1"], words: true })).toBeNull();
+    const loop = { sourceLines: ["    while i < n:"], words: true };
+    expect(fixInWords("The task says n ≥ 1, so you don't need to handle an empty list.", loop)).toBeNull();
+    expect(fixInWords("Make sure your loop works for any n ≥ 0.", loop)).toBeNull();
+    const sum = { sourceLines: ["    total = total + x", "    total = total - y"], words: true };
+    expect(fixInWords("Line 2's `+` and line 3's `-` have the opposite effect on the total.", sum)).toBeNull();
+    expect(fixInWords("Your `+` on line 2 has the opposite effect of the `-` on line 3, so the total goes up then down.", sum)).toBeNull();
+    expect(fixInWords("Your comparison should, as a result, include equality.", adult)).toBe("swap");
   });
   it("review of leak-words: \"does the opposite\" in one sentence; an opposite sign or case is no operator contrast", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };
