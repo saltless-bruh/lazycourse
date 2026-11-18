@@ -1207,7 +1207,8 @@ export default function (pi: ExtensionAPI): void {
       let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: cur.asked });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
-      if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall")) {
+      // Live check 2026-11-17: a reply with only the judgment block is caught as empty below; the reader would only cost time.
+      if (!issues.length && m.stopReason === "stop" && !m.content.some((c) => c.type === "toolCall") && hideJudgment(text).trim()) {
         const steersBefore = pendingSteers;
         reason = await askChecker(ctx, cur.step, text, cur.code ?? "");
         // Phase 8 B4: a message typed during the wait continues this run before any rewrite could start.
@@ -1229,7 +1230,8 @@ export default function (pi: ExtensionAPI): void {
           pendingRewrite = issues;
         } else if (final) {
           const inRecipe = workflow && roleNamed(activeRole).ladder ? { n: workflow.step, ...STEP_SPECS[workflow.step - 1] } : undefined;
-          replacement = fallbackReply(cur.step, episode?.trigger.kind === "run" ? spotLine(episode.trigger.trace) : undefined, inRecipe);
+          const t = episode?.trigger;
+          replacement = fallbackReply(cur.step, t?.kind === "run" ? spotLine(t.trace) : undefined, inRecipe, t && "line" in t ? t.line : undefined);
           rewrite = null;
         }
         // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.

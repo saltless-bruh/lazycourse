@@ -35,5 +35,10 @@ describe("re-run finding: the recipe's teach fallback", () => {
     expect(t).toContain(STEP_SPECS[0].explain);
     expect(t).not.toMatch(/`/);
     expect(fallbackReply("teach")).toMatch(/^Tell me which step/);
+    // Live check 2026-11-17: a stuck ask knows the learner's line; the fallback points at it, with no code and no fix.
+    expect(fallbackReply("teach", undefined, undefined, 2)).toBe("Look at line 2: what does it give with your numbers? Work it out by hand for one small example, then tell me what you got.");
+    expect(fallbackReply("hint", undefined, undefined, 7)).toBe("Look again at line 7: what does that part do with its values? Change it, then run again.");
+    expect(fallbackReply("hint", "ZeroDivisionError: x", undefined, 7)).toContain("the spot the last run points to (ZeroDivisionError: x)");
+    expect(fallbackReply("teach", undefined, { n: 1, ...STEP_SPECS[0] }, 2)).toMatch(/^Step 1/);
   });
 });

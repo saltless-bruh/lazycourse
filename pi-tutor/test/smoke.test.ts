@@ -2784,6 +2784,33 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     expect(b.entries.filter((e) => e.type === "tutor_checker_skip")).toHaveLength(2);
     expect(b.entries.filter((e) => e.type === "tutor_checker").map((e) => (e.data as { verdict: string }).verdict)).toEqual(["ok"]);
   });
+  it("live check 2026-11-17: a reply with only the judgment block is caught as empty without waiting for the reader", async () => {
+    const b = await boot({ cwd: project(), branch: [ep(1)] });
+    await level10(b);
+    const calls = await checkerOn(b, ["ok"]);
+    const blank = reply("");
+    await turn(b.events, b.ctx, "help", blank);
+    expect(calls).toHaveLength(0);
+    expect(textOf(blank)).toMatch(/writing its answer/);
+  });
+  it("live check 2026-11-17: a stuck ask whose every try leaked points at the learner's line, not a generic line", async () => {
+    const dir = project();
+    const idle = { type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "idle", path: pjoin(dir, "src", "main.py"), line: 2 }, band: "beginner", attempts: 0, climbs: 0, opened: 1, turns: 0, concept_tags: [] } };
+    const b = await boot({ cwd: dir, branch: [idle] });
+    await level10(b);
+    const shown: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const leak = reply("Write `return total / people`.");
+      const rewrites = b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite");
+      if (i === 0) await turn(b.events, b.ctx, "help", leak);
+      else await customTurn(b, (rewrites.at(-1) as { message: object }).message, leak);
+      shown.push(textOf(leak));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+    }
+    expect(shown[2]).toMatch(/^Look (again )?at line 2: /);
+    expect(shown[2]).not.toMatch(/`|\/ people/);
+  });
   it("review 2026-11-11 I3: the reader answers `ok` or `leak: <reason>`; a bare yes or no fits the question both ways, so it is no verdict", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
     await level10(b);

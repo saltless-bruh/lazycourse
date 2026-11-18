@@ -382,7 +382,10 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     const shown = new Set<string>();
     for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (OP_SPAN.test(m[1].trim())) shown.add(m[1].trim());
     if (CHANGE_TO.test(sentence) && !USE_FOR.test(sentence) && [...shown].some((op) => !theirs.has(op) && !askedOps.has(op) && kin(op, theirs))) return "swap";
-    if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => ops.has(op) && theirs.has(op) && !askedOps.has(op))) return "swap";
+    // Live check 2026-11-17: "…dividing the total by the count or the count by the total. Try swapping the order…":
+    // the operation is named in the sentence before the one that says to swap.
+    const before = i > 0 && !ops.size ? opsOf(sentences[i - 1]) : new Set<string>();
+    if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => (ops.has(op) || before.has(op)) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator
     // each in two neighbouring sentences, told apart in so many words.
     const next = sentences[i + 1];

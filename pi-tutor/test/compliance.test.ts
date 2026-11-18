@@ -666,6 +666,12 @@ describe("re-measure 2026-11-11: a fix inside a question, a value named in passi
     expect(fixInWords("What would happen if we swapped the order of the addition?", change)).toBeNull(); // their code divides and subtracts nothing
     expect(fixInWords("How would you reorder the division to calculate the average correctly?", { ...avg, words: false })).toBeNull(); // why may name the kind of change
   });
+  it("live check 2026-11-17: the two sides named in one sentence and the swap told in the next is the fix", () => {
+    expect(fixInWords("Ask whether you're dividing the total by the count or the count by the total. Try swapping the order and see what you get.", avg)).toBe("swap");
+    expect(fixInWords("Your function adds two numbers. Try swapping the order of your notes.", change)).toBeNull(); // addition has no sides to swap
+    expect(fixInWords("Look at what you divide. Then read the error message again.", avg)).toBeNull();
+    expect(fixInWords("Ask whether you're dividing the total by the count. Try swapping the order.", { ...avg, words: false })).toBeNull();
+  });
   it("a value named in passing (`age = 18`) is not their line edited", () => {
     expect(fixInWords("The line `return age > 18` uses a strict greater-than operator. With `age = 18`, the expression `18 > 18` evaluates to `False` because 18 is not greater than itself.", adult)).toBeNull();
     expect(fixInWords("Set `share = people` there.", f("    share = total * people"))).toBe("edited-line"); // their own assignment, changed
