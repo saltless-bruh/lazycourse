@@ -2808,8 +2808,28 @@ describe("held replies (spec 2026-10-21 §6)", () => {
       await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
       await settle();
     }
-    expect(shown[2]).toMatch(/^Look (again )?at line 2: /);
+    expect(shown[2]).toMatch(/^You asked from line 2\. Pick one input/);
     expect(shown[2]).not.toMatch(/`|\/ people/);
+  });
+  it("live check 2026-11-17: a stuck ask from a blank line, or past the end of the file, names no line", async () => {
+    for (const line of [3, 40]) {
+      const dir = project();
+      wfile(pjoin(dir, "src", "main.py"), "def split_amount(total, people):\n    return total * people\n\nprint(split_amount(10, 2))\n");
+      const idle = { type: "custom", customType: "tutor_episode", data: { id: "ep-1", trigger: { kind: "idle", path: pjoin(dir, "src", "main.py"), line }, band: "beginner", attempts: 0, climbs: 0, opened: 1, turns: 0, concept_tags: [] } };
+      const b = await boot({ cwd: dir, branch: [idle] });
+      await level10(b);
+      let last = "";
+      for (let i = 0; i < 3; i++) {
+        const leak = reply("Write `return total / people`.");
+        const rewrites = b.messages.filter((m) => (m as { message: { customType: string } }).message.customType === "tutor_rewrite");
+        if (i === 0) await turn(b.events, b.ctx, "help", leak);
+        else await customTurn(b, (rewrites.at(-1) as { message: object }).message, leak);
+        last = textOf(leak);
+        await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+        await settle();
+      }
+      expect([line, last]).toEqual([line, expect.stringMatching(/^Pick one input where the answer is wrong/)]);
+    }
   });
   it("review 2026-11-11 I3: the reader answers `ok` or `leak: <reason>`; a bare yes or no fits the question both ways, so it is no verdict", async () => {
     const b = await boot({ cwd: project(), branch: [ep(1)] });
