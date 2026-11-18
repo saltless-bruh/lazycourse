@@ -395,7 +395,11 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     const before = both ? opsOf(sentences[i - 1]) : new Set<string>();
     // Re-check 2026-11-18: "the count over the total, or vice versa" (or "the price from the discount or the discount
     // from the price"): the word between the two sides is the operation.
-    const said = both ? CONNECTOR_OP[/\b(over|minus|times|from)\b/i.exec(both[0])?.[1].toLowerCase() ?? ""] : undefined;
+    // Review of dc517a6: "from" is everyday direction ("data flows from the caller, or vice versa"); it is subtraction
+    // only with both sides repeated in the other order.
+    const mirrored = !!both && !/\b(?:vice versa|other way)\b/i.test(both[0]);
+    const word = both ? /\b(over|minus|times|from)\b/i.exec(both[0])?.[1].toLowerCase() : undefined;
+    const said = word && (word !== "from" || mirrored) ? CONNECTOR_OP[word] : undefined;
     if (said) before.add(said);
     if (o.words && OTHER_WAY.test(sentence) && ORDERED.some((op) => (ops.has(op) || before.has(op)) && theirs.has(op) && !askedOps.has(op))) return "swap";
     // Live run 2026-11-10: "…the typical operator is division. Multiplication, by contrast, produces…": one operator

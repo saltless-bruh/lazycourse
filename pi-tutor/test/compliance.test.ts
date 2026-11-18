@@ -688,6 +688,16 @@ describe("re-measure 2026-11-11: a fix inside a question, a value named in passi
     // Re-check 2026-11-18: "from" between the two sides, both ways round, is subtraction.
     expect(fixInWords("Is it the price from the discount or the discount from the price? Swap the order and see.", off)).toBe("swap");
     expect(fixInWords("Is it the count from the total or the total from the count? Swap the order.", avg2)).toBeNull(); // their code only divides
+    // Review of dc517a6: "from" is everyday direction; only the two sides repeated in the other order make it subtraction.
+    const loop = f("def gaps(xs):", "    for i in range(len(xs) - 1):", "        print(xs[i + 1] - xs[i])");
+    for (const r of ["Data flows from the caller, or vice versa. Swap the two test values you call it with.",
+      "Do you read the values from the file, or the other way round? Swap the two values in your test.",
+      "Copy the items from the list, or vice versa. Reverse the numbers in your test list.",
+      "The loop runs from zero, or the other way round. Try swapping the numbers in your test.",
+      "The result comes from the function, or the other way round? Swap the order of the two print lines."]) {
+      expect([r, fixInWords(r, loop)]).toEqual([r, null]);
+      expect([r, fixInWords(r, off)]).toEqual([r, null]);
+    }
     expect(fixInWords("Ask whether you're dividing the total by the count. Try swapping the order.", { ...avg, words: false })).toBeNull();
   });
   it("a value named in passing (`age = 18`) is not their line edited", () => {
