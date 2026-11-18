@@ -226,7 +226,7 @@ const STATEMENT = /^(?:def|fn|func|function|class)\s+\w+\s*[(:<{]|^import\s+\S|^
 const lettersOnly = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
 const PLACEHOLDERS = new Set([HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT].map(lettersOnly));
 const OP_SPAN = /^(?:\/\/|<=|>=|==|!=|[-+*/%<>])$/;
-const OP_SIGNS: Record<string, string> = { "÷": "/", "×": "*" };
+const OP_SIGNS: Record<string, string> = { "÷": "/", "×": "*", "≥": ">=", "≤": "<=" };
 const WORD_OR_NUMBER = /[A-Za-z_]\w*|\d+(?:\.\d+)?/g;
 /** Operator names for the swap check: stricter than OP_WORDS ("add an `if`" names no operator; in 68 real replies it was the one false alarm). */
 const SWAP_WORDS: [string, RegExp][] = [
@@ -254,16 +254,44 @@ const SWAP_WORDS: [string, RegExp][] = [
 // Review 2026-11-11 I4: "or", "while", "would" and "whether" also join plain descriptions ("each of `*` or `/` takes
 // two numbers", "this part multiplies, while that part divides"); they no longer count as a contrast by themselves.
 // Review of leak-words: "a `<` gate does the opposite" sets the two apart; "the opposite sign" or "case" does not.
-const OPPOSITE = String.raw`\b(?:does|do|works) the (?:opposite|reverse)\b`;
-const CONTRAST = new RegExp(String.raw`\b(?:not|instead|rather|but|should|whereas|versus|vs\.?|better|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;|${OPPOSITE}`, "i");
+// leak-minors: "does just the opposite", "has the opposite effect", "works in the opposite direction".
+const OPPOSITE = String.raw`\b(?:(?:does|do|works)(?: just| exactly)? the (?:opposite|reverse)|ha(?:s|ve) the (?:opposite|reverse) effect|works? in the opposite direction)\b`;
+const CONTRAST = /\b(?:not|instead|rather|but|should|whereas|versus|vs\.?|better|replac\w*|chang\w*|swap\w*|switch\w*|needs? to|must|wrong)\b|;/i;
+// Review of leak-minors I4: "your `+` and `-` have the opposite effect" describes their own two operators; "opposite"
+// sets two apart only when one of them is not theirs.
+const OPPOSED = new RegExp(OPPOSITE, "i");
 // Live check 2026-11-18: "A `>` gate … climbs toward the maximum. A `<` gate does the opposite."
-const SET_APART = new RegExp(String.raw`\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b|${OPPOSITE}`, "i");
+const SET_APART = new RegExp(String.raw`\b(?:not|instead|rather than|whereas|versus|by contrast|in contrast|on the other hand|typical(?:ly)?|should|correct|appropriate)\b`, "i");
 // Live check 2026-11-18: "the operator should include equality" beside their `age > 18` names `>=` with no symbol.
 // Review of leak-words: said of their comparison only ("`range()` is not inclusive" and "accept equal-length arrays" are not).
-const INCLUSIVE = /\binclud\w*\s+(?:\w+\s+){0,2}equal\w*|\ballow\w*\s+(?:for\s+)?equality\b|\bor[- ]equal\b|\binclusive\b/i;
+// Review of leak-minors I3: ≥ named as the operator ("should be ≥"), not written between two operands ("n ≥ 1").
+// Re-check: decided by the word before it — "use ≥", "to ≥", "be ≥" name it; "i ≥ start", "n ≥ len(xs)" are operands.
+const SIGN = String.raw`(?<=(?:^|\b(?:be|is|are|use|uses|using|to|with|into|an?|the|of|it)|[:\x60"'(*])\s*)[≥≤]`;
+const INCLUSIVE = new RegExp(String.raw`\binclud\w*\s+(?:\w+\s+){0,3}equal\w*|\b(?:allow\w*|let(?:s|ting)?)\s+(?:for\s+)?equality\b|\bor[- ]equal\b|\binclusive\b|\bnon-?strict\b|${SIGN}`, "i");
 // Re-check of leak-words: the comparison itself has to be what is made inclusive ("check whether `range()` is
 // inclusive" and "the task's condition says…" are hints), or an operator is named in the sentence.
-const COMPARED = /\b(?:the|your|this|that)\s+(?:comparison|operator|check|condition|gate)\b[^.?!;]*\b(?:inclusive|includ\w*|allow\w*|or[- ]equal)|`[<>]=?`|\b(?:greater|less)[- ]than\b/i;
+// leak-minors: "use the condition you wrote and test whether the output includes…" is about the output, not the check.
+const COMPARED = new RegExp(String.raw`\b(?:the|your|this|that)\s+(?:comparison|operator|check|condition|gate)\b(?:(?!\b(?:test\w*|whether|outputs?)\b|(?<!\bas an? )\bresults?\b)[^.?!;])*\b(?:inclusive|includ\w*|allow\w*|let(?:s|ting)?|or[- ]equal|non-?strict)|${"`"}[<>]=?${"`"}|\b(?:greater|less)[- ]than\b|${SIGN}`, "i");
+// leak-minors: "at least 18" / "18 or older" beside their `age > 18` names `>=` by its boundary; any other number is not theirs.
+const NUM = String.raw`(\d+(?:\.\d+)?)`;
+const BOUND_UP = new RegExp(String.raw`\b(?:at least|no (?:less|fewer) than) ${NUM}\b|\b${NUM} or (?:older|more|above|over|higher|greater|bigger)\b`, "i");
+const BOUND_DOWN = new RegExp(String.raw`\b(?:at most|no (?:more|greater) than) ${NUM}\b|\b${NUM} or (?:younger|less|fewer|below|under|lower|smaller)\b`, "i");
+/** A boundary told inclusive ("at least 18") that one of their strict comparisons against that same number leaves out. */
+// Review of leak-minors: the task's own words ("the task says … at least 18") and counts ("at most 10 times",
+// "0 or more numbers") are no boundary told.
+// Re-check N3: "the problem is…" is the tutor naming the bug, not quoting the task.
+const QUOTES_TASK = /\b(?:task|spec|specification|instructions?|exercise|requirements?|description)\b/i;
+const COUNTED = /^\s+(?:more\s+|fewer\s+|other\s+)?(?:times?|items?|tries|attempts?|numbers?|inputs?|elements?|results?|values?|entries|entry|characters?|chars?|rows?|steps?|lines?|words?|digits?|iterations?|loops?|calls?|arguments?|args?|people|users?|records?|cases?|tests?)\b/i;
+function boundTold(sentence: string, lines: string[]): ">" | "<" | null {
+  if (QUOTES_TASK.test(sentence)) return null;
+  for (const [re, op] of [[BOUND_UP, ">"], [BOUND_DOWN, "<"]] as const) {
+    const m = re.exec(sentence);
+    if (m && COUNTED.test(sentence.slice(m.index + m[0].length))) continue;
+    const n = m && (m[1] ?? m[2]);
+    if (n && lines.some((l) => new RegExp(String.raw`[\w)\]]\s*${op}(?!=)\s*${n.replace(".", "\\.")}(?![\d.])`).test(l))) return op;
+  }
+  return null;
+}
 const TELLS = /\b(?:should|needs?|need to|must|has to|have to|chang\w*|make|use|switch\w*|replac\w*)\b/i;
 // Re-measure 2026-11-11: the fix was put inside a question ("what would changing the operator to `>=` do?", "what
 // if we swapped the order of the division?"). An operator their code lacks, named as the one to change to or use,
@@ -394,7 +422,8 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     // Review 2026-11-11 I4: three or more operators are a list of them; operators that are all already in the
     // learner's code describe that code ("this part multiplies, while that part divides") unless set against each other.
     const listed = LISTING.test(sentence) || ops.size >= 3 || [...ops].every((op) => theirs.has(op));
-    if (told(ops) && (CONTRAST.test(sentence) || !listed)) return "swap";
+    const notAllTheirs = (set: Set<string>) => [...set].some((op) => !theirs.has(op));
+    if (told(ops) && (CONTRAST.test(sentence) || (OPPOSED.test(sentence) && notAllTheirs(ops)) || !listed)) return "swap";
     const shown = new Set<string>();
     for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (OP_SPAN.test(m[1].trim())) shown.add(m[1].trim());
     if (CHANGE_TO.test(sentence) && !USE_FOR.test(sentence) && [...shown].some((op) => !theirs.has(op) && !askedOps.has(op) && kin(op, theirs))) return "swap";
@@ -413,6 +442,8 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     if (said) before.add(said);
     // A strict comparison of theirs (`>` with no `>=`) told, in so many words, to take in equality.
     // Review I3/I4: not when the sentence is about an inclusive one they already have, or one they asked about.
+    const bound = o.words && TELLS.test(sentence) ? boundTold(sentence, lines) : null;
+    if (bound && !askedOps.has(bound) && !askedOps.has(`${bound}=`)) return "swap";
     if (o.words && INCLUSIVE.test(sentence) && TELLS.test(sentence) && COMPARED.test(sentence)
       && ![...ops].some((op) => (op === "<=" || op === ">=") && theirs.has(op))
       && [["<", "<="], [">", ">="]].some(([lt, le]) => theirs.has(lt) && !theirs.has(le) && !askedOps.has(lt) && !askedOps.has(le))) return "swap";
@@ -422,7 +453,8 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     const next = sentences[i + 1];
     if (next !== undefined && ops.size === 1) {
       const pair = new Set([...ops, ...opsOf(next)]);
-      if (told(pair) && SET_APART.test(`${sentence} ${next}`)) return "swap";
+      const pairText = `${sentence} ${next}`;
+      if (told(pair) && (SET_APART.test(pairText) || (OPPOSED.test(pairText) && notAllTheirs(pair)))) return "swap";
     }
     for (const m of sentence.matchAll(/`([^`\n]+)`/g)) if (editedLine(m[1], lines)) return "edited-line";
   }

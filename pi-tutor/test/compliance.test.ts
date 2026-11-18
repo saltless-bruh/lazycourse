@@ -637,6 +637,49 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     // re-check N2: "is the opposite" describes their own code
     expect(fixInWords("Line 2 uses `-`. Line 3 uses `<`, which is the opposite of what you might expect.", { sourceLines: ["    return paid - price", "    if paid < price:"], words: true })).toBeNull();
   });
+  it("leak-minors: the rewordings the leak-words review found still missed", () => {
+    const best = { sourceLines: ["        if x < best:"], words: true };
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate does just the opposite.", best)).toBe("swap");
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate has the opposite effect.", best)).toBe("swap");
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate works in the opposite direction.", best)).toBe("swap");
+    const adult = { sourceLines: ["def is_adult(age):", "    return age > 18"], words: true };
+    expect(fixInWords("Your check should also include ages that are equal to 18.", adult)).toBe("swap");
+    expect(fixInWords("The comparison should let equality through.", adult)).toBe("swap");
+    expect(fixInWords("Make the comparison non-strict.", adult)).toBe("swap");
+    expect(fixInWords("Change it so the age has to be at least 18.", adult)).toBe("swap");
+    expect(fixInWords("It should accept 18 or older.", adult)).toBe("swap");
+    expect(fixInWords("The comparison should be ≥.", adult)).toBe("swap");
+    // a number that is not their boundary, a test request, and a question about the task stay free
+    expect(fixInWords("The list should have at least 3 items before you call it.", adult)).toBeNull();
+    expect(fixInWords("Use the condition you wrote and test whether the output includes the equal case.", { sourceLines: ["    while i < n:"], words: true })).toBeNull();
+    expect(fixInWords("Is someone who is exactly 18 at least 18? Trace `is_adult(18)` by hand.", adult)).toBeNull();
+    // review of leak-minors: the task's own words, counts, maths notation, and their own two operators stay free
+    expect(fixInWords("The task says a user must be at least 18. What does your function return for exactly 18?", adult)).toBeNull();
+    expect(fixInWords("The loop should run at most 10 times.", { sourceLines: ["    i = 0", "    while i < 10:"], words: true })).toBeNull();
+    expect(fixInWords("The user should get no more than 3 tries.", { sourceLines: ["    while attempts < 3:"], words: true })).toBeNull();
+    expect(fixInWords("The input can hold 0 or more numbers, so make sure your code handles an empty list.", { sourceLines: ["    if len(nums) > 0:"], words: true })).toBeNull();
+    expect(fixInWords("Each test should check that the function returns at least 1 result.", { sourceLines: ["    return n > 1"], words: true })).toBeNull();
+    const loop = { sourceLines: ["    while i < n:"], words: true };
+    expect(fixInWords("The task says n ≥ 1, so you don't need to handle an empty list.", loop)).toBeNull();
+    expect(fixInWords("Make sure your loop works for any n ≥ 0.", loop)).toBeNull();
+    const sum = { sourceLines: ["    total = total + x", "    total = total - y"], words: true };
+    expect(fixInWords("Line 2's `+` and line 3's `-` have the opposite effect on the total.", sum)).toBeNull();
+    expect(fixInWords("Your `+` on line 2 has the opposite effect of the `-` on line 3, so the total goes up then down.", sum)).toBeNull();
+    expect(fixInWords("Your comparison should, as a result, include equality.", adult)).toBe("swap");
+    // re-check of leak-minors: ≥ between two operands is maths; ≥ after "use", "to", "be" is the operator named
+    expect(fixInWords("Make sure your loop handles i ≥ start and stops at the end.", { sourceLines: ["    while i < end:"], words: true })).toBeNull();
+    expect(fixInWords("The task says n ≥ len(xs), so you don't need to handle an empty list.", loop)).toBeNull();
+    expect(fixInWords("Switch to ≥ instead.", adult)).toBe("swap");
+    expect(fixInWords("Your check should use ≥ instead.", adult)).toBe("swap");
+    expect(fixInWords("Use ≥ here.", adult)).toBe("swap");
+    expect(fixInWords("The comparison should be ≥ 18.", adult)).toBe("swap");
+    expect(fixInWords("Make it ≥ so 18 passes.", adult)).toBe("swap");
+    expect(fixInWords("Use **≥** here.", adult)).toBe("swap");
+    // confirming their strict check names ≥ only to reject it
+    expect(fixInWords("The task says over 18, so your check should be >, not ≥.", adult)).toBeNull();
+    // "the problem is" is the tutor talking about the bug, not quoting the task
+    expect(fixInWords("The problem is that the age should be at least 18, not above it.", adult)).toBe("swap");
+  });
   it("review of leak-words: \"does the opposite\" in one sentence; an opposite sign or case is no operator contrast", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };
     expect(fixInWords("A `>` gate climbs toward the maximum, and a `<` gate does the opposite.", best)).toBe("swap");
