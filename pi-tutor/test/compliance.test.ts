@@ -637,6 +637,23 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     // re-check N2: "is the opposite" describes their own code
     expect(fixInWords("Line 2 uses `-`. Line 3 uses `<`, which is the opposite of what you might expect.", { sourceLines: ["    return paid - price", "    if paid < price:"], words: true })).toBeNull();
   });
+  it("leak-minors: the rewordings the leak-words review found still missed", () => {
+    const best = { sourceLines: ["        if x < best:"], words: true };
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate does just the opposite.", best)).toBe("swap");
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate has the opposite effect.", best)).toBe("swap");
+    expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate works in the opposite direction.", best)).toBe("swap");
+    const adult = { sourceLines: ["def is_adult(age):", "    return age > 18"], words: true };
+    expect(fixInWords("Your check should also include ages that are equal to 18.", adult)).toBe("swap");
+    expect(fixInWords("The comparison should let equality through.", adult)).toBe("swap");
+    expect(fixInWords("Make the comparison non-strict.", adult)).toBe("swap");
+    expect(fixInWords("Change it so the age has to be at least 18.", adult)).toBe("swap");
+    expect(fixInWords("It should accept 18 or older.", adult)).toBe("swap");
+    expect(fixInWords("The comparison should be ≥.", adult)).toBe("swap");
+    // a number that is not their boundary, a test request, and a question about the task stay free
+    expect(fixInWords("The list should have at least 3 items before you call it.", adult)).toBeNull();
+    expect(fixInWords("Use the condition you wrote and test whether the output includes the equal case.", { sourceLines: ["    while i < n:"], words: true })).toBeNull();
+    expect(fixInWords("Is someone who is exactly 18 at least 18? Trace `is_adult(18)` by hand.", adult)).toBeNull();
+  });
   it("review of leak-words: \"does the opposite\" in one sentence; an opposite sign or case is no operator contrast", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };
     expect(fixInWords("A `>` gate climbs toward the maximum, and a `<` gate does the opposite.", best)).toBe("swap");
