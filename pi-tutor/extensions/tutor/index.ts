@@ -535,7 +535,8 @@ export default function (pi: ExtensionAPI): void {
   }
   /**
    * Live check 2026-11-17: where a code spot's fallback may say the learner asked from. The line is named only when it
-   * holds code in the saved file inside the project root; a churn region is a spot with no one line.
+   * holds code in the saved file inside the project root. The latest ask's line wins (review 2026-11-18 M1); a churn
+   * episode without one is a region with no one line.
    */
   function askedFrom(ep: Episode | null): { line: number | null; error: boolean } | undefined {
     const t = ep?.trigger;

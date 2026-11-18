@@ -680,6 +680,11 @@ describe("re-measure 2026-11-11: a fix inside a question, a value named in passi
     const sub = "Your line subtracts one value from another. Swap the values in your second test call and check the output.";
     expect([sub, fixInWords(sub, off)]).toEqual([sub, null]);
     expect(fixInWords("Are you subtracting the price from the discount or the discount from the price? Try the other way round.", off)).toBe("swap");
+    // Re-check 2026-11-18: the same leak in other words is still held; one idiom said twice is not two sides.
+    expect(fixInWords("Is it the total divided by the count, or the count divided by the total? Try swapping the order.", avg2)).toBe("swap");
+    expect(fixInWords("Is it the count over the total, or vice versa? Try swapping the order.", avg2)).toBe("swap");
+    expect(fixInWords("Is it price minus discount or discount minus price? Try the other way round.", off)).toBe("swap");
+    expect(fixInWords("Divide it step by step, or step by step with prints. Try swapping the two numbers.", avg2)).toBeNull();
     expect(fixInWords("Ask whether you're dividing the total by the count. Try swapping the order.", { ...avg, words: false })).toBeNull();
   });
   it("a value named in passing (`age = 18`) is not their line edited", () => {
