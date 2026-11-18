@@ -670,6 +670,16 @@ describe("re-measure 2026-11-11: a fix inside a question, a value named in passi
     expect(fixInWords("Ask whether you're dividing the total by the count or the count by the total. Try swapping the order and see what you get.", avg)).toBe("swap");
     expect(fixInWords("Your function adds two numbers. Try swapping the order of your notes.", change)).toBeNull(); // addition has no sides to swap
     expect(fixInWords("Look at what you divide. Then read the error message again.", avg)).toBeNull();
+    // Review 2026-11-18 I1: a swap of something else after a sentence about their division is ordinary teaching.
+    const avg2 = f("def average(count, total):", "    return count / total"), off = f("def off(discount, price):", "    return discount - price");
+    for (const r of ["Your function divides one number by another. Now try swapping the two test values you call it with and compare.",
+      "Line 2 divides. Reverse the numbers in your list of test cases and run it again.",
+      "Good, that line divides. Next, switch the order of the two print lines so the heading comes first.",
+      "Division gives a float here. Try swapping the order of your test inputs to see edge cases.",
+      "Your function divides two numbers. Think of it the other way round: what would a caller expect back?"]) expect([r, fixInWords(r, avg2)]).toEqual([r, null]);
+    const sub = "Your line subtracts one value from another. Swap the values in your second test call and check the output.";
+    expect([sub, fixInWords(sub, off)]).toEqual([sub, null]);
+    expect(fixInWords("Are you subtracting the price from the discount or the discount from the price? Try the other way round.", off)).toBe("swap");
     expect(fixInWords("Ask whether you're dividing the total by the count. Try swapping the order.", { ...avg, words: false })).toBeNull();
   });
   it("a value named in passing (`age = 18`) is not their line edited", () => {

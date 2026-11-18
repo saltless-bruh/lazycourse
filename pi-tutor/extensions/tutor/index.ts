@@ -537,15 +537,17 @@ export default function (pi: ExtensionAPI): void {
    * Live check 2026-11-17: where a code spot's fallback may say the learner asked from. The line is named only when it
    * holds code in the saved file inside the project root; a churn region is a spot with no one line.
    */
-  function askedFrom(t: Trigger | undefined): { line: number | null; error: boolean } | undefined {
+  function askedFrom(ep: Episode | null): { line: number | null; error: boolean } | undefined {
+    const t = ep?.trigger;
     if (!t || (t.kind !== "idle" && t.kind !== "error" && t.kind !== "churn")) return undefined;
-    if (t.kind === "churn") return { line: null, error: false };
+    const at = ep?.askLine ?? (t.kind === "churn" ? null : { line: t.line, error: t.kind === "error" });
+    if (!at) return { line: null, error: false };
     let text: string | undefined;
     try {
       const root = realCwd(project?.path ?? session?.cwd ?? process.cwd()), real = realpathSync(t.path);
-      if (real.startsWith(root + "/")) text = readFileSync(real, "utf8").split(/\r?\n/)[t.line - 1];
+      if (real.startsWith(root + "/")) text = readFileSync(real, "utf8").split(/\r?\n/)[at.line - 1];
     } catch { text = undefined; }
-    return { line: text?.trim() ? t.line : null, error: t.kind === "error" };
+    return { line: text?.trim() ? at.line : null, error: at.error };
   }
   /** Asked readers of an error (path|message): one reads-errors event each, however often the learner presses (M5). */
   const askedErrors = new Set<string>();
@@ -589,6 +591,8 @@ export default function (pi: ExtensionAPI): void {
     // Author 2026-11-09: this ask, not the failed runs before it, moves help (one step, and only after new effort).
     // Live check 2026-11-10: the architect answers about the spot in its own way and never moves help (spec 2026-10-13 §3).
     if (roleNamed(activeRole).ladder) episode = askHelp(episode!, sourceHash(root));
+    // Review 2026-11-18 M1: a later ask in the same file keeps the episode; its own line is what the fallback names.
+    if (episode!.trigger.kind !== "run") episode = { ...episode!, askLine: { line: p.line, error: !!p.error } };
     if (episode.spot) remember(episode);
     pi.appendEntry("tutor_episode", episode);
     ui?.notify(`stuck: ${rel}:${p.line}`, "info");
@@ -1245,7 +1249,7 @@ export default function (pi: ExtensionAPI): void {
         } else if (final) {
           const inRecipe = workflow && roleNamed(activeRole).ladder ? { n: workflow.step, ...STEP_SPECS[workflow.step - 1] } : undefined;
           const t = episode?.trigger;
-          replacement = fallbackReply(cur.step, t?.kind === "run" ? spotLine(t.trace) : undefined, inRecipe, askedFrom(t));
+          replacement = fallbackReply(cur.step, t?.kind === "run" ? spotLine(t.trace) : undefined, inRecipe, askedFrom(episode));
           rewrite = null;
         }
         // A tool-use turn's text is dropped, not re-asked: the run goes on and its final reply is checked.
