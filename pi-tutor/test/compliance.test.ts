@@ -637,6 +637,31 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     // re-check N2: "is the opposite" describes their own code
     expect(fixInWords("Line 2 uses `-`. Line 3 uses `<`, which is the opposite of what you might expect.", { sourceLines: ["    return paid - price", "    if paid < price:"], words: true })).toBeNull();
   });
+  it("live check 2026-11-19: the fix offered as a choice between their code and the changed code", () => {
+    const loop = { sourceLines: ["def sum_to(n):", "    for i in range(1, n):"], words: true };
+    expect(fixInWords("Look at the `range()` call in your function. Ask yourself whether the stop value should be `n` or `n + 1` to include the number you mean to sum.", loop)).toBe("swap");
+    expect(fixInWords("Is the stop `n + 1` or `n`?", loop)).toBe("swap");
+    expect(fixInWords("Should it be `range(1, n)` or `range(1, n + 1)`?", loop)).toBe("swap");
+    const adult = { sourceLines: ["    return age > 18"], words: true };
+    expect(fixInWords("Should the limit be `18` or `17`?", adult)).toBe("swap");
+    // two of their own names, a name for a name, and one expression alone stay free
+    expect(fixInWords("Which one does the loop add last: `i` or `n`?", loop)).toBeNull();
+    expect(fixInWords("Is the stop value `n` or `total`?", loop)).toBeNull();
+    expect(fixInWords("What does `range(1, n)` give for n = 4?", loop)).toBeNull();
+    expect(fixInWords("Should the stop value be `n` or `n + 1`?", { ...loop, words: false })).toBeNull();
+  });
+  it("live check 2026-11-19: the comparison told to go the opposite way, with no operator named", () => {
+    const best = { sourceLines: ["        if x < best:"], words: true };
+    expect(fixInWords("To select the maximum, the condition needs to test the opposite relationship.", best)).toBe("swap");
+    expect(fixInWords("Ask yourself whether changing the operator would make the loop prefer larger numbers instead of smaller ones.", best)).toBe("swap");
+    expect(fixInWords("Try flipping the comparison.", best)).toBe("swap");
+    expect(fixInWords("What happens if you reverse the comparison on line 4?", best)).toBe("swap");
+    // the opposite case, a question about what it does, and code with no comparison stay free
+    expect(fixInWords("Your condition should also handle the opposite case, when the list is empty.", best)).toBeNull();
+    expect(fixInWords("The comparison on line 4 decides which numbers replace `best`. Which ones does it let through?", best)).toBeNull();
+    expect(fixInWords("To select the maximum, the condition needs to test the opposite relationship.", { sourceLines: ["    return a + b"], words: true })).toBeNull();
+    expect(fixInWords("Try flipping the comparison.", { ...best, asked: "what does < do vs >?" })).toBeNull();
+  });
   it("leak-minors: the rewordings the leak-words review found still missed", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };
     expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate does just the opposite.", best)).toBe("swap");

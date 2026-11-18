@@ -276,6 +276,49 @@ const COMPARED = new RegExp(String.raw`\b(?:the|your|this|that)\s+(?:comparison|
 const NUM = String.raw`(\d+(?:\.\d+)?)`;
 const BOUND_UP = new RegExp(String.raw`\b(?:at least|no (?:less|fewer) than) ${NUM}\b|\b${NUM} or (?:older|more|above|over|higher|greater|bigger)\b`, "i");
 const BOUND_DOWN = new RegExp(String.raw`\b(?:at most|no (?:more|greater) than) ${NUM}\b|\b${NUM} or (?:younger|less|fewer|below|under|lower|smaller)\b`, "i");
+// Live check 2026-11-19: "the condition needs to test the opposite relationship", "whether changing the operator
+// would make the loop prefer larger numbers": their comparison told to turn round, with no operator named.
+const COMPARISON_NOUN = String.raw`(?:the|your|this|that)\s+(?:comparison|operator|condition|check|gate|sign)\b`;
+const FLIP = new RegExp(String.raw`\b(?:flip\w*|revers\w*|invert\w*)\s+${COMPARISON_NOUN}`, "i");
+const OPPOSITE_WAY = /\b(?:opposite|reverse|other)\s+(?:relationship|direction|comparison|way|operator|check|test)\b/i;
+const TURNED = new RegExp(String.raw`\bchang\w*\s+${COMPARISON_NOUN}(?:[^.?!;])*\b(?:larger|bigger|greater|higher|smaller|lower|maximum|minimum)\b`, "i");
+const COMPARING = ["<", ">", "<=", ">="];
+function turnedRound(sentence: string): boolean {
+  return FLIP.test(sentence) || TURNED.test(sentence)
+    || (OPPOSITE_WAY.test(sentence) && TELLS.test(sentence) && new RegExp(COMPARISON_NOUN, "i").test(sentence));
+}
+
+/**
+ * Live check 2026-11-19: "should the stop value be `n` or `n + 1`?" — a stretch of their code offered beside the
+ * same stretch changed (a number or operator put in, taken out or swapped): the fix, as a choice.
+ */
+const isOpOrNumber = (t: string) => /^\d/.test(t) || /^(?:\/\/|<=|>=|==|!=|[-+*/%<>])$/.test(t);
+function smallChange(a: string[], b: string[]): boolean {
+  if (a.length === b.length) {
+    const diff = a.flatMap((t, i) => (t === b[i] ? [] : [i]));
+    return diff.length === 1 && isOpOrNumber(a[diff[0]]) && isOpOrNumber(b[diff[0]]) && /^\d/.test(a[diff[0]]) === /^\d/.test(b[diff[0]]);
+  }
+  const [long, short] = a.length > b.length ? [a, b] : [b, a];
+  const k = long.length - short.length;
+  if (k > 2) return false;
+  for (let p = 0; p <= short.length; p++) {
+    if (long.slice(0, p).join("\u0000") !== short.slice(0, p).join("\u0000")) break;
+    if (long.slice(p + k).join("\u0000") === short.slice(p).join("\u0000") && long.slice(p, p + k).every(isOpOrNumber)) return true;
+  }
+  return false;
+}
+function choiceOffered(sentence: string, lines: string[]): boolean {
+  const lineTokens = lines.map((l) => l.match(CODE_TOKEN) ?? []);
+  const inCode = (t: string[]) => lineTokens.some((lt) => lt.some((_, at) => t.every((x, i) => lt[at + i] === x)));
+  for (const m of sentence.matchAll(/`([^`\n]+)`\s*,?\s*or\s+`([^`\n]+)`/gi)) {
+    const a = m[1].trim().match(CODE_TOKEN) ?? [], b = m[2].trim().match(CODE_TOKEN) ?? [];
+    // Two bare operators ("either `*` or `/`") are the operator rules' to judge: listed, or set apart.
+    if (!a.length || !b.length || (a.length === 1 && b.length === 1 && !/^\d/.test(a[0]))) continue;
+    for (const [x, y] of [[a, b], [b, a]]) if (inCode(x) && !inCode(y) && smallChange(x, y)) return true;
+  }
+  return false;
+}
+
 /** A boundary told inclusive ("at least 18") that one of their strict comparisons against that same number leaves out. */
 // Review of leak-minors: the task's own words ("the task says … at least 18") and counts ("at most 10 times",
 // "0 or more numbers") are no boundary told.
@@ -442,6 +485,8 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     if (said) before.add(said);
     // A strict comparison of theirs (`>` with no `>=`) told, in so many words, to take in equality.
     // Review I3/I4: not when the sentence is about an inclusive one they already have, or one they asked about.
+    if (o.words && choiceOffered(sentence, lines)) return "swap";
+    if (o.words && turnedRound(sentence) && COMPARING.some((op) => theirs.has(op)) && !COMPARING.some((op) => askedOps.has(op))) return "swap";
     const bound = o.words && TELLS.test(sentence) ? boundTold(sentence, lines) : null;
     if (bound && !askedOps.has(bound) && !askedOps.has(`${bound}=`)) return "swap";
     if (o.words && INCLUSIVE.test(sentence) && TELLS.test(sentence) && COMPARED.test(sentence)
