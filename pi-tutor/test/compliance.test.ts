@@ -673,6 +673,10 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(fixInWords("Your check should use ≥ instead.", adult)).toBe("swap");
     expect(fixInWords("Use ≥ here.", adult)).toBe("swap");
     expect(fixInWords("The comparison should be ≥ 18.", adult)).toBe("swap");
+    expect(fixInWords("Make it ≥ so 18 passes.", adult)).toBe("swap");
+    expect(fixInWords("Use **≥** here.", adult)).toBe("swap");
+    // confirming their strict check names ≥ only to reject it
+    expect(fixInWords("The task says over 18, so your check should be >, not ≥.", adult)).toBeNull();
     // "the problem is" is the tutor talking about the bug, not quoting the task
     expect(fixInWords("The problem is that the age should be at least 18, not above it.", adult)).toBe("swap");
   });

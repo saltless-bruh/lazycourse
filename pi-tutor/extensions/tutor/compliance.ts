@@ -266,7 +266,7 @@ const SET_APART = new RegExp(String.raw`\b(?:not|instead|rather than|whereas|ver
 // Review of leak-words: said of their comparison only ("`range()` is not inclusive" and "accept equal-length arrays" are not).
 // Review of leak-minors I3: ≥ named as the operator ("should be ≥"), not written between two operands ("n ≥ 1").
 // Re-check: decided by the word before it — "use ≥", "to ≥", "be ≥" name it; "i ≥ start", "n ≥ len(xs)" are operands.
-const SIGN = String.raw`(?<=(?:^|\b(?:be|is|are|use|uses|using|to|with|into|an?|the|of|not)|[:\x60"'(])\s*)[≥≤]`;
+const SIGN = String.raw`(?<=(?:^|\b(?:be|is|are|use|uses|using|to|with|into|an?|the|of|it)|[:\x60"'(*])\s*)[≥≤]`;
 const INCLUSIVE = new RegExp(String.raw`\binclud\w*\s+(?:\w+\s+){0,3}equal\w*|\b(?:allow\w*|let(?:s|ting)?)\s+(?:for\s+)?equality\b|\bor[- ]equal\b|\binclusive\b|\bnon-?strict\b|${SIGN}`, "i");
 // Re-check of leak-words: the comparison itself has to be what is made inclusive ("check whether `range()` is
 // inclusive" and "the task's condition says…" are hints), or an operator is named in the sentence.
