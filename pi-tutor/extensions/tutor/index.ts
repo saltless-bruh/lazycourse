@@ -1278,7 +1278,8 @@ export default function (pi: ExtensionAPI): void {
       const reask = m.stopReason === "stop" && !emptyAsked;
       const line = reask ? EMPTY_TEXT : LOST_TEXT;
       if (reask) {
-        emptyAsked = true; pendingEmpty = true;
+        // Re-check N4: the re-ask may come back empty too; its lost line is owed even after a timeout's.
+        emptyAsked = true; pendingEmpty = true; lostShown = false;
         if (inOnboarding()) { onboardWaits = true; waitNote = intake ?? null; }
         // Review I1: the judgment counts on the reply the learner reads, so this one's is dropped; the re-ask keeps
         // this turn's step (a fix stays a fix) and is told why.

@@ -3173,6 +3173,21 @@ describe("empty replies", () => {
     expect(visible(later)).toMatch(/lost my answer/i);
   });
 
+  it("re-check of leak-words N4: a timeout, then empty twice, still ends with the lost line", async () => {
+    const b = await boot();
+    const first = { role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] };
+    await turn(b.events, b.ctx, "what is normal mode?", first);
+    expect(visible(first)).toMatch(/lost my answer/i);
+    const retried = onlyThinking();
+    const e = (await b.events["message_end"]({ type: "message_end", message: retried }, b.ctx)) as { message?: object } | undefined;
+    expect(visible(e?.message ?? retried)).toMatch(/writing its answer/);
+    await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    await settle();
+    const again = onlyThinking();
+    await customTurn(b, rewrites(b)[0].message as object, again);
+    expect(visible(again)).toMatch(/lost my answer/i);
+  });
+
   it("empty again: an honest line, and no third try", async () => {
     const b = await boot();
     await turn(b.events, b.ctx, "what is normal mode?", onlyThinking());

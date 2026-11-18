@@ -596,7 +596,7 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
   it("live check 2026-11-18: \"does the opposite\" sets two operators apart over neighbouring sentences", () => {
     const best = { sourceLines: ["    for x in xs:", "        if x < best:", "            best = x"], words: true };
     expect(fixInWords("A `>` gate lets newer, larger values replace the current leader, so the running `best` climbs toward the maximum. A `<` gate does the opposite, keeping the smallest.", best)).toBe("swap");
-    expect(fixInWords("`>` keeps larger values. A `<` gate is the opposite.", best)).toBe("swap");
+    expect(fixInWords("`>` keeps larger values. A `<` gate does the opposite.", best)).toBe("swap");
     // one operator, or an opposite that is not about operators, stays free
     expect(fixInWords("Your `<` gate decides who stays. What does the loop do with the opposite case?", best)).toBeNull();
   });
@@ -627,6 +627,15 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     expect(fixInWords("Your `<=` on line 5 should include 3 itself: less than or equal.", mixed)).toBeNull();
     const adult = { sourceLines: ["    return age > 18"], words: true };
     expect(fixInWords("Use `>=` when you want greater than or equal.", { ...adult, asked: "what does >= mean?" })).toBeNull();
+    // Re-check: "check", "compare" and "condition" as hint words are not their comparison
+    expect(fixInWords("Check whether `range()` is inclusive: should the loop reach n?", loop)).toBeNull();
+    expect(fixInWords("Compare your loop with the task: should the total be inclusive of n?", loop)).toBeNull();
+    expect(fixInWords("The task's condition says the sum should be inclusive of n; trace your loop with n = 3.", loop)).toBeNull();
+    expect(fixInWords("Before you change anything, check the spec: does it make the upper bound inclusive?", loop)).toBeNull();
+    expect(fixInWords("Use a check like `is_adult(18)`; the spec says adults include those equal to 18 — what does yours return?", adult)).toBeNull();
+    expect(fixInWords("Your date-range check should be inclusive on both ends.", { sourceLines: ["function first(xs: Array<number>) {"], words: true })).toBeNull();
+    // re-check N2: "is the opposite" describes their own code
+    expect(fixInWords("Line 2 uses `-`. Line 3 uses `<`, which is the opposite of what you might expect.", { sourceLines: ["    return paid - price", "    if paid < price:"], words: true })).toBeNull();
   });
   it("review of leak-words: \"does the opposite\" in one sentence; an opposite sign or case is no operator contrast", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };
