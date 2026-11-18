@@ -276,6 +276,70 @@ const COMPARED = new RegExp(String.raw`\b(?:the|your|this|that)\s+(?:comparison|
 const NUM = String.raw`(\d+(?:\.\d+)?)`;
 const BOUND_UP = new RegExp(String.raw`\b(?:at least|no (?:less|fewer) than) ${NUM}\b|\b${NUM} or (?:older|more|above|over|higher|greater|bigger)\b`, "i");
 const BOUND_DOWN = new RegExp(String.raw`\b(?:at most|no (?:more|greater) than) ${NUM}\b|\b${NUM} or (?:younger|less|fewer|below|under|lower|smaller)\b`, "i");
+// Live check 2026-11-19: "the condition needs to test the opposite relationship", "whether changing the operator
+// would make the loop prefer larger numbers": their comparison told to turn round, with no operator named.
+const COMPARISON_NOUN = String.raw`(?:the|your|this|that)\s+(?:comparison|operator|condition|check|gate|sign)\b`;
+// Review of leak-choice: the verb on the comparison itself, or on a backticked comparison operator ("flip the `<`").
+const FLIP = new RegExp(String.raw`\b(?:flip\w*|revers\w*|invert\w*)\s+(?:${COMPARISON_NOUN}|(?:the\s+|your\s+)?\x60[<>]=?\x60)|\bswap\w*\s+${COMPARISON_NOUN}(?!\s+(?:and|with)\b)|\bturn\w*\s+${COMPARISON_NOUN}\s+(?:a)?round\b|\b(?:comparison|condition|operator|check)\s+is\s+backwards?\b`, "i");
+// The comparison noun says what turns ("the condition needs to test the opposite relationship"); "the other test case",
+// "the other way" and "the opposite direction of the list" are about something else.
+const OPPOSITE_WAY = new RegExp(String.raw`${COMPARISON_NOUN}[^.?!;]*\b(?:opposite|reverse)\s+(?:relationship|comparison|operator|direction)\b(?!\s+of\b)|\b(?:the\s+)?opposite\s+(?:comparison|operator)\b`, "i");
+const TURNED = new RegExp(String.raw`\bchang\w*\s+${COMPARISON_NOUN}[^.?!;]*\b(?:would|to|so)\b[^.?!;]*\b(?:prefer|keep|pick|select|find|choose)\w*\b[^.?!;]*\b(?:larger|bigger|greater|higher|smaller|lower|maximum|minimum)\b`, "i");
+// Talk about order, sorting, walking a list or returning early is about something other than which way the comparison faces.
+// Re-check I-A: only what is turned — "flip the condition order", a sort, walking the list, "reverse the check: return
+// early" — not "list" or "early" said beside a real turn ("…the biggest number in the list").
+const ORDER_TALK = /\b(?:comparison|condition|check)s?\s+order\b|\b(?:flip\w*|revers\w*)\s+(?:the|your)\s+order\b|\bsort\w*\b|\b(?:descending|ascending)\b|\b(?:walk\w*|iterat\w*|travers\w*)\s+(?:over\s+|through\s+)?(?:the|your)\s+list\b|\bdirection of the list\b|`not`|\b(?:comparison|condition|check)\s*:\s*return early\b/i;
+function turnedRound(sentence: string): boolean {
+  if (ORDER_TALK.test(sentence)) return false;
+  return FLIP.test(sentence) || TURNED.test(sentence) || (OPPOSITE_WAY.test(sentence) && TELLS.test(sentence));
+}
+// Re-check I-B: a type's brackets hold types (`HashMap<String, Vec<i32>>`), never `b and c` or `b && c`.
+const TYPE_ARG = String.raw`&?[\w:\[\]]+(?:<&?[\w:\[\]]+(?:,\s*&?[\w:\[\]]+)*>)?`;
+const GENERIC = new RegExp(String.raw`\b[A-Za-z_]\w*<${TYPE_ARG}(?:,\s*${TYPE_ARG})*>`, "g");
+/** Review I5: their comparisons, without the angle brackets of a generic (`Vec<i32>`, `Array<number>`). */
+function comparesIn(lines: string[]): boolean {
+  return lines.some((l) => /<=|>=|(?<![-=<>])[<>](?![=<>])/.test(l.replace(/->|=>/g, " ").replace(GENERIC, " ")));
+}
+
+/**
+ * Live check 2026-11-19: "should the stop value be `n` or `n + 1`?" — a stretch of their code offered beside the
+ * same stretch changed (a number or operator put in, taken out or swapped): the fix, as a choice.
+ */
+const isOpOrNumber = (t: string) => /^\d/.test(t) || /^(?:\/\/|<=|>=|==|!=|[-+*/%<>])$/.test(t);
+function smallChange(a: string[], b: string[]): boolean {
+  if (a.length === b.length) {
+    const diff = a.flatMap((t, i) => (t === b[i] ? [] : [i]));
+    return diff.length === 1 && isOpOrNumber(a[diff[0]]) && isOpOrNumber(b[diff[0]]) && /^\d/.test(a[diff[0]]) === /^\d/.test(b[diff[0]]);
+  }
+  const [long, short] = a.length > b.length ? [a, b] : [b, a];
+  const k = long.length - short.length;
+  if (k > 2) return false;
+  for (let p = 0; p <= short.length; p++) {
+    if (long.slice(0, p).join("\u0000") !== short.slice(0, p).join("\u0000")) break;
+    if (long.slice(p + k).join("\u0000") === short.slice(p).join("\u0000") && long.slice(p, p + k).every(isOpOrNumber)) return true;
+  }
+  return false;
+}
+// Review I1: offered as what it should be ("should the stop value be `n` or `n + 1`"); "does `i` end at `10` or `9`?"
+// asks what the code does now.
+const SHOULD_BE = /\b(?:should|needs? to|must|has to|ought to)\b/i;
+function choiceOffered(sentence: string, lines: string[], asked = ""): boolean {
+  const said = asked.replace(/\s+/g, "");
+  const lineTokens = lines.map((l) => l.match(CODE_TOKEN) ?? []);
+  const inCode = (t: string[]) => lineTokens.some((lt) => lt.some((_, at) => t.every((x, i) => lt[at + i] === x)));
+  for (const m of sentence.matchAll(/`([^`\n]+)`\s*,?\s*or\s+`([^`\n]+)`/gi)) {
+    // Re-check M-1: in the clause that offers the pair ("you should trace it: does `i` end at…" asks).
+    if (!SHOULD_BE.test(sentence.slice(0, m.index).split(/[:;—]/).pop() ?? "")) continue;
+    // Review I2: both sides named in their own question are their topic.
+    if ([m[1], m[2]].every((x) => said.includes(x.replace(/\s+/g, "")))) continue;
+    const a = m[1].trim().match(CODE_TOKEN) ?? [], b = m[2].trim().match(CODE_TOKEN) ?? [];
+    // Two bare operators ("either `*` or `/`") are the operator rules' to judge: listed, or set apart.
+    if (!a.length || !b.length || (a.length === 1 && b.length === 1 && !/^\d/.test(a[0]))) continue;
+    for (const [x, y] of [[a, b], [b, a]]) if (inCode(x) && !inCode(y) && smallChange(x, y)) return true;
+  }
+  return false;
+}
+
 /** A boundary told inclusive ("at least 18") that one of their strict comparisons against that same number leaves out. */
 // Review of leak-minors: the task's own words ("the task says … at least 18") and counts ("at most 10 times",
 // "0 or more numbers") are no boundary told.
@@ -440,6 +504,8 @@ export function fixInWords(raw: string, o: { sourceLines: string[]; words: boole
     const word = both ? /\b(over|minus|times|from)\b/i.exec(both[0])?.[1].toLowerCase() : undefined;
     const said = word && (word !== "from" || mirrored) ? CONNECTOR_OP[word] : undefined;
     if (said) before.add(said);
+    if (o.words && choiceOffered(sentence, lines, o.asked)) return "swap";
+    if (o.words && turnedRound(sentence) && comparesIn(lines) && !["<", ">", "<=", ">="].some((op) => askedOps.has(op))) return "swap";
     // A strict comparison of theirs (`>` with no `>=`) told, in so many words, to take in equality.
     // Review I3/I4: not when the sentence is about an inclusive one they already have, or one they asked about.
     const bound = o.words && TELLS.test(sentence) ? boundTold(sentence, lines) : null;

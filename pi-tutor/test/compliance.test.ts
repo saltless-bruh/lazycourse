@@ -637,6 +637,74 @@ describe("fixInWords: a fix told with no hidden solution to compare against (liv
     // re-check N2: "is the opposite" describes their own code
     expect(fixInWords("Line 2 uses `-`. Line 3 uses `<`, which is the opposite of what you might expect.", { sourceLines: ["    return paid - price", "    if paid < price:"], words: true })).toBeNull();
   });
+  it("live check 2026-11-19: the fix offered as a choice between their code and the changed code", () => {
+    const loop = { sourceLines: ["def sum_to(n):", "    for i in range(1, n):"], words: true };
+    expect(fixInWords("Look at the `range()` call in your function. Ask yourself whether the stop value should be `n` or `n + 1` to include the number you mean to sum.", loop)).toBe("swap");
+    expect(fixInWords("Should it be `range(1, n)` or `range(1, n + 1)`?", loop)).toBe("swap");
+    const adult = { sourceLines: ["    return age > 18"], words: true };
+    expect(fixInWords("Should the limit be `18` or `17`?", adult)).toBe("swap");
+    // two of their own names, a name for a name, and one expression alone stay free
+    expect(fixInWords("Which one does the loop add last: `i` or `n`?", loop)).toBeNull();
+    expect(fixInWords("Is the stop value `n` or `total`?", loop)).toBeNull();
+    expect(fixInWords("What does `range(1, n)` give for n = 4?", loop)).toBeNull();
+    expect(fixInWords("Should the stop value be `n` or `n + 1`?", { ...loop, words: false })).toBeNull();
+    // review of leak-choice I1/I2: a trace question about what the code does now, and the learner's own question
+    expect(fixInWords("Does `i` reach `n` or `n - 1`?", loop)).toBeNull();
+    expect(fixInWords("Does `total += i` add `i` or `i + 1`?", { sourceLines: ["    for i in range(1, n):", "        total += i"], words: true })).toBeNull();
+    expect(fixInWords("Does `i` end at `10` or `9`?", { sourceLines: ["    for i in range(10):"], words: true })).toBeNull();
+    expect(fixInWords("Does the list index start at `0` or `1`?", { sourceLines: ["    best = xs[0]"], words: true })).toBeNull();
+    expect(fixInWords("You're asking whether it should be `n` or `n + 1`; trace it with n = 3.", { ...loop, asked: "should it be n or n + 1?" })).toBeNull();
+    // re-check M-1/M-4: "should" in another clause, and their question spaced differently
+    expect(fixInWords("You should trace it: does `i` end at `10` or `9`?", { sourceLines: ["    for i in range(10):"], words: true })).toBeNull();
+    expect(fixInWords("Should it be `n` or `n + 1`?", { ...loop, asked: "should it be n or n+1?" })).toBeNull();
+  });
+  it("live check 2026-11-19: the comparison told to go the opposite way, with no operator named", () => {
+    const best = { sourceLines: ["        if x < best:"], words: true };
+    expect(fixInWords("To select the maximum, the condition needs to test the opposite relationship.", best)).toBe("swap");
+    expect(fixInWords("Ask yourself whether changing the operator would make the loop prefer larger numbers instead of smaller ones.", best)).toBe("swap");
+    expect(fixInWords("Try flipping the comparison.", best)).toBe("swap");
+    expect(fixInWords("What happens if you reverse the comparison on line 4?", best)).toBe("swap");
+    // the opposite case, a question about what it does, and code with no comparison stay free
+    expect(fixInWords("Your condition should also handle the opposite case, when the list is empty.", best)).toBeNull();
+    expect(fixInWords("The comparison on line 4 decides which numbers replace `best`. Which ones does it let through?", best)).toBeNull();
+    expect(fixInWords("To select the maximum, the condition needs to test the opposite relationship.", { sourceLines: ["    return a + b"], words: true })).toBeNull();
+    expect(fixInWords("Try flipping the comparison.", { ...best, asked: "what does < do vs >?" })).toBeNull();
+    // review of leak-choice I3/I4/I5: other tests, directions of a walk, condition order, sort order, generics
+    for (const hint of [
+      "Use the other test case, where the list is sorted, and see what the check returns.",
+      "You should run the other test too; what does the check give for `[5, 1]`?",
+      "Think about it the other way: what does the check need to keep?",
+      "The loop should walk the list in the opposite direction; what does the condition do then?",
+      "Make sure the condition handles the reverse direction of the list.",
+      "The other way to make the check is a `while` loop; you need to decide.",
+      "Flip the condition order so the empty case is checked first.",
+      "Reverse the check: return early when the list is empty.",
+      "Invert the condition with `not` to return early.",
+      "Try reversing the comparison of the sort order.",
+      "Flip the comparison in your sort key so it goes descending.",
+      "Changing the check order would help larger lists too.",
+      "If you change the condition, what happens with larger inputs?",
+    ]) expect(fixInWords(hint, best), hint).toBeNull();
+    expect(fixInWords("You need to think of the other test: what should the check do for an empty vec?", { sourceLines: ["fn total(xs: &Vec<i32>) -> i32 {"], words: true })).toBeNull();
+    expect(fixInWords("Flip the comparison.", { sourceLines: ["fn total(xs: &Vec<i32>) -> i32 {"], words: true })).toBeNull();
+    // re-check I-A: "in the list" and "return early" said beside a real turn of the comparison
+    for (const leak of [
+      "To find the biggest number in the list, the condition needs to test the opposite relationship.",
+      "Try flipping the comparison so it keeps the biggest item of the list.",
+      "You need the opposite operator to find the largest value in the list.",
+      "Flip the comparison and return early if nothing is bigger.",
+    ]) expect(fixInWords(leak, best), leak).toBe("swap");
+    // re-check I-B: two comparisons on one line are no generic
+    expect(fixInWords("Flip the comparison.", { sourceLines: ["    return a < b and c > b"], words: true })).toBe("swap");
+    expect(fixInWords("Flip the comparison.", { sourceLines: ["    if (a<b && c>d) {"], words: true })).toBe("swap");
+    expect(fixInWords("Flip the comparison.", { sourceLines: ["fn f(m: HashMap<String, Vec<i32>>) -> bool {"], words: true })).toBeNull();
+    // re-check M-3: swapping lines or blocks
+    expect(fixInWords("Swap the check and the assignment lines.", best)).toBeNull();
+    expect(fixInWords("Swap the condition with the one in the `while` loop.", best)).toBeNull();
+    // review M3: plainer ways of saying it
+    for (const leak of ["Swap the comparison.", "Turn the comparison around.", "The condition is backwards.", "You need the opposite comparison.", "Use the opposite operator.", "Flip the `<`."])
+      expect(fixInWords(leak, best), leak).toBe("swap");
+  });
   it("leak-minors: the rewordings the leak-words review found still missed", () => {
     const best = { sourceLines: ["        if x < best:"], words: true };
     expect(fixInWords("A `>` gate climbs toward the maximum. A `<` gate does just the opposite.", best)).toBe("swap");
