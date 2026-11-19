@@ -315,6 +315,9 @@ export default function (pi: ExtensionAPI): void {
   // Live check 2026-11-19: a reply that failed (stopReason "error") gets no line of ours, since Pi shows the error and its
   // own retry; the lost line waits for agent_settled, when no retry is left and no answer came.
   let lostPending = false;
+  // Review of lost-settled: Pi fires agent_end before it decides to retry a failed reply, so a failed onboarding reply
+  // waits — for the retry's own agent_end, or, when no answer comes, for agent_settled — before the next step.
+  let onboardAfterSettle = false;
   /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
   let onboardWaits = false;
   /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
@@ -635,7 +638,7 @@ export default function (pi: ExtensionAPI): void {
     // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
     // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
     rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
-    emptyAsked = false; pendingEmpty = false; lostShown = false; lostPending = false; onboardWaits = false; waitNote = null;
+    emptyAsked = false; pendingEmpty = false; lostShown = false; lostPending = false; onboardAfterSettle = false; onboardWaits = false; waitNote = null;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
@@ -1309,12 +1312,15 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // Live check 2026-11-19 (types.d.ts:820, agent-session.js:702): the run is over, no retry or continuation follows.
-  pi.on("agent_settled", (event) => {
+  pi.on("agent_settled", async (event, ctx) => {
     const owed = lostPending && !event.aborted && !lostShown;
     lostPending = false;
-    if (!owed) return;
-    lostShown = true;
-    pi.sendMessage({ customType: "tutor_lost", content: LOST_TEXT, display: true }, { triggerTurn: false });
+    if (owed) {
+      lostShown = true;
+      pi.sendMessage({ customType: "tutor_lost", content: LOST_TEXT, display: true }, { triggerTurn: false });
+    }
+    // Every retry failed: onboarding moves on now, as it did on agent_end before (its step re-asks or continues).
+    if (onboardAfterSettle) { onboardAfterSettle = false; if (!event.aborted) await stepOnboarding(ctx); }
   });
 
   // Spec §5: take the judgment (fence, fallback, or invented tool call) and apply it once per run.
@@ -3013,12 +3019,13 @@ export default function (pi: ExtensionAPI): void {
     startSpecJob(ctx, job);
   }
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", async (event, ctx) => {
     if (pendingEmpty) {
       pendingEmpty = false;
       if (!pendingRewrite) rewriteWhenIdle(ctx, "Your last reply had no text for the learner: your answer was only in your thinking. Write your answer to the learner now, following this turn's instruction.");
       // Author 2026-11-09: getting-started's own step (the note, the next question or dialog) runs after the retry.
-      if (onboardWaits && !pendingRewrite) return;
+      // Review of onboard-retry I1: the re-ask owns the step now, not a timed-out try before it.
+      if (onboardWaits && !pendingRewrite) { onboardAfterSettle = false; return; }
     }
     onboardWaits = false;
     if (pendingRewrite) {
@@ -3029,13 +3036,20 @@ export default function (pi: ExtensionAPI): void {
       rewriteWhenIdle(ctx, `Your last reply broke this turn's rules (${issues.join(", ")}). Write it again, following this turn's instruction.`);
     }
     if (!inOnboarding() || !onboarding) return;
+    const last = [...event.messages].reverse().find((m) => m.role === "assistant") as { stopReason?: string } | undefined;
+    if (last?.stopReason === "error") { onboardAfterSettle = true; return; }
+    onboardAfterSettle = false;
+    await stepOnboarding(ctx);
+  });
+  async function stepOnboarding(ctx: ExtensionContext) {
+    if (!inOnboarding() || !onboarding) return;
     // Third review I1/M2: what the blank reply recorded stays; the retry's (or the learner's next) note adds to it.
     const note = waitNote ? { ...waitNote, ...(intake ?? {}) } : intake;
     intake = undefined; waitNote = null;
     saveOnboarding(applyTurn(onboarding, note === undefined ? null : note));
     try { await onboardStep(ctx); } catch (e) { ctx.ui.notify(`onboarding: ${e instanceof Error ? e.message : String(e)}`, "error"); }
     paint();
-  });
+  }
 
   pi.registerCommand("tutor-start", {
     description: describeCmd("/tutor-start"),

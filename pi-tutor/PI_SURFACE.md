@@ -213,6 +213,10 @@ Re-verify every line when bumping versions.
   (`tutor_lost`, `pi.sendMessage(…, { triggerTurn: false })`) is appended and shown at once. Observed 2026-11-19:
   for a failed reply (stopReason "error") Pi already renders "Error: <message>" (assistant-message.js:175) and a retry
   countdown, and on final failure "Retry failed after N attempts" (interactive-mode.js:3104).
+- Observed 2026-11-19 (Pi 1.5.0, agent-session.js `_handlePostAgentRun`): `agent_end` fires *before* Pi decides to
+  retry a failed reply; each retry (`agent.continue()`) brings its own `message_end` and `agent_end`, and
+  `agent_settled` comes once after the last. The onboarding step therefore skips an `agent_end` whose last assistant
+  message has stopReason "error" and runs on the retry's `agent_end`, or on `agent_settled` when no answer came.
 
 ## Onboarding (spec 2026-10-19 §6; verified in Pi 1.3.0 types.d.ts, 2026-10-19)
 - `ctx.ui.select(title, options)` (types.d.ts:74), `ctx.ui.confirm(title, message)` → `Promise<boolean>`
