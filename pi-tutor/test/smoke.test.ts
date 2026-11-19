@@ -3102,6 +3102,44 @@ describe("empty replies", () => {
     });
   });
 
+  it("getting-started: a timed-out reply does not move onboarding on while Pi retries; the retry's answer does, once", async () => {
+    await onboardingRun(async (b, saved) => {
+      const timedOut = { role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] };
+      await turn(b.events, b.ctx, "I want to learn python", timedOut);
+      // Pi fires agent_end before it decides to retry (agent-session.js _handlePostAgentRun).
+      await b.events["agent_end"]({ type: "agent_end", messages: [timedOut] }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(0);
+      // Pi's retry (agent.continue): another message_end and agent_end, then the run settles.
+      const answer = assistant(`Nice to meet you! How long have you been coding?\n${NOTE({ goal: "learn python" })}`);
+      await b.events["message_end"]({ type: "message_end", message: answer }, b.ctx);
+      await b.events["turn_end"]({ type: "turn_end", message: answer }, b.ctx);
+      await b.events["agent_end"]({ type: "agent_end", messages: [answer] }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(1);
+      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(1); // the settle does not step a second time
+    });
+  });
+
+  it("getting-started: when every retry fails, onboarding moves on once, after the run ends", async () => {
+    await onboardingRun(async (b, saved) => {
+      const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] });
+      const first = timedOut();
+      await turn(b.events, b.ctx, "I want to learn python", first);
+      await b.events["agent_end"]({ type: "agent_end", messages: [first] }, b.ctx);
+      const again = timedOut();
+      await b.events["message_end"]({ type: "message_end", message: again }, b.ctx);
+      await b.events["agent_end"]({ type: "agent_end", messages: [again] }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(0);
+      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(1);
+    });
+  });
+
   it("getting-started: a note in the blank reply is kept for the retry's step", async () => {
     await onboardingRun(async (b, saved) => {
       const m = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: NOTE({ experience: "none yet" }) }] };
