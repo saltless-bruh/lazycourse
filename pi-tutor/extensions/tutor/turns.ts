@@ -12,7 +12,8 @@ export const REWRITE_TEXT = "_(tutor is rewriting this reply…)_";
 export const EMPTY_TEXT = "_(tutor is writing its answer…)_";
 export const LOST_TEXT = "I lost my answer on the way — please ask again.";
 /** An error Pi does not retry (a bad key, a used-up quota, an unknown model): asking again cannot help. */
-export const FAILED_TEXT = "The model could not answer (the error is shown above). Asking again will not help until that is fixed: check the model with /model, or your provider account.";
+// Review of lost-kind m2: the error itself says why (a content filter, an oversized request…); the model or account is only the usual case.
+export const FAILED_TEXT = "The model could not answer, and asking again the same way will probably not help; the error above says why (often the model choice or the provider account — see /model).";
 
 /** What a reply at each step may be; the reply check (compliance.checkTurn) holds it to these. */
 export const TURN_LIMITS: Record<TurnStep, { maxSentences: number | null; ownCode: boolean; question: boolean; noCode?: boolean }> = {
