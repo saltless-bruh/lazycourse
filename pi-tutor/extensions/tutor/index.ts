@@ -208,7 +208,7 @@ export default function (pi: ExtensionAPI): void {
    * - `step`: this turn's step on the attempt ladder (spec 2026-10-21 §5), `null` outside a ladder role.
    * - `reasks`/`rejected`: spec 2026-10-21 §6 held replies; `names`/`sourceLines`: what the reply check compares with.
    */
-  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; asked?: string; code?: string; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
+  let run: { prompt: string; step: TurnStep | null; judged: boolean; aside?: boolean; asked?: string; code?: string; episodeId?: string | null; lang?: string | null; reasks?: number; rejected?: boolean; names?: Set<string>; sourceLines?: string[]; files?: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] }; referenceCode?: string; taskTerms?: Set<string> } | null = null;
   /** A held reply failed its check: the re-ask count carried into the "[tutor] rewrite:" run, and its reasons. */
   let rewrite: { reasks: number; issues: TurnIssue[]; step: TurnStep; reason?: string } | null = null;
   /** Reasons to send as the next "[tutor] rewrite:" once this run ends. */
@@ -855,8 +855,10 @@ export default function (pi: ExtensionAPI): void {
       const root = realCwd(project?.path ?? session?.cwd ?? process.cwd());
       let tasksMd: string | null = null;
       try { tasksMd = readFileSync(join(root, "spec", "tasks.md"), "utf8"); } catch { tasksMd = null; }
-      const sources = projectSources(root);
-      if (snap && realCwd(snap.path).startsWith(root + "/")) sources.push(snap.lines.join("\n"));
+      const files: string[] = [];
+      const sources = projectSources(root, files);
+      if (snap && realCwd(snap.path).startsWith(root + "/")) { sources.push(snap.lines.join("\n")); files.push(relative(root, realCwd(snap.path))); }
+      run.files = files;
       run.names = ownNames({ tasksMd, sources });
       // Learner-session fixes (spec §5): the current task's words — the recipe's task, the episode's, else the first
       // open one — or, before a plan, the README's title and first paragraph (the project's own words).
@@ -1226,7 +1228,7 @@ export default function (pi: ExtensionAPI): void {
     const cur = run;
     const text = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (held() && cur && cur.step !== null && text.trim()) {
-      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: cur.asked });
+      let issues: TurnIssue[] = checkTurn(text, { step: cur.step, names: cur.names ?? new Set(), sourceLines: cur.sourceLines ?? [], referenceLines: cur.referenceLines, proseScope: cur.proseScope, referenceCode: cur.referenceCode, taskTerms: cur.taskTerms, asked: cur.asked, files: cur.files });
       // Habits Task 19: the optional second reader sees only a final reply code passed; it can only make it stricter.
       let reason: string | undefined, typedMeanwhile = false;
       // Live check 2026-11-17: a reply with only the judgment block is caught as empty below; the reader would only cost time.

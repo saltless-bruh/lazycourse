@@ -37,7 +37,8 @@ export function sourceHash(root: string): string {
 }
 
 /** The learner's source texts under `root` (same files the hash covers): their own names come from these. */
-export function projectSources(root: string): string[] {
+/** `paths`, when given, gets each file read, root-relative (review of place-tight: the reply check's places). */
+export function projectSources(root: string, paths?: string[]): string[] {
   const out: string[] = [];
   let bytes = 0;
   const walk = (dir: string) => {
@@ -56,6 +57,7 @@ export function projectSources(root: string): string[] {
       if (text.includes("\0")) continue;
       bytes += text.length;
       out.push(text);
+      paths?.push(relative(root, abs));
     }
   };
   walk(root);

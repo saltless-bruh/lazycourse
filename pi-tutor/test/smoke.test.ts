@@ -2571,6 +2571,22 @@ describe("held replies (spec 2026-10-21 §6)", () => {
     return Object.assign(opts, { message: r?.message });
   };
 
+  it("review of place-tight: a bare name of one of their own files is a place, though it carries their function's name", async () => {
+    const dir = mkd(pjoin(tmp(), "pitutor-held-js-"));
+    mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "split_amount.js"), "function split_amount(total, people) {\n  return total * people;\n}\n");
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P2.T2 add `split_amount(total, people)` = total / people\n");
+    const b = await boot({ cwd: dir, branch: [ep(1)] });
+    await level10(b);
+    const r = reply("Open `split_amount.js` and trace it with 120 and 4. What do you get?");
+    await turn(b.events, b.ctx, "help", r);
+    expect(textOf(r)).toContain("Open `split_amount.js`");
+    // a name that is no file of theirs is still their code
+    const leak = reply("Open `split_amount.json` and trace it with 120 and 4. What do you get?");
+    await turn(b.events, b.ctx, "help", leak);
+    expect(textOf(leak)).not.toContain("split_amount.json");
+  });
+
   it("a hint showing a line of the hidden reference is held, though no task names it (spec 2026-10-21 §7)", async () => {
     const { realpathSync } = await import("node:fs");
     const dir = realpathSync(mkd(pjoin(tmp(), "pitutor-ref-")));
