@@ -213,6 +213,14 @@ Re-verify every line when bumping versions.
   (`tutor_lost`, `pi.sendMessage(…, { triggerTurn: false })`) is appended and shown at once. Observed 2026-11-19:
   for a failed reply (stopReason "error") Pi already renders "Error: <message>" (assistant-message.js:175) and a retry
   countdown, and on final failure "Retry failed after N attempts" (interactive-mode.js:3104).
+- `import { isRetryableAssistantError } from "@earendil-works/pi-ai"` (Pi 1.5.0; pi-ai dist/utils/retry.d.ts:57,
+  `(message: AssistantMessage) => boolean`, re-exported by the package root and by `pi-ai/compat`). Inside Pi the
+  extension loader aliases `@earendil-works/pi-ai` to its extension view (loader.js:56-60,
+  pi-ai-extension-view.js `export * from "@earendil-works/pi-ai/compat"`), which carries it; checked 2026-11-19 that
+  it is a function there and gives true for "Request timed out.", false for "401 invalid api key" and
+  "insufficient_quota". It is Pi's own retry rule (agent-session.js `_isRetryableError`), so the lost line at
+  `agent_settled` says "please ask again" only for errors Pi would have retried. The compat entry is marked
+  temporary in pi-ai; re-check this import on each Pi update.
 - Observed 2026-11-19 (Pi 1.5.0, agent-session.js `_handlePostAgentRun`): `agent_end` fires *before* Pi decides to
   retry a failed reply; each retry (`agent.continue()`) brings its own `message_end` and `agent_end`, and
   `agent_settled` comes once after the last. The onboarding step therefore skips an `agent_end` whose last assistant
