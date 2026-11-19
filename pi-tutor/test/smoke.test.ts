@@ -3222,6 +3222,9 @@ describe("empty replies", () => {
     const e = (await b.events["message_end"]({ type: "message_end", message: retried }, b.ctx)) as { message?: object } | undefined;
     expect(visible(e?.message ?? retried)).toMatch(/writing its answer/);
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    // Review of lost-settled I1: the run settles before the re-ask starts; the re-ask owes the answer, so no lost line yet.
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost")).toHaveLength(0);
     await settle();
     const again = onlyThinking();
     await customTurn(b, rewrites(b)[0].message as object, again);
