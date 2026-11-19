@@ -694,7 +694,11 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   const seen = [...quoted];
   // Live check 2026-11-19 (gpt-6.1-sol): `average.py:2` is a place in their file, not their code.
   // Review of leak-example: a bare file name, `:N:M` and "line N" too; only real file types, so `numbers.sort` stays code.
-  const PLACE = /^[\w./~-]+\.(?:py|js|mjs|cjs|ts|tsx|jsx|lua|rs|go|md|toml|json|ya?ml|txt|csv|html|css|sh)(?::\d+(?:[-:]\d+)?|\s+line\s+\d+)?$/;
+  // Review of place-names: `json`, `ts`, `go`, `rs`, `md`, `sh`, `css`, `html`, `js` are also field and method names
+  // (`response.json`, `event.ts`), so bare they count only with a path; with a line they are a place whatever the type.
+  const EXT = String.raw`(?:py|js|mjs|cjs|ts|tsx|jsx|lua|rs|go|md|toml|json|ya?ml|txt|csv|html|css|sh)`;
+  const RARE = String.raw`(?:py|lua|mjs|cjs|tsx|jsx|toml|ya?ml|txt|csv)`;
+  const PLACE = new RegExp(String.raw`^(?:[\w./~-]+\.${EXT}(?::\d+(?:[-:]\d+)?|\s+line\s+\d+)|[\w.~-]+\.${RARE}|[\w.~-]*\/[\w./~-]+\.${EXT})$`);
   const spanLeaks = (span: string) => !PLACE.test(span.trim()) && leaks(span) && !seen.some((l) => l.includes(span.trim()));
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
