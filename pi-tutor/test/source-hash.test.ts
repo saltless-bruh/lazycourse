@@ -33,6 +33,10 @@ describe("final review I4: the learner's source files, not a virtualenv or the p
     writeFileSync(join(d, "main.py"), "def split_amount(total, people):\n    return total * people\n");
     const h1 = sourceHash(d);
     expect(projectSources(d).some((t) => t.includes("split_amount"))).toBe(true);
+    // Review of place-tight: the same walk names each file, root-relative, for the reply check's places.
+    const paths: string[] = [];
+    projectSources(d, paths);
+    expect(paths).toEqual(["main.py"]);
     writeFileSync(join(d, "main.py"), "def split_amount(total, people):\n    return total / people\n");
     expect(sourceHash(d)).not.toBe(h1);
   });

@@ -946,6 +946,12 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
     const fetchy = { step: "hint" as const, names: new Set(["response", "event"]), sourceLines: ["const data = response;", "const when = event.time;"] };
     expect(checkTurn("Look at what `response.json` gives you. What do you get?", fetchy)).toContain("own-code");
     expect(checkTurn("Try `event.ts` there. What do you get?", fetchy)).toContain("own-code");
+    // their own file, named bare, is a place whatever its type
+    const js = { step: "hint" as const, names: new Set(["average"]), sourceLines: ["function average(xs) {", "  return xs.length / sum(xs);", "}"] };
+    expect(checkTurn("Open `average.js`. What do you get?", js)).toContain("own-code");
+    expect(checkTurn("Open `average.js`. What do you get?", { ...js, files: ["average.js"] })).not.toContain("own-code");
+    expect(checkTurn("Open `./src/average.js`. What do you get?", { ...js, files: ["src/average.js"] })).not.toContain("own-code");
+    expect(checkTurn("Open `average.json`. What do you get?", { ...js, files: ["average.js"] })).toContain("own-code");
     for (const span of ["src/response.json", "response.json:3", "event.ts line 2"])
       expect(checkTurn(`Open \`${span}\`. What do you get?`, fetchy), span).not.toContain("own-code");
     // at the fix step their code may be shown

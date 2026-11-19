@@ -654,7 +654,9 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   /** The learner's own message this reply answers: what they named themselves is their topic (fixInWords). */
   asked?: string;
   /** Learner-session fixes (spec §5): the hidden solution's code, and the task's (or project's) content words. */
-  referenceCode?: string; taskTerms?: Set<string> }): TurnIssue[] {
+  referenceCode?: string; taskTerms?: Set<string>;
+  /** Their project's files, root-relative: a bare name of one (`average.js`) is a place whatever its type. */
+  files?: string[] }): TurnIssue[] {
   const limits = TURN_LIMITS[o.step];
   const issues = new Set<TurnIssue>();
   // Final review I7: the judgment (fenced or bare JSON) is not part of the reply the learner reads.
@@ -699,7 +701,10 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   const EXT = String.raw`(?:py|js|mjs|cjs|ts|tsx|jsx|lua|rs|go|md|toml|json|ya?ml|txt|csv|html|css|sh)`;
   const RARE = String.raw`(?:py|lua|mjs|cjs|tsx|jsx|toml|ya?ml|txt|csv)`;
   const PLACE = new RegExp(String.raw`^(?:[\w./~-]+\.${EXT}(?::\d+(?:[-:]\d+)?|\s+line\s+\d+)|[\w.~-]+\.${RARE}|[\w.~-]*\/[\w./~-]+\.${EXT})$`);
-  const spanLeaks = (span: string) => !PLACE.test(span.trim()) && leaks(span) && !seen.some((l) => l.includes(span.trim()));
+  // Review of place-tight: `average.js` beside their `function average` is their file when they have one by that name.
+  const own = new Set((o.files ?? []).flatMap((f) => [f, f.split("/").pop() ?? f]));
+  const ownFile = (span: string) => own.has(span.replace(/(?::\d+(?:[-:]\d+)?|\s+line\s+\d+)$/, "").replace(/^\.\//, ""));
+  const spanLeaks = (span: string) => !PLACE.test(span.trim()) && !ownFile(span.trim()) && leaks(span) && !seen.some((l) => l.includes(span.trim()));
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
   // statement, expression or bare operator in backticks, unless it quotes a line the learner already has.
