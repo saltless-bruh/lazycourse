@@ -693,7 +693,8 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
   const seen = [...quoted];
   // Live check 2026-11-19 (gpt-6.1-sol): `average.py:2` is a place in their file, not their code.
-  const PLACE = /^[\w./~-]+\.\w+:\d+(?:-\d+)?$/;
+  // Review of leak-example: a bare file name, `:N:M` and "line N" too; only real file types, so `numbers.sort` stays code.
+  const PLACE = /^[\w./~-]+\.(?:py|js|mjs|cjs|ts|tsx|jsx|lua|rs|go|md|toml|json|ya?ml|txt|csv|html|css|sh)(?::\d+(?:[-:]\d+)?|\s+line\s+\d+)?$/;
   const spanLeaks = (span: string) => !PLACE.test(span.trim()) && leaks(span) && !seen.some((l) => l.includes(span.trim()));
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
