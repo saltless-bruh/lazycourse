@@ -620,9 +620,11 @@ const CODE_TAGS = new Set(["python", "py", "javascript", "js", "typescript", "ts
 function shapeOf(lines: string[]): string[] {
   return lines
     .map((l) => l.replace(/\s#.*$|\s--.*$|\s\/\/.*$/, "").trim())
-    .filter((l) => l && !/^(?:#|--|\/\/)/.test(l))
+    // Review of leak-example: closing braces, `end`, `...`/`pass` and docstrings carry no step of the function.
+    .filter((l) => l && !/^(?:#|--|\/\/)/.test(l) && !/^(?:[{}()\[\];,]+|end|\.\.\.|pass)$/.test(l))
     .map((l) => (l.match(CODE_TOKEN) ?? []).map((t, i, all) =>
-      /^['"]/.test(t) || /^\d/.test(t) ? "L" : /^[A-Za-z_]/.test(t) && !KEYWORDS.has(t) && !LANGUAGE.has(t) && all[i - 1] !== "." ? "N" : t).join(" "));
+      /^['"]/.test(t) || /^\d/.test(t) ? "L" : /^[A-Za-z_]/.test(t) && !KEYWORDS.has(t) && !LANGUAGE.has(t) && all[i - 1] !== "." ? "N" : t).join(" "))
+    .filter((l) => l !== "L");
 }
 function commonInOrder(a: string[], b: string[]): number {
   const row = new Array(b.length + 1).fill(0);
@@ -632,20 +634,19 @@ function commonInOrder(a: string[], b: string[]): number {
   }
   return row[b.length];
 }
-/** Their function's lines, one block per definition (Python by indentation, others by braces via functionLines). */
-function ownFunctions(lines: string[]): string[][] {
-  const names = lines.flatMap((l) => /^\s*(?:def|fn|func|function)\s+([A-Za-z_]\w*)/.exec(l)?.[1] ?? []);
-  return names.map((n) => functionLines(lines, n)).filter((b) => b.length);
+const DEF_NAME = /^\s*(?:def|fn|func|function)\s+([A-Za-z_]\w*)/;
+/** The shape of each function defined in `lines` (Python by indentation, others by braces via functionLines). */
+function functionShapes(lines: string[]): string[][] {
+  return lines.flatMap((l) => DEF_NAME.exec(l)?.[1] ?? []).map((n) => shapeOf(functionLines(lines, n)));
 }
-/** An example of three or more of their function's lines, by shape and in order, with a line put in or changed. */
-function renamedCopy(code: string, sourceLines: string[]): boolean {
-  const example = shapeOf(code.split(/\r?\n/));
-  return ownFunctions(sourceLines).some((block) => {
-    const theirs = shapeOf(block);
-    if (theirs.length < 3 || example.length > theirs.length + 2) return false;
-    const same = commonInOrder(theirs, example);
-    return same / theirs.length >= 0.75 && same < example.length;
-  });
+/**
+ * Review of leak-example: the example's own function is all of one of theirs, line for line by shape and in order,
+ * with one or two lines put in — their code plus the missing step. A line changed, a call after it, or another
+ * accumulator (`count += 1` for `s += n`) is a different program.
+ */
+function renamedCopy(code: string, theirs: string[][]): boolean {
+  return functionShapes(code.split(/\r?\n/)).some((example) => theirs.some((mine) =>
+    mine.length >= 3 && example.length > mine.length && example.length <= mine.length + 2 && commonInOrder(mine, example) === mine.length));
 }
 
 export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] };
@@ -669,6 +670,7 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && !/^\^/.test(t) && (usesOwnName(t, o.names) || answer.has(t));
   };
   let quotedProse = "";
+  let ownShapes: string[][] | undefined;
   for (const m of text.matchAll(FENCES)) {
     const tag = m[2].trim().toLowerCase();
     if (tag === "tutor-judgment") continue;
@@ -682,7 +684,7 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
       const t = l.replace(tag === "python" || tag === "py" ? /\s#.*$/ : tag === "lua" ? /\s--.*$/ : /\s\/\/.*$/, "").trim();
       return t !== "" && !quoted.has(t) && changedLine(t, [...quoted]);
     })) issues.add("own-code");
-    if (!limits.ownCode && CODE_TAGS.has(tag) && renamedCopy(m[3], o.sourceLines)) issues.add("own-code");
+    if (!limits.ownCode && CODE_TAGS.has(tag) && renamedCopy(m[3], ownShapes ??= functionShapes(o.sourceLines))) issues.add("own-code");
     // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
     if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }

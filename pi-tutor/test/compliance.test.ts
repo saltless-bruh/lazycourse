@@ -910,13 +910,25 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
     const o = { step: "hint" as const, names: new Set(["double_all"]), sourceLines: ["def double_all(nums):", "    result = []", "    for x in nums:", "        result.append(x * 2)", "", "", "print(double_all([1, 2, 3]))  # expected [2, 4, 6]"] };
     const live = "**Example** (unrelated — using a string instead of numbers):\n```python\ndef double_chars(s):\n    result = []\n    for ch in s:\n        result.append(ch * 2)\n    return result\n```\nWhat does yours give back?";
     expect(checkTurn(live, o)).toContain("own-code");
-    // a changed line instead of an added one
-    const vowels = { step: "hint" as const, names: new Set(["count_vowels"]), sourceLines: ["def count_vowels(text):", "    for ch in text:", "        count = 0", "        if ch in \"aeiou\":", "            count += 1", "    return count"] };
-    expect(checkTurn("```python\ndef count_digits(word):\n    total = 0\n    for c in word:\n        if c in \"0123456789\":\n            total += 1\n    return total\n```", vowels)).toContain("own-code");
+    // with a call after it, or a docstring, it is still their function plus the missing line
+    expect(checkTurn("```python\ndef double_chars(s):\n    \"\"\"Double each char.\"\"\"\n    result = []\n    for ch in s:\n        result.append(ch * 2)\n    return result\n\nprint(double_chars(\"ab\"))\n```", o)).toContain("own-code");
     // the same shape with the bug kept, a different shape, and a short example stay free
     expect(checkTurn("```python\ndef triple_chars(s):\n    out = []\n    for ch in s:\n        out.append(ch * 3)\n```\nWhat does this give back for \"ab\"?", o)).toEqual([]);
     expect(checkTurn("```python\ndef shout(words):\n    return [w.upper() for w in words]\n```\nWhat comes back?", o)).toEqual([]);
     expect(checkTurn("```python\nfor ch in \"ab\":\n    print(ch * 2)\n```\nWhat prints?", o)).toEqual([]);
+    // review of leak-example: the same bug with a call line, the body varied, another accumulator, a 4-line check
+    // changed, tiny brace functions, and a partial quote of theirs stay free
+    expect(checkTurn("```python\ndef triple_chars(s):\n    out = []\n    for ch in s:\n        out.append(ch * 3)\n\nprint(triple_chars(\"ab\"))\n```", o)).toEqual([]);
+    expect(checkTurn("```python\ndef shout_all(words):\n    out = []\n    for w in words:\n        out.append(w.upper())\n```", o)).toEqual([]);
+    const total = { step: "hint" as const, names: new Set(["total"]), sourceLines: ["def total(nums):", "    s = 0", "    for n in nums:", "        s += n", "    return s"] };
+    expect(checkTurn("```python\ndef long_words(words):\n    count = 0\n    for w in words:\n        if len(w) > 3:\n            count += 1\n    return count\n```", total)).toEqual([]);
+    expect(checkTurn("```python\ndef product(vals):\n    p = 1\n    for v in vals:\n        p *= v\n    return p\n```", total)).toEqual([]);
+    const adult = { step: "hint" as const, names: new Set(["is_adult"]), sourceLines: ["def is_adult(age):", "    if age >= 18:", "        return True", "    return False"] };
+    expect(checkTurn("```python\ndef is_teen(age):\n    if age >= 13 and age <= 19:\n        return True\n    return False\n```", adult)).toEqual([]);
+    expect(checkTurn("```python\ndef is_positive(n):\n    if n > 0:\n        return True\n    return False\n\nprint(is_positive(-3))\n```", adult)).toEqual([]);
+    const square = { step: "hint" as const, names: new Set(["square"]), sourceLines: ["function square(n) {", "  return n * n;", "}"] };
+    expect(checkTurn("```js\nfunction area(w) {\n  const h = 2;\n  return w * h;\n}\n```", square)).toEqual([]);
+    expect(checkTurn("Your function so far:\n```python\ndef double_all(nums):\n    result = []\n    for x in nums:\n        ...\n```\nWhat does it hand back?", o)).toEqual([]);
     // at the fix step their code may be shown
     expect(checkTurn(live, { ...o, step: "fix" })).not.toContain("own-code");
   });
