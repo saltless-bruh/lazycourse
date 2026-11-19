@@ -942,6 +942,12 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
     for (const span of ["average.py", "average.py:2:5", "average.py line 2", "src/average.py"])
       expect(checkTurn(`Open \`${span}\`. What do you get?`, avg), span).not.toContain("own-code");
     expect(checkTurn("Use `average.sort` here. What do you get?", avg)).toContain("own-code");
+    // review of place-names: a bare `name.json` / `name.ts` is as likely a field as a file; with a path or a line it is a place
+    const fetchy = { step: "hint" as const, names: new Set(["response", "event"]), sourceLines: ["const data = response;", "const when = event.time;"] };
+    expect(checkTurn("Look at what `response.json` gives you. What do you get?", fetchy)).toContain("own-code");
+    expect(checkTurn("Try `event.ts` there. What do you get?", fetchy)).toContain("own-code");
+    for (const span of ["src/response.json", "response.json:3", "event.ts line 2"])
+      expect(checkTurn(`Open \`${span}\`. What do you get?`, fetchy), span).not.toContain("own-code");
     // at the fix step their code may be shown
     expect(checkTurn(live, { ...o, step: "fix" })).not.toContain("own-code");
   });
