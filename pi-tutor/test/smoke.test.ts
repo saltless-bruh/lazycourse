@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, nudgeTurn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import { hideJudgment } from "../extensions/tutor/compliance.js";
-import { HOLD_TEXT, REWRITE_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
+import { HOLD_TEXT, REWRITE_TEXT, LOST_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
 import { PY_EXAM } from "./exam-fixtures.js";
@@ -3172,32 +3172,59 @@ describe("empty replies", () => {
     expect(rewrites(b)).toHaveLength(0);
   });
 
-  it("live check 2026-11-18: Pi's own retries of a timed-out reply show the lost line once, a new message gets it again", async () => {
+  it("live check 2026-11-19: while Pi retries a timed-out reply nothing is added; the lost line comes once, when the run ends with no answer", async () => {
     const b = await boot();
+    const lost = () => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost");
     const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] });
     const first = timedOut();
     await turn(b.events, b.ctx, "what is normal mode?", first);
-    expect(visible(first)).toMatch(/lost my answer/i);
+    // Pi shows "Error: Request timed out." and its own retry countdown; "please ask again" would be wrong now.
+    expect(visible(first)).toBe("");
     // Pi retries with agent.continue(): no before_agent_start, only another message_end.
-    for (let n = 0; n < 4; n++) {
+    for (let n = 0; n < 3; n++) {
       const retry = timedOut();
       const e = (await b.events["message_end"]({ type: "message_end", message: retry }, b.ctx)) as { message?: object } | undefined;
       expect(visible(e?.message ?? retry)).toBe("");
     }
-    const later = timedOut();
-    await turn(b.events, b.ctx, "and insert mode?", later);
-    expect(visible(later)).toMatch(/lost my answer/i);
+    expect(lost()).toHaveLength(0);
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(lost()).toHaveLength(1);
+    expect((lost()[0].message as { content: string; display: boolean })).toMatchObject({ content: LOST_TEXT, display: true });
+    expect(lost()[0].options).toMatchObject({ triggerTurn: false });
+    // a second settle of the same message adds nothing
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(lost()).toHaveLength(1);
+    // the next message can lose its answer too
+    await turn(b.events, b.ctx, "and insert mode?", timedOut());
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(lost()).toHaveLength(2);
+  });
+
+  it("live check 2026-11-19: a retry that answers, or a run stopped with Esc, gets no lost line", async () => {
+    const b = await boot();
+    const lost = () => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost");
+    await turn(b.events, b.ctx, "what is normal mode?", { role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] });
+    const good = assistant(`Normal mode is for commands.\n${JUDGED}`);
+    await b.events["message_end"]({ type: "message_end", message: good }, b.ctx);
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(lost()).toHaveLength(0);
+    await turn(b.events, b.ctx, "and insert mode?", { role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] });
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: true }, b.ctx);
+    expect(lost()).toHaveLength(0);
   });
 
   it("re-check of leak-words N4: a timeout, then empty twice, still ends with the lost line", async () => {
     const b = await boot();
     const first = { role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] };
     await turn(b.events, b.ctx, "what is normal mode?", first);
-    expect(visible(first)).toMatch(/lost my answer/i);
+    expect(visible(first)).toBe("");
     const retried = onlyThinking();
     const e = (await b.events["message_end"]({ type: "message_end", message: retried }, b.ctx)) as { message?: object } | undefined;
     expect(visible(e?.message ?? retried)).toMatch(/writing its answer/);
     await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+    // Review of lost-settled I1: the run settles before the re-ask starts; the re-ask owes the answer, so no lost line yet.
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost")).toHaveLength(0);
     await settle();
     const again = onlyThinking();
     await customTurn(b, rewrites(b)[0].message as object, again);

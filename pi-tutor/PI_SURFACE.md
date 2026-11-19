@@ -207,6 +207,13 @@ Re-verify every line when bumping versions.
   editor card, set every turn in `before_agent_start`). `package.json` `"prompts": ["./prompts/*.md"]` is non-recursive,
   so `prompts/system/*.md` are not registered as `/` templates.
 
+- `pi.on("agent_settled", (event) => …)` (Pi 1.5.0, types.d.ts:820 `AgentSettledEvent { aborted }`, :1234;
+  agent-session.js:702 `_emitAgentSettled`): fired once a run has fully settled, after Pi's own automatic retries
+  (`auto_retry_start` / `auto_retry_end`, not exposed to extensions). Pi is idle then, so the stuck-reply lost line
+  (`tutor_lost`, `pi.sendMessage(…, { triggerTurn: false })`) is appended and shown at once. Observed 2026-11-19:
+  for a failed reply (stopReason "error") Pi already renders "Error: <message>" (assistant-message.js:175) and a retry
+  countdown, and on final failure "Retry failed after N attempts" (interactive-mode.js:3104).
+
 ## Onboarding (spec 2026-10-19 §6; verified in Pi 1.3.0 types.d.ts, 2026-10-19)
 - `ctx.ui.select(title, options)` (types.d.ts:74), `ctx.ui.confirm(title, message)` → `Promise<boolean>`
   (types.d.ts:76), `ctx.ui.input(title, placeholder)` (types.d.ts:78): the fallback questions, the level
