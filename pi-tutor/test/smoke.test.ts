@@ -3123,6 +3123,25 @@ describe("empty replies", () => {
     });
   });
 
+  it("getting-started: a timeout, then an empty retry: the re-ask owns the step, not the settle (review of onboard-retry I1)", async () => {
+    await onboardingRun(async (b, saved) => {
+      const timedOut = { role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] };
+      await turn(b.events, b.ctx, "I want to learn python", timedOut);
+      await b.events["agent_end"]({ type: "agent_end", messages: [timedOut] }, b.ctx);
+      const blank = onlyThinking();
+      await b.events["message_end"]({ type: "message_end", message: blank }, b.ctx);
+      await b.events["agent_end"]({ type: "agent_end", messages: [blank] }, b.ctx);
+      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(0);
+      expect(rewrites(b)).toHaveLength(1);
+      await customTurn(b, rewrites(b)[0].message as object, assistant("Nice to meet you! How long have you been coding?"));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
+      await settle();
+      expect((await saved()).exchanges).toBe(1);
+    });
+  });
+
   it("getting-started: when every retry fails, onboarding moves on once, after the run ends", async () => {
     await onboardingRun(async (b, saved) => {
       const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] });

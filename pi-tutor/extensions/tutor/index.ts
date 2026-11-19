@@ -3024,7 +3024,8 @@ export default function (pi: ExtensionAPI): void {
       pendingEmpty = false;
       if (!pendingRewrite) rewriteWhenIdle(ctx, "Your last reply had no text for the learner: your answer was only in your thinking. Write your answer to the learner now, following this turn's instruction.");
       // Author 2026-11-09: getting-started's own step (the note, the next question or dialog) runs after the retry.
-      if (onboardWaits && !pendingRewrite) return;
+      // Review of onboard-retry I1: the re-ask owns the step now, not a timed-out try before it.
+      if (onboardWaits && !pendingRewrite) { onboardAfterSettle = false; return; }
     }
     onboardWaits = false;
     if (pendingRewrite) {
