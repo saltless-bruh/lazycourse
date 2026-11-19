@@ -612,6 +612,44 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 /** Fence tags that mark code (not a diagram, a quote or a note) for the structural leak check (spec §5). */
 const CODE_TAGS = new Set(["python", "py", "javascript", "js", "typescript", "ts", "lua", "rust", "rs", "go", "golang"]);
 
+/**
+ * Live check 2026-11-19: the "unrelated" example was their `double_all` renamed (`double_chars`, `s`, `ch`) with the
+ * missing `return result` added. Lines are compared by shape: every name and literal is one placeholder, so only
+ * keywords, operators and attribute names (`.append`) are left.
+ */
+function shapeOf(lines: string[]): string[] {
+  return lines
+    .map((l) => l.replace(/\s#.*$|\s--.*$|\s\/\/.*$/, "").trim())
+    // Review of leak-example: closing braces, `end`, `...`/`pass` and docstrings carry no step of the function.
+    .filter((l) => l && !/^(?:#|--|\/\/)/.test(l) && !/^(?:[{}()\[\];,]+|end|\.\.\.|pass)$/.test(l))
+    .map((l) => (l.match(CODE_TOKEN) ?? []).map((t, i, all) =>
+      /^['"]/.test(t) || /^\d/.test(t) ? "L" : /^[A-Za-z_]/.test(t) && !KEYWORDS.has(t) && !LANGUAGE.has(t) && all[i - 1] !== "." ? "N" : t).join(" "))
+    // Re-check: a docstring (`"""…"""` is three literals) and a print put in to trace are no step of the function.
+    .filter((l) => !/^L(?: L)*$/.test(l) && !/^(?:print|console \. log|fmt \. Println|println !) \(/.test(l));
+}
+function commonInOrder(a: string[], b: string[]): number {
+  const row = new Array(b.length + 1).fill(0);
+  for (const x of a) {
+    let prev = 0;
+    for (let j = 1; j <= b.length; j++) { const keep = row[j]; row[j] = x === b[j - 1] ? prev + 1 : Math.max(row[j], row[j - 1]); prev = keep; }
+  }
+  return row[b.length];
+}
+const DEF_NAME = /^\s*(?:def|fn|func|function)\s+([A-Za-z_]\w*)/;
+/** The shape of each function defined in `lines` (Python by indentation, others by braces via functionLines). */
+function functionShapes(lines: string[]): string[][] {
+  return lines.flatMap((l) => DEF_NAME.exec(l)?.[1] ?? []).map((n) => shapeOf(functionLines(lines, n)));
+}
+/**
+ * Review of leak-example: the example's own function is all of one of theirs, line for line by shape and in order,
+ * with one or two lines put in — their code plus the missing step. A line changed, a call after it, or another
+ * accumulator (`count += 1` for `s += n`) is a different program.
+ */
+function renamedCopy(code: string, theirs: string[][]): boolean {
+  return functionShapes(code.split(/\r?\n/)).some((example) => theirs.some((mine) =>
+    mine.length >= 3 && example.length > mine.length && example.length <= mine.length + 2 && commonInOrder(mine, example) === mine.length));
+}
+
 export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] };
   /** The learner's own message this reply answers: what they named themselves is their topic (fixInWords). */
   asked?: string;
@@ -633,6 +671,7 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
     return t !== "" && !quoted.has(t) && !DIAGRAM_ONLY.test(t) && !/^\^/.test(t) && (usesOwnName(t, o.names) || answer.has(t));
   };
   let quotedProse = "";
+  let ownShapes: string[][] | undefined;
   for (const m of text.matchAll(FENCES)) {
     const tag = m[2].trim().toLowerCase();
     if (tag === "tutor-judgment") continue;
@@ -646,13 +685,16 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
       const t = l.replace(tag === "python" || tag === "py" ? /\s#.*$/ : tag === "lua" ? /\s--.*$/ : /\s\/\/.*$/, "").trim();
       return t !== "" && !quoted.has(t) && changedLine(t, [...quoted]);
     })) issues.add("own-code");
+    if (!limits.ownCode && CODE_TAGS.has(tag) && renamedCopy(m[3], ownShapes ??= functionShapes(o.sourceLines))) issues.add("own-code");
     // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
     if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }
   const prose = text.replace(FENCES, "") + quotedProse;
   // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
   const seen = [...quoted];
-  const spanLeaks = (span: string) => leaks(span) && !seen.some((l) => l.includes(span.trim()));
+  // Live check 2026-11-19 (gpt-6.1-sol): `average.py:2` is a place in their file, not their code.
+  const PLACE = /^[\w./~-]+\.\w+:\d+(?:-\d+)?$/;
+  const spanLeaks = (span: string) => !PLACE.test(span.trim()) && leaks(span) && !seen.some((l) => l.includes(span.trim()));
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
   // statement, expression or bare operator in backticks, unless it quotes a line the learner already has.
