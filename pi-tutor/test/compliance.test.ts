@@ -929,6 +929,15 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
     const square = { step: "hint" as const, names: new Set(["square"]), sourceLines: ["function square(n) {", "  return n * n;", "}"] };
     expect(checkTurn("```js\nfunction area(w) {\n  const h = 2;\n  return w * h;\n}\n```", square)).toEqual([]);
     expect(checkTurn("Your function so far:\n```python\ndef double_all(nums):\n    result = []\n    for x in nums:\n        ...\n```\nWhat does it hand back?", o)).toEqual([]);
+    // re-check of leak-example: a triple-quoted docstring, and a print put in to trace the loop, are no missing step
+    expect(checkTurn("```python\ndef triple_chars(s):\n    \"\"\"Triple each char.\"\"\"\n    out = []\n    for ch in s:\n        out.append(ch * 3)\n```\nWhat comes back?", o)).toEqual([]);
+    expect(checkTurn("```python\ndef triple_chars(s):\n    out = []\n    for ch in s:\n        out.append(ch * 3)\n        print(out)\n```\nWhat prints?", o)).toEqual([]);
+    expect(checkTurn("```js\nfunction tripleAll(ys) {\n  const res = [];\n  for (const y of ys) {\n    res.push(y * 3);\n  }\n  console.log(res);\n}\n```\nWhat prints?", { step: "hint" as const, names: new Set(["doubleAll"]), sourceLines: ["function doubleAll(xs) {", "  const out = [];", "  for (const x of xs) {", "    out.push(x * 2);", "  }", "}"] })).toEqual([]);
+    // live check 2026-11-19 (gpt-6.1-sol): a backticked place in their file is a location, not their code
+    const avg = { step: "hint" as const, names: new Set(["average"]), sourceLines: ["def average(numbers):", "    return len(numbers) / sum(numbers)"] };
+    expect(checkTurn("That matters in the calculation at `average.py:2`. Compare it with the expectation at `average.py:5`. What do you get?", avg)).not.toContain("own-code");
+    expect(checkTurn("Look at `average.py:2-3`. What do you get?", avg)).not.toContain("own-code");
+    expect(checkTurn("Try `sum(numbers) / len(numbers)` here. What do you get?", avg)).not.toEqual([]);
     // at the fix step their code may be shown
     expect(checkTurn(live, { ...o, step: "fix" })).not.toContain("own-code");
   });

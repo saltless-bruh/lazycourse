@@ -624,7 +624,8 @@ function shapeOf(lines: string[]): string[] {
     .filter((l) => l && !/^(?:#|--|\/\/)/.test(l) && !/^(?:[{}()\[\];,]+|end|\.\.\.|pass)$/.test(l))
     .map((l) => (l.match(CODE_TOKEN) ?? []).map((t, i, all) =>
       /^['"]/.test(t) || /^\d/.test(t) ? "L" : /^[A-Za-z_]/.test(t) && !KEYWORDS.has(t) && !LANGUAGE.has(t) && all[i - 1] !== "." ? "N" : t).join(" "))
-    .filter((l) => l !== "L");
+    // Re-check: a docstring (`"""…"""` is three literals) and a print put in to trace are no step of the function.
+    .filter((l) => !/^L(?: L)*$/.test(l) && !/^(?:print|console \. log|fmt \. Println|println !) \(/.test(l));
 }
 function commonInOrder(a: string[], b: string[]): number {
   const row = new Array(b.length + 1).fill(0);
@@ -691,7 +692,9 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
   const prose = text.replace(FENCES, "") + quotedProse;
   // An inline span the learner already saw (part of their line, or the run's error text) is a quote (live audit 2026-10-21).
   const seen = [...quoted];
-  const spanLeaks = (span: string) => leaks(span) && !seen.some((l) => l.includes(span.trim()));
+  // Live check 2026-11-19 (gpt-6.1-sol): `average.py:2` is a place in their file, not their code.
+  const PLACE = /^[\w./~-]+\.\w+:\d+(?:-\d+)?$/;
+  const spanLeaks = (span: string) => !PLACE.test(span.trim()) && leaks(span) && !seen.some((l) => l.includes(span.trim()));
   if (!limits.ownCode && [...prose.matchAll(/`([^`\n]+)`/g)].some((m) => spanLeaks(m[1]))) issues.add("own-code");
   // Live check 2026-11-10: a role that never writes code (the architect) is held to it: no code fence, and no
   // statement, expression or bare operator in backticks, unless it quotes a line the learner already has.
