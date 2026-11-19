@@ -938,6 +938,10 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
     expect(checkTurn("That matters in the calculation at `average.py:2`. Compare it with the expectation at `average.py:5`. What do you get?", avg)).not.toContain("own-code");
     expect(checkTurn("Look at `average.py:2-3`. What do you get?", avg)).not.toContain("own-code");
     expect(checkTurn("Try `sum(numbers) / len(numbers)` here. What do you get?", avg)).not.toEqual([]);
+    // review of leak-example: a bare file name, `:N:M`, and "line N" are places too; `numbers.sort` is no file
+    for (const span of ["average.py", "average.py:2:5", "average.py line 2", "src/average.py"])
+      expect(checkTurn(`Open \`${span}\`. What do you get?`, avg), span).not.toContain("own-code");
+    expect(checkTurn("Use `average.sort` here. What do you get?", avg)).toContain("own-code");
     // at the fix step their code may be shown
     expect(checkTurn(live, { ...o, step: "fix" })).not.toContain("own-code");
   });
