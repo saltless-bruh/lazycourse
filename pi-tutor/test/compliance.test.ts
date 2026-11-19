@@ -906,6 +906,20 @@ describe("fresh batch 2026-11-11: their line with one token changed, short names
     expect(checkTurn("Your loop today:\n```python\n    while n > 0:\n        n += 1\n```\nWhat happens to n each time round?", o)).toEqual([]);
     expect(checkTurn("```python\n        n -= 1\n```", { ...o, step: "fix" })).toEqual([]);
   });
+  it("live check 2026-11-19: an \"unrelated\" example that is their function renamed, with the fix in it, is their own code", () => {
+    const o = { step: "hint" as const, names: new Set(["double_all"]), sourceLines: ["def double_all(nums):", "    result = []", "    for x in nums:", "        result.append(x * 2)", "", "", "print(double_all([1, 2, 3]))  # expected [2, 4, 6]"] };
+    const live = "**Example** (unrelated — using a string instead of numbers):\n```python\ndef double_chars(s):\n    result = []\n    for ch in s:\n        result.append(ch * 2)\n    return result\n```\nWhat does yours give back?";
+    expect(checkTurn(live, o)).toContain("own-code");
+    // a changed line instead of an added one
+    const vowels = { step: "hint" as const, names: new Set(["count_vowels"]), sourceLines: ["def count_vowels(text):", "    for ch in text:", "        count = 0", "        if ch in \"aeiou\":", "            count += 1", "    return count"] };
+    expect(checkTurn("```python\ndef count_digits(word):\n    total = 0\n    for c in word:\n        if c in \"0123456789\":\n            total += 1\n    return total\n```", vowels)).toContain("own-code");
+    // the same shape with the bug kept, a different shape, and a short example stay free
+    expect(checkTurn("```python\ndef triple_chars(s):\n    out = []\n    for ch in s:\n        out.append(ch * 3)\n```\nWhat does this give back for \"ab\"?", o)).toEqual([]);
+    expect(checkTurn("```python\ndef shout(words):\n    return [w.upper() for w in words]\n```\nWhat comes back?", o)).toEqual([]);
+    expect(checkTurn("```python\nfor ch in \"ab\":\n    print(ch * 2)\n```\nWhat prints?", o)).toEqual([]);
+    // at the fix step their code may be shown
+    expect(checkTurn(live, { ...o, step: "fix" })).not.toContain("own-code");
+  });
 });
 
 describe("review of leak-shapes 2026-11-11: the new rules must not hold everyday teaching", () => {

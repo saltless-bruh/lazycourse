@@ -612,6 +612,42 @@ function usesOwnName(code: string, names: Set<string>): boolean {
 /** Fence tags that mark code (not a diagram, a quote or a note) for the structural leak check (spec §5). */
 const CODE_TAGS = new Set(["python", "py", "javascript", "js", "typescript", "ts", "lua", "rust", "rs", "go", "golang"]);
 
+/**
+ * Live check 2026-11-19: the "unrelated" example was their `double_all` renamed (`double_chars`, `s`, `ch`) with the
+ * missing `return result` added. Lines are compared by shape: every name and literal is one placeholder, so only
+ * keywords, operators and attribute names (`.append`) are left.
+ */
+function shapeOf(lines: string[]): string[] {
+  return lines
+    .map((l) => l.replace(/\s#.*$|\s--.*$|\s\/\/.*$/, "").trim())
+    .filter((l) => l && !/^(?:#|--|\/\/)/.test(l))
+    .map((l) => (l.match(CODE_TOKEN) ?? []).map((t, i, all) =>
+      /^['"]/.test(t) || /^\d/.test(t) ? "L" : /^[A-Za-z_]/.test(t) && !KEYWORDS.has(t) && !LANGUAGE.has(t) && all[i - 1] !== "." ? "N" : t).join(" "));
+}
+function commonInOrder(a: string[], b: string[]): number {
+  const row = new Array(b.length + 1).fill(0);
+  for (const x of a) {
+    let prev = 0;
+    for (let j = 1; j <= b.length; j++) { const keep = row[j]; row[j] = x === b[j - 1] ? prev + 1 : Math.max(row[j], row[j - 1]); prev = keep; }
+  }
+  return row[b.length];
+}
+/** Their function's lines, one block per definition (Python by indentation, others by braces via functionLines). */
+function ownFunctions(lines: string[]): string[][] {
+  const names = lines.flatMap((l) => /^\s*(?:def|fn|func|function)\s+([A-Za-z_]\w*)/.exec(l)?.[1] ?? []);
+  return names.map((n) => functionLines(lines, n)).filter((b) => b.length);
+}
+/** An example of three or more of their function's lines, by shape and in order, with a line put in or changed. */
+function renamedCopy(code: string, sourceLines: string[]): boolean {
+  const example = shapeOf(code.split(/\r?\n/));
+  return ownFunctions(sourceLines).some((block) => {
+    const theirs = shapeOf(block);
+    if (theirs.length < 3 || example.length > theirs.length + 2) return false;
+    const same = commonInOrder(theirs, example);
+    return same / theirs.length >= 0.75 && same < example.length;
+  });
+}
+
 export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; sourceLines: string[]; referenceLines?: string[]; proseScope?: { referenceLines: string[]; sourceLines: string[] };
   /** The learner's own message this reply answers: what they named themselves is their topic (fixInWords). */
   asked?: string;
@@ -646,6 +682,7 @@ export function checkTurn(raw: string, o: { step: TurnStep; names: Set<string>; 
       const t = l.replace(tag === "python" || tag === "py" ? /\s#.*$/ : tag === "lua" ? /\s--.*$/ : /\s\/\/.*$/, "").trim();
       return t !== "" && !quoted.has(t) && changedLine(t, [...quoted]);
     })) issues.add("own-code");
+    if (!limits.ownCode && CODE_TAGS.has(tag) && renamedCopy(m[3], o.sourceLines)) issues.add("own-code");
     // Spec §5: an example that is the solution renamed, or that uses the task's own words, is the answer too.
     if (!limits.ownCode && CODE_TAGS.has(tag) && ((o.referenceCode && windowOverlap(m[3], o.referenceCode) >= 0.6) || (o.taskTerms && termHits(m[3], o.taskTerms) >= 2))) issues.add("own-code");
   }
