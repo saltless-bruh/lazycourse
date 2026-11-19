@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, nudgeTurn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import { hideJudgment } from "../extensions/tutor/compliance.js";
-import { HOLD_TEXT, REWRITE_TEXT, LOST_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
+import { HOLD_TEXT, REWRITE_TEXT, LOST_TEXT, FAILED_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
 import { PY_EXAM } from "./exam-fixtures.js";
@@ -3255,6 +3255,19 @@ describe("empty replies", () => {
     await turn(b.events, b.ctx, "and insert mode?", timedOut());
     await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
     expect(lost()).toHaveLength(2);
+  });
+
+  it("an error asking again cannot fix (a bad key, a used-up quota) says so, not \"please ask again\"", async () => {
+    const b = await boot();
+    const lost = () => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost");
+    await turn(b.events, b.ctx, "what is normal mode?", { role: "assistant", stopReason: "error", errorMessage: "401 Unauthorized: invalid api key", content: [] });
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect(lost()).toHaveLength(1);
+    expect((lost()[0].message as { content: string }).content).toBe(FAILED_TEXT);
+    expect(FAILED_TEXT).not.toMatch(/ask again\.$/);
+    await turn(b.events, b.ctx, "and insert mode?", { role: "assistant", stopReason: "error", errorMessage: "insufficient_quota: You exceeded your current quota", content: [] });
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect((lost()[1].message as { content: string }).content).toBe(FAILED_TEXT);
   });
 
   it("live check 2026-11-19: a retry that answers, or a run stopped with Esc, gets no lost line", async () => {

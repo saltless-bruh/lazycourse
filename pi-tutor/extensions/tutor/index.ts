@@ -12,7 +12,9 @@ import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { cleanReply, guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
-import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT, LOST_TEXT, fallbackReply, turnInstruction } from "./turns.js";
+import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT, LOST_TEXT, FAILED_TEXT, fallbackReply, turnInstruction } from "./turns.js";
+// Pi's own retry rule (pi-ai utils/retry.ts; extensions get it through Pi's pi-ai alias, PI_SURFACE.md).
+import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 /** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
 const CHECKER_TIMEOUT_MS = 180_000;
 import { DEFAULT_ROLE, roleNamed, rolePrompt } from "./roles.js";
@@ -315,6 +317,8 @@ export default function (pi: ExtensionAPI): void {
   // Live check 2026-11-19: a reply that failed (stopReason "error") gets no line of ours, since Pi shows the error and its
   // own retry; the lost line waits for agent_settled, when no retry is left and no answer came.
   let lostPending = false;
+  /** The failed reply behind lostPending: whether Pi would retry it decides which line it gets. */
+  let lostError: Parameters<typeof isRetryableAssistantError>[0] | null = null;
   // Review of lost-settled: Pi fires agent_end before it decides to retry a failed reply, so a failed onboarding reply
   // waits — for the retry's own agent_end, or, when no answer comes, for agent_settled — before the next step.
   let onboardAfterSettle = false;
@@ -1298,7 +1302,7 @@ export default function (pi: ExtensionAPI): void {
         }
       }
       pi.appendEntry("tutor_check", { issues: ["empty"], step: cur?.step ?? null, rejected: shown.slice(0, 2000) });
-      if (m.stopReason === "error") lostPending = true;
+      if (m.stopReason === "error") { lostPending = true; lostError = m; }
       else if (reask || !lostShown) {
         if (!reask) lostShown = true;
         const i = content.findIndex((c) => c.type === "text");
@@ -1317,7 +1321,9 @@ export default function (pi: ExtensionAPI): void {
     lostPending = false;
     if (owed) {
       lostShown = true;
-      pi.sendMessage({ customType: "tutor_lost", content: LOST_TEXT, display: true }, { triggerTurn: false });
+      // An error Pi would not retry (a bad key, a quota) is not fixed by asking again.
+      const text = lostError && !isRetryableAssistantError(lostError) ? FAILED_TEXT : LOST_TEXT;
+      pi.sendMessage({ customType: "tutor_lost", content: text, display: true }, { triggerTurn: false });
     }
     // Every retry failed: onboarding moves on now, as it did on agent_end before (its step re-asks or continues).
     if (onboardAfterSettle) { onboardAfterSettle = false; if (!event.aborted) await stepOnboarding(ctx); }

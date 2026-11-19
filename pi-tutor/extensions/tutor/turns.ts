@@ -11,6 +11,8 @@ export const REWRITE_TEXT = "_(tutor is rewriting this reply…)_";
 /** Author 2026-11-09: a reply with nothing for the learner (the answer stayed in the hidden thinking) is asked again. */
 export const EMPTY_TEXT = "_(tutor is writing its answer…)_";
 export const LOST_TEXT = "I lost my answer on the way — please ask again.";
+/** An error Pi does not retry (a bad key, a used-up quota, an unknown model): asking again cannot help. */
+export const FAILED_TEXT = "The model could not answer (the error is shown above). Asking again will not help until that is fixed: check the model with /model, or your provider account.";
 
 /** What a reply at each step may be; the reply check (compliance.checkTurn) holds it to these. */
 export const TURN_LIMITS: Record<TurnStep, { maxSentences: number | null; ownCode: boolean; question: boolean; noCode?: boolean }> = {
