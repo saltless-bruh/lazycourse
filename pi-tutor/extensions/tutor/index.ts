@@ -319,9 +319,6 @@ export default function (pi: ExtensionAPI): void {
   let lostPending = false;
   /** The failed reply behind lostPending: whether Pi would retry it decides which line it gets. */
   let lostError: Parameters<typeof isRetryableAssistantError>[0] | null = null;
-  // Review of lost-settled: Pi fires agent_end before it decides to retry a failed reply, so a failed onboarding reply
-  // waits — for the retry's own agent_end, or, when no answer comes, for agent_settled — before the next step.
-  let onboardAfterSettle = false;
   /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
   let onboardWaits = false;
   /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
@@ -642,7 +639,7 @@ export default function (pi: ExtensionAPI): void {
     // Phase 1 minor M5: a new session (/new, /resume) owes nothing to the last one: no rewrite, no issues, no
     // spot counts. `run` stays: a reply still streaming finishes under its own language (M7 minor).
     rewrite = null; pendingRewrite = null; lastIssues = []; spotMemory.clear();
-    emptyAsked = false; pendingEmpty = false; lostShown = false; lostPending = false; onboardAfterSettle = false; onboardWaits = false; waitNote = null;
+    emptyAsked = false; pendingEmpty = false; lostShown = false; lostPending = false; onboardWaits = false; waitNote = null;
     ui = ctx.hasUI ? ctx.ui : null;
     if (!profile) {
       try { profile = Profile.open(); } catch (e) { ctx.ui.notify(`tutor profile unavailable: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
@@ -1316,7 +1313,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // Live check 2026-11-19 (types.d.ts:820, agent-session.js:702): the run is over, no retry or continuation follows.
-  pi.on("agent_settled", async (event, ctx) => {
+  pi.on("agent_settled", (event) => {
     const owed = lostPending && !event.aborted && !lostShown;
     lostPending = false;
     if (owed) {
@@ -1325,8 +1322,6 @@ export default function (pi: ExtensionAPI): void {
       const text = lostError && !isRetryableAssistantError(lostError) ? FAILED_TEXT : LOST_TEXT;
       pi.sendMessage({ customType: "tutor_lost", content: text, display: true }, { triggerTurn: false });
     }
-    // Every retry failed: onboarding moves on now, as it did on agent_end before (its step re-asks or continues).
-    if (onboardAfterSettle) { onboardAfterSettle = false; if (!event.aborted) await stepOnboarding(ctx); }
   });
 
   // Spec §5: take the judgment (fence, fallback, or invented tool call) and apply it once per run.
@@ -3030,8 +3025,7 @@ export default function (pi: ExtensionAPI): void {
       pendingEmpty = false;
       if (!pendingRewrite) rewriteWhenIdle(ctx, "Your last reply had no text for the learner: your answer was only in your thinking. Write your answer to the learner now, following this turn's instruction.");
       // Author 2026-11-09: getting-started's own step (the note, the next question or dialog) runs after the retry.
-      // Review of onboard-retry I1: the re-ask owns the step now, not a timed-out try before it.
-      if (onboardWaits && !pendingRewrite) { onboardAfterSettle = false; return; }
+      if (onboardWaits && !pendingRewrite) return;
     }
     onboardWaits = false;
     if (pendingRewrite) {
@@ -3043,8 +3037,10 @@ export default function (pi: ExtensionAPI): void {
     }
     if (!inOnboarding() || !onboarding) return;
     const last = [...event.messages].reverse().find((m) => m.role === "assistant") as { stopReason?: string } | undefined;
-    if (last?.stopReason === "error") { onboardAfterSettle = true; return; }
-    onboardAfterSettle = false;
+    // Review of lost-settled: Pi fires agent_end before it decides to retry a failed reply. A failed reply is no
+    // exchange: the retry's answer brings its own agent_end and step; when none comes (live check 2026-11-20) the learner
+    // is told the answer was lost and asks again, and nothing is counted — no exchange, no missing note.
+    if (last?.stopReason === "error") return;
     await stepOnboarding(ctx);
   });
   async function stepOnboarding(ctx: ExtensionContext) {
