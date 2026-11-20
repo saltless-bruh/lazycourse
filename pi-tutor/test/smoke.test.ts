@@ -3142,18 +3142,27 @@ describe("empty replies", () => {
     });
   });
 
-  it("getting-started: when every retry fails, onboarding moves on once, after the run ends", async () => {
+  it("getting-started: when every retry fails, the lost answer is no exchange and no missing note; the next message carries on (live check 2026-11-20)", async () => {
     await onboardingRun(async (b, saved) => {
-      const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Request timed out.", content: [] as object[] });
-      const first = timedOut();
-      await turn(b.events, b.ctx, "I want to learn python", first);
-      await b.events["agent_end"]({ type: "agent_end", messages: [first] }, b.ctx);
-      const again = timedOut();
-      await b.events["message_end"]({ type: "message_end", message: again }, b.ctx);
-      await b.events["agent_end"]({ type: "agent_end", messages: [again] }, b.ctx);
-      await settle();
-      expect((await saved()).exchanges).toBe(0);
-      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] as object[] });
+      for (const msg of ["I want to learn python", "I want to learn python"]) {
+        const first = timedOut();
+        await turn(b.events, b.ctx, msg, first);
+        await b.events["agent_end"]({ type: "agent_end", messages: [first] }, b.ctx);
+        const again = timedOut();
+        await b.events["message_end"]({ type: "message_end", message: again }, b.ctx);
+        await b.events["agent_end"]({ type: "agent_end", messages: [again] }, b.ctx);
+        await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+        await settle();
+      }
+      // Two lost answers: nothing counted, so no early fallback dialogs (MAX_BAD_NOTES is 2).
+      const lostTwice = await saved();
+      expect(lostTwice.exchanges).toBe(0);
+      expect((lostTwice as unknown as { badNotes: number }).badNotes).toBe(0);
+      expect(b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost")).toHaveLength(2);
+      // The learner asks again and is answered: that turn is the first exchange.
+      await turn(b.events, b.ctx, "I want to learn python", assistant(`Nice to meet you! How long have you been coding?\n${NOTE({ target: "python" })}`));
+      await b.events["agent_end"]({ type: "agent_end", messages: [] }, b.ctx);
       await settle();
       expect((await saved()).exchanges).toBe(1);
     });
