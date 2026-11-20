@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fakePi, fakeCtx, realExec, boot, assistant, judged, episodes, turn, nudgeTurn, REASONED } from "./fake-pi.js";
 import { THINKING_LABEL } from "../extensions/tutor/thinking.js";
 import { hideJudgment } from "../extensions/tutor/compliance.js";
-import { HOLD_TEXT, REWRITE_TEXT, LOST_TEXT, FAILED_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
+import { HOLD_TEXT, REWRITE_TEXT, LOST_TEXT, FAILED_TEXT, KICK_LOST_TEXT, fallbackReply } from "../extensions/tutor/turns.js";
 import extension from "../extensions/tutor/index.js";
 import { mkdtempSync as mkd, mkdirSync as mkdir, writeFileSync as wfile, existsSync, readFileSync } from "node:fs";
 import { PY_EXAM } from "./exam-fixtures.js";
@@ -3264,6 +3264,20 @@ describe("empty replies", () => {
     await turn(b.events, b.ctx, "and insert mode?", timedOut());
     await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
     expect(lost()).toHaveLength(2);
+  });
+
+  it("a lost answer to a turn the tutor started itself (an onboarding kick) says to send any message, not to ask again", async () => {
+    const b = await boot();
+    const lost = () => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost");
+    const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] as object[] });
+    await customTurn(b, { role: "custom", customType: "tutor_nudge", content: "[tutor] onboarding: give the learner your read", display: false, timestamp: 1 }, timedOut());
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect((lost()[0].message as { content: string }).content).toBe(KICK_LOST_TEXT);
+    expect(KICK_LOST_TEXT).toMatch(/send any message/);
+    // a stuck ask is a hidden nudge too, but the learner asked: "please ask again" stays
+    await customTurn(b, { role: "custom", customType: "tutor_nudge", content: "[tutor] The learner pressed stuck at count_up.py:3", display: false, timestamp: 2 }, timedOut());
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect((lost()[1].message as { content: string }).content).toBe(LOST_TEXT);
   });
 
   it("an error asking again cannot fix (a bad key, a used-up quota) says so, not \"please ask again\"", async () => {

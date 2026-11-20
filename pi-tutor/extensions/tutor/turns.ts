@@ -11,6 +11,8 @@ export const REWRITE_TEXT = "_(tutor is rewriting this reply…)_";
 /** Author 2026-11-09: a reply with nothing for the learner (the answer stayed in the hidden thinking) is asked again. */
 export const EMPTY_TEXT = "_(tutor is writing its answer…)_";
 export const LOST_TEXT = "I lost my answer on the way — please ask again.";
+/** The same, for a turn the tutor started itself (an onboarding kick): the learner asked nothing (review of lost-note m1). */
+export const KICK_LOST_TEXT = "I lost my answer on the way — send any message to go on.";
 /** An error Pi does not retry (a bad key, a used-up quota, an unknown model): asking again cannot help. */
 // Review of lost-kind m2: the error itself says why (a content filter, an oversized request…); the model or account is only the usual case.
 export const FAILED_TEXT = "The model could not answer, and asking again the same way will probably not help; the error above says why (often the model choice or the provider account — see /model).";

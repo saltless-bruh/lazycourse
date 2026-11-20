@@ -12,7 +12,7 @@ import { tutorPrompt, systemText } from "./prompts.js";
 import { parseJudgment, toJudgment, isJudgmentTool, type Judgment } from "./judgment.js";
 import { formatEditorContext, formatEpisodeContext } from "./context.js";
 import { cleanReply, guardJudgment, checkReply, formatCheck, replyReminder, scrubInternals, diagramCols, ownNames, checkTurn, functionLines, foldPreamble, hideJudgment, type Issue, type TurnIssue } from "./compliance.js";
-import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT, LOST_TEXT, FAILED_TEXT, fallbackReply, turnInstruction } from "./turns.js";
+import { MAX_REASKS, HOLD_TEXT, REWRITE_TEXT, EMPTY_TEXT, LOST_TEXT, FAILED_TEXT, KICK_LOST_TEXT, fallbackReply, turnInstruction } from "./turns.js";
 // Pi's own retry rule (pi-ai utils/retry.ts; extensions get it through Pi's pi-ai alias, PI_SURFACE.md).
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 /** Habits Task 19: the second reader gets three minutes (glm took about one per reply; speed is no goal for learners). */
@@ -319,6 +319,8 @@ export default function (pi: ExtensionAPI): void {
   let lostPending = false;
   /** The failed reply behind lostPending: whether Pi would retry it decides which line it gets. */
   let lostError: Parameters<typeof isRetryableAssistantError>[0] | null = null;
+  /** The run was the tutor's own onboarding turn (a kick), so the learner asked nothing; a rewrite run keeps it. */
+  let tutorStarted = false;
   /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
   let onboardWaits = false;
   /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
@@ -782,7 +784,10 @@ export default function (pi: ExtensionAPI): void {
   }
   pi.on("before_agent_start", async (event) => {
     // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
-    if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) { emptyAsked = false; lostShown = false; lostPending = false; }
+    if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) {
+      emptyAsked = false; lostShown = false; lostPending = false;
+      tutorStarted = event.messageType === "custom" && event.message.customType === "tutor_nudge" && promptOf(event).startsWith(`${TUTOR_PREFIX} onboarding:`);
+    }
     // Third review M1: a new message from the learner is the next turn: no queued rewrite or onboarding wait survives it.
     if (event.messageType === "user") { rewriteToken++; onboardWaits = false; }
     event.systemPromptOptions.sections["tutor_commands"] = commandNote(whereNow());
@@ -1319,7 +1324,7 @@ export default function (pi: ExtensionAPI): void {
     if (owed) {
       lostShown = true;
       // An error Pi would not retry (a bad key, a quota) is not fixed by asking again.
-      const text = lostError && !isRetryableAssistantError(lostError) ? FAILED_TEXT : LOST_TEXT;
+      const text = lostError && !isRetryableAssistantError(lostError) ? FAILED_TEXT : tutorStarted ? KICK_LOST_TEXT : LOST_TEXT;
       pi.sendMessage({ customType: "tutor_lost", content: text, display: true }, { triggerTurn: false });
     }
   });
