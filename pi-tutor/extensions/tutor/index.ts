@@ -324,6 +324,8 @@ export default function (pi: ExtensionAPI): void {
   // Review of lost-kick m2: every hidden run is the tutor's own (a kick, the first lesson, a stuck signal, notes)
   // except these two, which the learner asked for (<leader>ts, /tutor-plan).
   const LEARNER_NUDGES = [`${TUTOR_PREFIX} stuck (asked)`, `${TUTOR_PREFIX} design recipe started for`];
+  /** Review of lost-kick m4: kickoffs autoRecipe sent itself (same text as /tutor-plan's); each is the tutor's own turn. */
+  const autoKickoffs = new Set<string>();
   /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
   let onboardWaits = false;
   /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
@@ -789,7 +791,8 @@ export default function (pi: ExtensionAPI): void {
     // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
     if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) {
       emptyAsked = false; lostShown = false; lostPending = false;
-      tutorStarted = event.messageType === "custom" && !LEARNER_NUDGES.some((p) => promptOf(event).startsWith(p));
+      const said = promptOf(event);
+      tutorStarted = event.messageType === "custom" && (autoKickoffs.delete(said) || !LEARNER_NUDGES.some((p) => said.startsWith(p)));
     }
     // Third review M1: a new message from the learner is the next turn: no queued rewrite or onboarding wait survives it.
     if (event.messageType === "user") { rewriteToken++; onboardWaits = false; }
@@ -1429,13 +1432,13 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  function beginRecipe(ctx: ExtensionContext, id: string, line: string) {
+  function beginRecipe(ctx: ExtensionContext, id: string, line: string, auto = false) {
     workflow = startWorkflow(id, Date.now());
     pi.appendEntry("tutor_workflow", workflow);
     paint();
     const kickoff = `${TUTOR_PREFIX} design recipe started for ${id}: ${line.replace(/^\s*[-*]\s*\[.\]\s*/, "").replace(id, "").trim()}. Begin step 1 (Find). (You can say "skip" to skip a step, or "/tutor-plan off" to stop.)`;
     // Only the TUI may start a turn: in print/RPC mode a fire-and-forget turn races the caller's next prompt.
-    if (ctx.hasUI) sendNudge(ctx, kickoff);
+    if (ctx.hasUI) { if (auto) autoKickoffs.add(kickoff); sendNudge(ctx, kickoff); }
     else ctx.ui.notify(`design recipe started for ${id}; send a message to begin step 1`, "info");
   }
 
@@ -1536,7 +1539,7 @@ export default function (pi: ExtensionAPI): void {
     const kept = recipeMemory();
     const id = recipeAutoStart({ band: bandFor(level()), workflow, task: next, offFor: new Set([...recipeOff, ...kept.off, ...kept.done]) });
     const line = id ? findTask(tasks, id) : null;
-    if (id && line) beginRecipe(ctx, id, line);
+    if (id && line) beginRecipe(ctx, id, line, true);
   }
 
   pi.registerCommand("tutor-exam", {

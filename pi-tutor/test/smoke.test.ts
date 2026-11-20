@@ -3296,6 +3296,37 @@ describe("empty replies", () => {
     await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
     expect((lost().at(-1)!.message as { content: string }).content).toBe(LOST_TEXT);
   });
+  it("review of lost-kick m4: the design recipe the tutor starts by itself is its own turn; /tutor-plan's is the learner's", async () => {
+    const { Profile } = await import("../extensions/tutor/profile.js");
+    const dir = mkd(pjoin(tmp(), "pitutor-auto-"));
+    mkdir(pjoin(dir, "spec"));
+    wfile(pjoin(dir, "spec", "tasks.md"), "- [ ] P1.T1 Parse argv into a Command\n");
+    const file = pjoin(dir, "profile.sqlite");
+    const seed = Profile.open(file);
+    seed.saveLanguage("python", 10, {}, 1);
+    seed.addProject("python", dir, "Argv", 1);
+    seed.setSetting("onboarding", "");
+    seed.close();
+    const saved = process.env.PI_TUTOR_PROFILE;
+    process.env.PI_TUTOR_PROFILE = file;
+    try {
+      const b = await boot({ cwd: dir });
+      const kickoff = b.nudges.at(-1)?.text ?? "";
+      expect(kickoff).toMatch(/^\[tutor\] design recipe started for P1\.T1/);
+      const lost = () => b.messages.filter((m) => (m.message as { customType: string }).customType === "tutor_lost");
+      const timedOut = () => ({ role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] as object[] });
+      await customTurn(b, { role: "custom", customType: "tutor_nudge", content: kickoff, display: false, timestamp: 1 }, timedOut());
+      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      expect((lost().at(-1)!.message as { content: string }).content).toBe(KICK_LOST_TEXT);
+      // the same kickoff typed for by the learner (/tutor-plan) is theirs
+      await b.commands["tutor-plan"].handler("off", b.ctx);
+      await b.commands["tutor-plan"].handler("P1.T1", b.ctx);
+      await customTurn(b, { role: "custom", customType: "tutor_nudge", content: b.nudges.at(-1)!.text, display: false, timestamp: 2 }, timedOut());
+      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      expect((lost().at(-1)!.message as { content: string }).content).toBe(LOST_TEXT);
+    } finally { if (saved === undefined) delete process.env.PI_TUTOR_PROFILE; else process.env.PI_TUTOR_PROFILE = saved; }
+  });
+
   it("review of lost-kick m3: a tutor-started turn cut off (length) gets the send-any-message line inline too", async () => {
     const b = await boot();
     const cut = { role: "assistant", stopReason: "length", content: [{ type: "thinking", thinking: "long…" }] };
