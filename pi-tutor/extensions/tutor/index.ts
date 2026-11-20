@@ -319,8 +319,11 @@ export default function (pi: ExtensionAPI): void {
   let lostPending = false;
   /** The failed reply behind lostPending: whether Pi would retry it decides which line it gets. */
   let lostError: Parameters<typeof isRetryableAssistantError>[0] | null = null;
-  /** The run was the tutor's own onboarding turn (a kick), so the learner asked nothing; a rewrite run keeps it. */
+  /** The run was one the tutor started itself, so the learner asked nothing; a rewrite run keeps it. */
   let tutorStarted = false;
+  // Review of lost-kick m2: every hidden run is the tutor's own (a kick, the first lesson, a stuck signal, notes)
+  // except these two, which the learner asked for (<leader>ts, /tutor-plan).
+  const LEARNER_NUDGES = [`${TUTOR_PREFIX} stuck (asked)`, `${TUTOR_PREFIX} design recipe started for`];
   /** Author 2026-11-09: a blank getting-started reply was re-asked; its onboarding step waits for the retry's agent_end. */
   let onboardWaits = false;
   /** Third review I1: the blank reply's own note, merged under the retry's (a retry's `{}` must not erase it). */
@@ -786,7 +789,7 @@ export default function (pi: ExtensionAPI): void {
     // Review I4: every run but the empty-reply re-ask itself starts with its own re-ask available.
     if (!(event.messageType === "custom" && event.message.customType === "tutor_rewrite")) {
       emptyAsked = false; lostShown = false; lostPending = false;
-      tutorStarted = event.messageType === "custom" && event.message.customType === "tutor_nudge" && promptOf(event).startsWith(`${TUTOR_PREFIX} onboarding:`);
+      tutorStarted = event.messageType === "custom" && !LEARNER_NUDGES.some((p) => promptOf(event).startsWith(p));
     }
     // Third review M1: a new message from the learner is the next turn: no queued rewrite or onboarding wait survives it.
     if (event.messageType === "user") { rewriteToken++; onboardWaits = false; }
@@ -1122,7 +1125,7 @@ export default function (pi: ExtensionAPI): void {
     const text = typeof m.content === "string" ? m.content : m.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     // Phase 8 review I3: a held reply that got the fallback marked the run rejected; the reply to this message is new.
     run = { ...run, prompt: text, judged: false, rejected: false, reasks: 0 };
-    emptyAsked = false; pendingEmpty = false; lostShown = false; lostPending = false; onboardWaits = false; // review I3: the learner moved on; their message gets the next reply
+    emptyAsked = false; pendingEmpty = false; lostShown = false; lostPending = false; tutorStarted = false; onboardWaits = false; // review I3: the learner moved on; their message gets the next reply
     learnerMessage(text);
   });
 
@@ -1290,7 +1293,7 @@ export default function (pi: ExtensionAPI): void {
     const shown = content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n");
     if (ended && !hideJudgment(shown).trim()) {
       const reask = m.stopReason === "stop" && !emptyAsked;
-      const line = reask ? EMPTY_TEXT : LOST_TEXT;
+      const line = reask ? EMPTY_TEXT : tutorStarted ? KICK_LOST_TEXT : LOST_TEXT; // review of lost-kick m3
       if (reask) {
         // Re-check N4: the re-ask may come back empty too; its lost line is owed even after a timeout's.
         // Review of lost-settled I1: the re-ask owes the answer now, not the timed-out try before it.

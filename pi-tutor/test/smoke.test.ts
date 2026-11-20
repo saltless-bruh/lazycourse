@@ -3274,10 +3274,33 @@ describe("empty replies", () => {
     await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
     expect((lost()[0].message as { content: string }).content).toBe(KICK_LOST_TEXT);
     expect(KICK_LOST_TEXT).toMatch(/send any message/);
-    // a stuck ask is a hidden nudge too, but the learner asked: "please ask again" stays
-    await customTurn(b, { role: "custom", customType: "tutor_nudge", content: "[tutor] The learner pressed stuck at count_up.py:3", display: false, timestamp: 2 }, timedOut());
+    // a stuck ask (<leader>ts) and /tutor-plan's kickoff are hidden nudges too, but the learner asked: "please ask again"
+    await customTurn(b, { role: "custom", customType: "tutor_nudge", content: "[tutor] stuck (asked): idle at count_up.py:3", display: false, timestamp: 2 }, timedOut());
     await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
     expect((lost()[1].message as { content: string }).content).toBe(LOST_TEXT);
+    await customTurn(b, { role: "custom", customType: "tutor_nudge", content: "[tutor] design recipe started for P1.T1: parse argv. Begin step 1 (Find).", display: false, timestamp: 3 }, timedOut());
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect((lost()[2].message as { content: string }).content).toBe(LOST_TEXT);
+    // review of lost-kick m2: every other turn the tutor starts (the first lesson, a stuck signal, notes) is its own
+    for (const [i, m] of ([
+      { customType: "tutor_nudge", content: "[tutor] lesson: start the lesson on variables" },
+      { customType: "tutor_nudge", content: "[tutor] stuck signal: run failed: python3 count_up.py" },
+      { customType: "tutor_notes", content: "[tutor] P1.T1 is ticked; code scored it 80/100" },
+    ] as const).entries()) {
+      await customTurn(b, { role: "custom", ...m, display: false, timestamp: 4 + i }, timedOut());
+      await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+      expect((lost()[3 + i].message as { content: string }).content, m.content).toBe(KICK_LOST_TEXT);
+    }
+    // a learner's typed message is theirs
+    await turn(b.events, b.ctx, "what next?", timedOut());
+    await b.events["agent_settled"]({ type: "agent_settled", aborted: false }, b.ctx);
+    expect((lost().at(-1)!.message as { content: string }).content).toBe(LOST_TEXT);
+  });
+  it("review of lost-kick m3: a tutor-started turn cut off (length) gets the send-any-message line inline too", async () => {
+    const b = await boot();
+    const cut = { role: "assistant", stopReason: "length", content: [{ type: "thinking", thinking: "long…" }] };
+    await customTurn(b, { role: "custom", customType: "tutor_nudge", content: "[tutor] onboarding: give the learner your read", display: false, timestamp: 1 }, cut);
+    expect(visible(cut)).toContain(KICK_LOST_TEXT);
   });
 
   it("an error asking again cannot fix (a bad key, a used-up quota) says so, not \"please ask again\"", async () => {
